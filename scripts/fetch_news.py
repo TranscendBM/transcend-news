@@ -111,6 +111,8 @@ def get_sources(mode):
         {'label': 'TrendForce NAND',     'url': 'https://news.google.com/rss/search?q=TrendForce+NAND+flash+storage&hl=en&gl=US&ceid=US:en', 'cat': 'usMarket'},
         {'label': 'TrendForce Flash',    'url': 'https://news.google.com/rss/search?q=TrendForce+flash+storage+market&hl=en&gl=US&ceid=US:en', 'cat': 'usMarket'},
         # ─── 應用端需求：AI / IPC / AIoT / 終端裝置 ───
+        {'label': 'HBM Market',           'url': 'https://news.google.com/rss/search?q=HBM+high+bandwidth+memory+market+2025&hl=en&gl=US&ceid=US:en', 'cat': 'usMarket'},
+        {'label': 'HBM AI Demand',        'url': 'https://news.google.com/rss/search?q=HBM+AI+GPU+memory+demand+supply&hl=en&gl=US&ceid=US:en', 'cat': 'usMarket'},
         {'label': 'AI Server DRAM HBM',  'url': 'https://news.google.com/rss/search?q=AI+server+DRAM+HBM+memory+demand&hl=en&gl=US&ceid=US:en', 'cat': 'usMarket'},
         {'label': 'AI Data Center Flash','url': 'https://news.google.com/rss/search?q=AI+data+center+flash+storage+NAND&hl=en&gl=US&ceid=US:en', 'cat': 'usMarket'},
         {'label': 'IPC Industrial Flash','url': 'https://news.google.com/rss/search?q=industrial+computing+IPC+embedded+flash+DRAM&hl=en&gl=US&ceid=US:en', 'cat': 'usMarket'},
