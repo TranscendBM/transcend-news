@@ -965,6 +965,12 @@ def main():
     gmail_pw      = os.environ.get('GMAIL_APP_PASSWORD', '')
     email_to      = os.environ.get('EMAIL_RECIPIENT', gmail_user) or 'elvis814@gmail.com'
     gemini_key    = os.environ.get('GEMINI_API_KEY', '')
+    # ── Gemini 功能開關（設為 False 可完全停用，避免 API 費用）──────
+    # 如需重新啟用，將下方改為 GEMINI_ENABLED = True 即可
+    GEMINI_ENABLED = False
+    if not GEMINI_ENABLED:
+        gemini_key = ''
+        print("ℹ️  Gemini AI 功能已停用（GEMINI_ENABLED=False）")
 
     print(f"\n{'='*50}")
     print(f"創見資訊新聞監控 — 自動抓取")
