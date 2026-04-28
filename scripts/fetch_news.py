@@ -207,17 +207,29 @@ def _link_domain(link):
 
 def _is_us_media(article):
     """文章是否來自美國/國際英文媒體（排除台灣中文媒體與 MSN）"""
+    # usMarket 類別本身就是從美國/國際 RSS 來源抓取，排除 MSN 即可
+    if article.get('cat') == 'usMarket':
+        return 'msn.com' not in _link_domain(article.get('link', ''))
     domain = _link_domain(article.get('link', ''))
     if 'msn.com' in domain:
         return False
+    # Google News RSS 的 link 都是 news.google.com，不能用 domain 判斷
+    if 'google.com' in domain:
+        return True
     if any(d in domain for d in _TW_DOMAINS if d not in {'trendforce.com', 'taiwannews.com.tw'}):
-        return False  # 排除純台灣中文媒體
-    # 只要不是 MSN、不是純台灣媒體，就視為可接受
+        return False
     return True
 
 def _is_tw_media(article):
     """文章是否來自台灣媒體"""
+    # twMarket 類別本身就是從台灣科技媒體 RSS 來源抓取
+    if article.get('cat') == 'twMarket':
+        return True
     domain = _link_domain(article.get('link', ''))
+    # Google News RSS 的 link 都是 news.google.com，改用 mediaName / sourceName 判斷
+    if 'google.com' in domain:
+        media = (article.get('mediaName') or article.get('sourceName') or '').lower()
+        return any(d.replace('.', '') in media.replace('.', '') for d in _TW_DOMAINS)
     return any(d in domain for d in _TW_DOMAINS)
 
 # ─── 郵件過濾關鍵字 ───
@@ -1447,9 +1459,16 @@ def backfill_summaries(db, api_key, batch_size=50):
         print(f"  ✗ Gemini 初始化失敗: {e}")
         return
 
-    PROMPT = (
+    PROMPT_EN = (
+        'You are a semiconductor and memory industry analyst. '
+        'Summarize the following news in English with 2-3 bullet points. '
+        'Format: •Point one •Point two •Point three (separated by •, no line breaks). '
+        'Each point under 25 words. Output points only, no preamble.\n\n'
+        'Title: {title}\nContent: {content}'
+    )
+    PROMPT_ZH = (
         '你是專業的半導體暨記憶體產業分析師。'
-        '請用繁體中文，以 2-3 個重點條列摘要以下英文新聞的核心內容。'
+        '請用繁體中文，以 2-3 個重點條列摘要以下新聞的核心內容。'
         '格式：•重點一 •重點二 •重點三（用 • 分隔，不要換行）'
         '每個重點不超過 30 字，直接輸出重點，不要有前言。\n\n'
         '標題：{title}\n內文：{content}'
@@ -1462,9 +1481,11 @@ def backfill_summaries(db, api_key, batch_size=50):
         if not title:
             continue
         try:
+            # usMarket 用英文摘要，twMarket / supplier 用繁中
+            tmpl = PROMPT_EN if data.get('cat') == 'usMarket' else PROMPT_ZH
             resp = client.models.generate_content(
                 model=MODEL,
-                contents=PROMPT.format(title=title, content=content[:800]),
+                contents=tmpl.format(title=title, content=content[:800]),
             )
             summary = resp.text.strip()
             db.collection('news').document(doc_id).update({'summary': summary})
@@ -1508,9 +1529,17 @@ def summarize_us_news_with_gemini(articles, api_key, max_articles=20):
 
     print(f"\n🤖 Gemini 摘要生成（共 {len(targets)} 則上游市場新聞）...")
 
-    PROMPT_TEMPLATE = (
+    # usMarket 文章用英文摘要，其他用繁中
+    PROMPT_EN = (
+        'You are a semiconductor and memory industry analyst. '
+        'Summarize the following news in English with 2-3 bullet points. '
+        'Format: •Point one •Point two •Point three (separated by •, no line breaks). '
+        'Each point under 25 words. Output points only, no preamble.\n\n'
+        'Title: {title}\nContent: {content}'
+    )
+    PROMPT_ZH = (
         '你是專業的半導體暨記憶體產業分析師。'
-        '請用繁體中文，以 2-3 個重點條列摘要以下英文新聞的核心內容。'
+        '請用繁體中文，以 2-3 個重點條列摘要以下新聞的核心內容。'
         '格式：•重點一 •重點二 •重點三（用 • 分隔，不要換行）'
         '每個重點不超過 30 字，直接輸出重點，不要有前言。\n\n'
         '標題：{title}\n內文：{content}'
@@ -1541,7 +1570,9 @@ def summarize_us_news_with_gemini(articles, api_key, max_articles=20):
         if not title:
             continue
         try:
-            prompt = PROMPT_TEMPLATE.format(title=title, content=content[:800])
+            # usMarket 用英文摘要，twMarket / supplier 用繁中
+            tmpl = PROMPT_EN if article.get('cat') == 'usMarket' else PROMPT_ZH
+            prompt = tmpl.format(title=title, content=content[:800])
             resp = client.models.generate_content(
                 model=MODEL,
                 contents=prompt,
@@ -1740,7 +1771,7 @@ def send_afternoon_email(db, gmail_user, gmail_app_password, recipient, gemini_k
     try:
         docs = (db.collection('news')
                 .order_by('pubDate', direction=firestore.Query.DESCENDING)
-                .limit(300)
+                .limit(1000)
                 .stream())
         all_news = [doc.to_dict() for doc in docs]
     except Exception as e:
@@ -1767,12 +1798,25 @@ def send_afternoon_email(db, gmail_user, gmail_app_password, recipient, gemini_k
         print("  ⚠ 無符合條件新聞，跳過寄信")
         return
 
-    # 補摘要
-    needs = [a for a in top5 if not a.get('summary')]
-    if needs and gemini_key:
-        print(f"  🤖 即時補摘要（{len(needs)} 則）...")
+    # 強制用英文重新摘要（覆蓋可能存在的舊中文摘要）
+    import re as _re
+    def _has_chinese(s):
+        return bool(_re.search(r'[一-鿿]', s or ''))
+    needs_en = [a for a in top5 if not a.get('summary') or _has_chinese(a.get('summary', ''))]
+    if gemini_key and needs_en:
+        print(f"  🤖 英文摘要補齊（{len(needs_en)} 則）...")
         gclient, model = _get_gemini_client_and_model(gemini_key)
-        _gemini_summarize(gclient, model, needs, lang='en')
+        # 清除舊中文摘要，強制重新生成英文版
+        for a in needs_en:
+            a['_old_summary'] = a.pop('summary', None)
+        _gemini_summarize(gclient, model, needs_en, lang='en')
+        # 如果 Gemini 失敗，還原舊摘要
+        for a in needs_en:
+            if not a.get('summary') and a.get('_old_summary'):
+                a['summary'] = a['_old_summary']
+            a.pop('_old_summary', None)
+    elif not gemini_key:
+        print("  ⚠ 未設定 GEMINI_API_KEY，跳過英文摘要補齊")
 
     html = _build_afternoon_html(top5, now_tw)
     subject = f"📊 Upstream Market Report {now_tw.strftime('%Y/%m/%d')} | Transcend News Monitor"
@@ -1864,7 +1908,7 @@ def send_morning_email(db, gmail_user, gmail_app_password, recipient, gemini_key
     try:
         docs = (db.collection('news')
                 .order_by('pubDate', direction=firestore.Query.DESCENDING)
-                .limit(300)
+                .limit(1000)
                 .stream())
         all_news = [doc.to_dict() for doc in docs]
     except Exception as e:
