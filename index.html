@@ -797,21 +797,26 @@ function StockSentimentForum({ community }) {
     const base = community && community.length > 0
       ? sortByDate(community)
           .filter(n => {
+            // 排除 PTT 貼文
+            const src = (n.mediaName || n.sourceName || '').toLowerCase();
+            const lnk = (n.link || '').toLowerCase();
+            if (src.includes('ptt') || lnk.includes('ptt.cc')) return false;
             const t = (n.title + ' ' + (n.content || '')).toLowerCase();
             return allKws.some(kw => t.includes(kw));
           })
           .slice(0, 80)
           .map(n => ({
             id:        n.id,
-            src:       n.mediaName || n.sourceName || 'PTT Stock',
+            src:       n.mediaName || n.sourceName || '股市討論',
             title:     n.title,
-            link:      n.link || 'https://www.ptt.cc/bbs/Stock/index.html',
+            link:      n.link || '#',
             s:         n.sentiment || getSentiment(n.title, n.content),
             time:      fmtDate(n.pubDate),
             author:    n.rawAuthor || '',
             stockCode: detectStockCode(n.title, n.content),
           }))
-      : MOCK_COMMUNITY.map(p => ({ ...p, stockCode: detectStockCode(p.title, '') }));
+      : MOCK_COMMUNITY.filter(p => !p.src?.includes('PTT'))
+          .map(p => ({ ...p, stockCode: detectStockCode(p.title, '') }));
     return base;
   }, [community]);
 
@@ -826,13 +831,8 @@ function StockSentimentForum({ community }) {
 
   return (
     <Card title="創見與競品 股市網路輿情" icon="💬">
-      {/* 快速連結：PTT + 各股 CMoney */}
+      {/* 快速連結：各股 CMoney 討論頁 */}
       <div className="flex flex-wrap gap-1.5 mb-3">
-        <a href="https://www.ptt.cc/bbs/Stock/index.html" target="_blank" rel="noreferrer"
-          className="flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-medium transition-all"
-          style={{ border:'1px solid #f9731644', background:'#f9731611', color:'#f97316' }}>
-          PTT Stock ↗
-        </a>
         {Object.entries(STOCK_CMONEY).map(([code, href]) => {
           const color = COMP_REV_META[code]?.color || '#6b7280';
           return (
