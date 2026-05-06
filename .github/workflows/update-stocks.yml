@@ -33,7 +33,7 @@ jobs:
 
       - name: Update stock prices
         env:
-          FIREBASE_SA_JSON: ${{ secrets.FIREBASE_SA_JSON }}
+          FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
           FETCH_MODE: stocks_only
         run: |
           python scripts/fetch_news.py
