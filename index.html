@@ -1827,12 +1827,13 @@ function App() {
   const [material,   setMaterial]   = useState(null);
   const [daily,      setDaily]      = useState(null);
   const [compRev,    setCompRev]    = useState({});
-  const [loading,    setLoading]    = useState(true);
-  const [connected,  setConnected]  = useState(false);
-  const [updated,    setUpdated]    = useState(null);
-  const [aiOpen,     setAiOpen]     = useState(false);
-  const [aiText,     setAiText]     = useState('');
-  const [aiLoading,  setAiLoading]  = useState(false);
+  const [loading,        setLoading]        = useState(true);
+  const [connected,      setConnected]      = useState(false);
+  const [updated,        setUpdated]        = useState(null);
+  const [aiOpen,         setAiOpen]         = useState(false);
+  const [aiText,         setAiText]         = useState('');
+  const [aiLoading,      setAiLoading]      = useState(false);
+  const [stockCountdown, setStockCountdown] = useState(600); // 600s = 10 min
 
   // ─── Firebase init ───────────────────────────────────────
   useEffect(() => {
@@ -1845,6 +1846,23 @@ function App() {
       console.error('Firebase:', e);
       setLoading(false);
     }
+  }, []);
+
+  // ─── 股價每 10 分鐘自動更新 ───────────────────────────────
+  useEffect(() => {
+    // 倒數計時器：每秒 -1
+    const tick = setInterval(() => {
+      setStockCountdown(s => {
+        if (s <= 1) {
+          // 時間到：靜默刷新股價 + 每日交易
+          fetchStocks();
+          fetchDaily();
+          return 600;
+        }
+        return s - 1;
+      });
+    }, 1000);
+    return () => clearInterval(tick);
   }, []);
 
   async function fetchAll() {
@@ -2048,6 +2066,9 @@ function App() {
           </span>
           <span className="text-gray-600">📰 {news.length} 則新聞</span>
           {updatedStr && <span className="text-gray-600">更新 {updatedStr}</span>}
+          <span className="text-gray-700" title="股價自動更新倒數">
+            ⏱ {Math.floor(stockCountdown/60)}:{String(stockCountdown%60).padStart(2,'0')}
+          </span>
           {self && (
             <span className="text-gray-500">
               創見 <span className={`font-semibold ${self.changePct>=0?'text-green-400':'text-red-400'}`}>

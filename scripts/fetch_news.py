@@ -1034,6 +1034,13 @@ def main():
         print(f"\n{'='*50}\nMSN 清理完成！\n{'='*50}\n")
         return
 
+    # ─── 股價快速更新模式（每 10 分鐘）────────────────────────────
+    if mode == 'stocks_only':
+        fetch_stock_prices(db)
+        fetch_daily_trading(db, '2451')
+        print(f"\n{'='*50}\n股價更新完成！\n{'='*50}\n")
+        return
+
     # ─── 抓取新聞 ───
     sources = get_sources(mode)
     print(f"📡 開始抓取 {len(sources)} 個來源...\n")
