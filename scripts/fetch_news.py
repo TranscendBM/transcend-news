@@ -952,11 +952,56 @@ def fetch_stock_prices(db):
         sign = '+' if change >= 0 else ''
         print(f"  {code} {name}: ${price:.1f} ({sign}{pct:.2f}%)")
 
+    # ─── 若 TWSE 無資料（非交易時間），用 FinMind 取最近收盤價 ───
+    if not stock_data:
+        print("  ⚠ TWSE 即時 API 無資料（非交易時間），改用 FinMind 最近收盤價...")
+        start_dt = (datetime.datetime.now() - datetime.timedelta(days=14)).strftime('%Y-%m-%d')
+        end_dt   = datetime.datetime.now().strftime('%Y-%m-%d')
+        for code, (name, _) in STOCKS.items():
+            try:
+                r2 = requests.get(
+                    'https://api.finmindtrade.com/api/v4/data',
+                    params={'dataset': 'TaiwanStockPrice', 'data_id': code,
+                            'start_date': start_dt, 'end_date': end_dt},
+                    timeout=15
+                )
+                records = r2.json().get('data', [])
+                if len(records) >= 2:
+                    latest  = records[-1]
+                    prev    = records[-2]
+                    price   = float(latest.get('close', 0))
+                    prev_cl = float(prev.get('close', price))
+                    change  = round(price - prev_cl, 2)
+                    pct     = round(change / prev_cl * 100, 2) if prev_cl else 0
+                    vol     = int(latest.get('Trading_Volume', 0))
+                    stock_data[code] = {
+                        'name':       name,
+                        'price':      price,
+                        'change':     change,
+                        'changePct':  pct,
+                        'volume':     vol,
+                        'updatedAt':  firestore.SERVER_TIMESTAMP,
+                    }
+                    sign = '+' if change >= 0 else ''
+                    print(f"  {code} {name}: ${price:.1f} ({sign}{pct:.2f}%) [FinMind 收盤]")
+                elif len(records) == 1:
+                    latest = records[-1]
+                    price  = float(latest.get('close', 0))
+                    stock_data[code] = {
+                        'name': name, 'price': price,
+                        'change': 0, 'changePct': 0,
+                        'volume': int(latest.get('Trading_Volume', 0)),
+                        'updatedAt': firestore.SERVER_TIMESTAMP,
+                    }
+                    print(f"  {code} {name}: ${price:.1f} [FinMind 收盤，無前日資料]")
+            except Exception as e:
+                print(f"  FinMind {code}: {e}")
+
     if stock_data:
         db.collection('stocks').document('latest').set(stock_data, merge=True)
         print(f"  ✅ 股價已存入 Firebase ({len(stock_data)} 檔)")
     else:
-        print("  ⚠ 未取得任何股價（可能為非交易時間，下次交易時段後會自動更新）")
+        print("  ⚠ 股價取得失敗（TWSE + FinMind 均無資料）")
 
 
 def main():
