@@ -1,9 +1,9 @@
 name: 📊 Upstream Market Report（下午 3 點）
 
 on:
-  # ─── 台灣時間週一至週五 15:00（UTC 07:00）───
-  schedule:
-    - cron: '0 7 * * 1-5'
+  # ─── 排程已停用（如需恢復，取消下方註解）───
+  # schedule:
+  #   - cron: '0 7 * * 1-5'
 
   # ─── 手動觸發測試 ───
   workflow_dispatch:
