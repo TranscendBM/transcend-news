@@ -965,70 +965,37 @@ def fetch_stock_prices(db):
         print("  ⚠ 股價取得失敗（TWSE + FinMind 均無資料），stocks/latest 未變動")
 
 
-def main():
-    mode = os.environ.get('FETCH_MODE', 'all')
+# ══════════════════════════════════════════════════════════════
+# 高階工作單元（Cloud Functions 與 CLI/GitHub Actions 共用）
+# ══════════════════════════════════════════════════════════════
 
-    print(f"\n{'='*50}")
-    print(f"創見資訊新聞監控 — 自動抓取")
-    print(f"模式: {mode} | 時間: {datetime.datetime.now(datetime.timezone(datetime.timedelta(hours=8))).strftime('%Y-%m-%d %H:%M:%S')} (台灣時間)")
-    print(f"{'='*50}")
-
-    # ─── Firebase 初始化 ───
+def init_db_from_env():
+    """從 FIREBASE_SERVICE_ACCOUNT 環境變數初始化 Firestore（支援原始 JSON 或 Base64）"""
     sa_key = os.environ.get('FIREBASE_SERVICE_ACCOUNT')
     if not sa_key:
-        print("❌ 找不到 FIREBASE_SERVICE_ACCOUNT 環境變數")
-        sys.exit(1)
+        raise RuntimeError('找不到 FIREBASE_SERVICE_ACCOUNT 環境變數')
 
-    # 支援兩種格式：原始 JSON 或 Base64 編碼的 JSON
     import base64
     sa_json = sa_key.strip()
     if not sa_json.startswith('{'):
         print("🔄 偵測到 Base64 格式，正在解碼...")
-        try:
-            sa_json = base64.b64decode(sa_json).decode('utf-8')
-            print("✅ Base64 解碼成功")
-        except Exception as e:
-            print(f"❌ Base64 解碼失敗: {e}")
-            sys.exit(1)
+        sa_json = base64.b64decode(sa_json).decode('utf-8')
 
-    try:
-        sa_dict = json.loads(sa_json)
-        cred = credentials.Certificate(sa_dict)
-        if not firebase_admin._apps:
-            firebase_admin.initialize_app(cred)
-        db = firestore.client()
-        print("✅ Firebase Firestore 已連線\n")
-    except json.JSONDecodeError as e:
-        print(f"❌ JSON 格式錯誤（行 {e.lineno} 欄 {e.colno}）: {e.msg}")
-        print("💡 建議到 base64encode.org 將 JSON 轉為 Base64 後再貼入 GitHub Secret")
-        sys.exit(1)
-    except Exception as e:
-        print(f"❌ Firebase 初始化失敗: {e}")
-        sys.exit(1)
+    sa_dict = json.loads(sa_json)
+    cred = credentials.Certificate(sa_dict)
+    if not firebase_admin._apps:
+        firebase_admin.initialize_app(cred)
+    print("✅ Firebase Firestore 已連線")
+    return firestore.client()
 
-    # 註：定時郵件（email_report / morning_email）與 Gemini 摘要（backfill_summaries）
-    # 功能已於 2026-07 移除；如需恢復請參考 git 歷史。
 
-    # ─── MSN 清理模式 ─────────────────────────────────────────────
-    if mode == 'cleanup_msn':
-        cleanup_msn_articles(db)
-        print(f"\n{'='*50}\nMSN 清理完成！\n{'='*50}\n")
-        return
-
-    # ─── 股價快速更新模式（每 10 分鐘）────────────────────────────
-    if mode == 'stocks_only':
-        fetch_stock_prices(db)
-        fetch_daily_trading(db, '2451')
-        print(f"\n{'='*50}\n股價更新完成！\n{'='*50}\n")
-        return
-
-    # ─── 抓取新聞 ───
+def fetch_and_save_news(db, mode='all'):
+    """抓取 RSS 新聞來源、去重並存入 Firestore；回傳儲存篇數"""
     sources = get_sources(mode)
     print(f"📡 開始抓取 {len(sources)} 個來源...\n")
 
     all_articles = []
     seen_links = set()
-
     seen_titles = set()
     for src in sources:
         articles = fetch_source(src)
@@ -1044,7 +1011,6 @@ def main():
 
     print(f"\n📊 共抓取 {len(all_articles)} 則不重複新聞")
 
-    # ─── 儲存到 Firestore ───
     if all_articles:
         print(f"\n💾 儲存到 Firebase Firestore...")
         saved = save_to_firestore(db, all_articles)
@@ -1052,50 +1018,78 @@ def main():
     else:
         print("⚠ 沒有新聞可儲存")
 
-    # ─── 情緒統計 ───
     pos = sum(1 for a in all_articles if a['sentiment'] == 'positive')
     neg = sum(1 for a in all_articles if a['sentiment'] == 'negative')
     neu = sum(1 for a in all_articles if a['sentiment'] == 'neutral')
     print(f"\n📈 情緒分佈: 正面 {pos} / 負面 {neg} / 中立 {neu}")
+    return len(all_articles)
 
-    # ─── 社群討論抓取（CMoney + PTT）───
+
+def fetch_and_save_community(db):
+    """抓取社群討論（CMoney + PTT）並存入 Firestore；回傳儲存篇數"""
     print(f"\n💬 抓取社群討論...")
     community_articles = []
     community_articles += fetch_cmoney_forum('2451')
     community_articles += fetch_ptt_stock_forum()
 
-    # 社群文章去重後加入儲存清單
-    for a in community_articles:
-        if a['link'] and a['link'] not in seen_links:
-            seen_links.add(a['link'])
-            all_articles.append(a)
-
     if community_articles:
         print(f"\n💾 儲存社群討論到 Firebase...")
         save_to_firestore(db, community_articles)
         print(f"✅ 社群討論已儲存 {len(community_articles)} 則")
+    return len(community_articles)
 
-    # ─── 股價抓取 ───
-    fetch_stock_prices(db)
 
-    # ─── 月營收抓取（每月 5 日後 MOPS 更新） ───
+def fetch_all_financials(db):
+    """財務類低頻資料一次抓齊：月營收（含競品）、季損益、股利、重大訊息"""
     fetch_monthly_revenue(db, '2451')
-
-    # ─── 季度損益抓取 ───
     fetch_quarterly_financials(db, '2451')
-
-    # ─── 股利資料抓取 ───
     fetch_dividend_data(db, '2451')
+    # 競品月營收（ADATA 3260、Apacer 8271、十銓 4967、宜鼎 5289、廣穎 4973）
+    for comp_code in ['3260', '8271', '4967', '5289', '4973']:
+        fetch_monthly_revenue(db, comp_code)
+    fetch_mops_material_news(db)
+
+
+def main():
+    mode = os.environ.get('FETCH_MODE', 'all')
+
+    print(f"\n{'='*50}")
+    print(f"創見資訊新聞監控 — 自動抓取")
+    print(f"模式: {mode} | 時間: {datetime.datetime.now(datetime.timezone(datetime.timedelta(hours=8))).strftime('%Y-%m-%d %H:%M:%S')} (台灣時間)")
+    print(f"{'='*50}")
+
+    try:
+        db = init_db_from_env()
+    except Exception as e:
+        print(f"❌ Firebase 初始化失敗: {e}")
+        sys.exit(1)
+
+    # 註：定時郵件（email_report / morning_email）與 Gemini 摘要（backfill_summaries）
+    # 功能已於 2026-07 移除；如需恢復請參考 git 歷史。
+
+    # ─── MSN 清理模式 ─────────────────────────────────────────────
+    if mode == 'cleanup_msn':
+        cleanup_msn_articles(db)
+        print(f"\n{'='*50}\nMSN 清理完成！\n{'='*50}\n")
+        return
+
+    # ─── 股價快速更新模式 ─────────────────────────────────────────
+    if mode == 'stocks_only':
+        fetch_stock_prices(db)
+        fetch_daily_trading(db, '2451')
+        print(f"\n{'='*50}\n股價更新完成！\n{'='*50}\n")
+        return
+
+    # ─── 完整抓取 ───
+    fetch_and_save_news(db, mode)
+    fetch_and_save_community(db)
+    fetch_stock_prices(db)
 
     # ─── 每日交易資料（開收盤 + 三大法人）───
     fetch_daily_trading(db, '2451')
 
-    # ─── 競品月營收抓取（ADATA 3260、Apacer 8271、十銓 4967、宜鼎 5289、廣穎 4973）───
-    for comp_code in ['3260', '8271', '4967', '5289', '4973']:
-        fetch_monthly_revenue(db, comp_code)
-
-    # ─── 競品重大訊息抓取（MOPS 直接抓取）───
-    fetch_mops_material_news(db)
+    # ─── 財務類資料（月營收/季損益/股利/重大訊息，含競品）───
+    fetch_all_financials(db)
 
     print(f"\n{'='*50}")
     print("抓取完成！")

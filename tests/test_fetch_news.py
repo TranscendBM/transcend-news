@@ -21,7 +21,7 @@ for _mod in ('requests', 'feedparser', 'firebase_admin',
     if _mod not in sys.modules:
         sys.modules[_mod] = MagicMock(name=_mod)
 
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent / 'scripts'))
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / 'functions'))
 
 import fetch_news  # noqa: E402
 

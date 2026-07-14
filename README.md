@@ -41,10 +41,11 @@ npm run deploy
 ├── firestore.rules               # Firestore 安全規則（屬於 transcend-news-monitor 專案）
 ├── firebase.json / .firebaserc   # Firebase Hosting 設定（transcend-news-tbm 專案）
 ├── .github/
-│   └── workflows/                # GitHub Actions（fetch-news / update-stocks / cleanup-msn）
-├── scripts/
-│   ├── fetch_news.py             # Python 抓取腳本
-│   └── requirements.txt          # Python 相依套件（固定版本，全部 workflow 共用）
+│   └── workflows/                # GitHub Actions（僅手動備援；正式排程在 Cloud Functions）
+├── functions/
+│   ├── main.py                   # Cloud Functions 排程進入點（部署於 transcend-news-tbm）
+│   ├── fetch_news.py             # 抓取邏輯（Functions 與 Actions 共用）
+│   └── requirements.txt          # Python 相依套件（固定版本）
 └── tests/
     └── test_fetch_news.py        # 純函式單元測試（離線，python3 -m unittest discover -s tests）
 ```

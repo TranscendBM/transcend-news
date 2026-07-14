@@ -45,11 +45,11 @@ jobs:
         with:
           python-version: '3.11'
           cache: 'pip'
-          cache-dependency-path: scripts/requirements.txt
+          cache-dependency-path: functions/requirements.txt
 
       # 3. 安裝相依套件
       - name: 安裝套件
-        run: pip install -r scripts/requirements.txt
+        run: pip install -r functions/requirements.txt
 
       # 4. 判斷抓取模式（手動可選，排程固定抓全部）
       - name: 判斷排程模式
@@ -66,7 +66,7 @@ jobs:
         env:
           FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
           FETCH_MODE: ${{ env.FETCH_MODE }}
-        run: python scripts/fetch_news.py
+        run: python functions/fetch_news.py
 
       # 註：原本會把 status.json commit 回 repository，但前端（Firebase Hosting
       # 只部署 public/）並未使用該檔案，且每 30 分鐘產生一筆無意義 commit 污染

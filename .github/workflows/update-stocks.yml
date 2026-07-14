@@ -35,15 +35,15 @@ jobs:
         with:
           python-version: '3.11'
           cache: 'pip'
-          cache-dependency-path: scripts/requirements.txt
+          cache-dependency-path: functions/requirements.txt
 
-      # 統一使用 scripts/requirements.txt（固定版本），避免安裝未鎖版套件
+      # 統一使用 functions/requirements.txt（固定版本），避免安裝未鎖版套件
       - name: Install dependencies
-        run: pip install -r scripts/requirements.txt
+        run: pip install -r functions/requirements.txt
 
       - name: Update stock prices
         env:
           FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
           FETCH_MODE: stocks_only
         run: |
-          python scripts/fetch_news.py
+          python functions/fetch_news.py
