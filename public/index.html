@@ -1833,7 +1833,7 @@ function App() {
   const [aiOpen,         setAiOpen]         = useState(false);
   const [aiText,         setAiText]         = useState('');
   const [aiLoading,      setAiLoading]      = useState(false);
-  const [stockCountdown, setStockCountdown] = useState(600); // 600s = 10 min
+  const [stockCountdown, setStockCountdown] = useState(300); // 300s = 5 min（配合 Actions 排程）
 
   // ─── Firebase init ───────────────────────────────────────
   useEffect(() => {
@@ -1842,13 +1842,20 @@ function App() {
       window._db = firebase.firestore();
       setConnected(true);
       fetchAll();
+      // 股價即時監聽：GitHub Actions 一寫入 stocks/latest，頁面立即更新（免重整）
+      const unsubStocks = window._db.collection('stocks').doc('latest')
+        .onSnapshot(
+          doc => { if (doc.exists) { setStocks(doc.data()); setStockCountdown(300); } },
+          err => console.error('Stocks listen:', err)
+        );
+      return () => unsubStocks();
     } catch(e) {
       console.error('Firebase:', e);
       setLoading(false);
     }
   }, []);
 
-  // ─── 股價每 10 分鐘自動更新 ───────────────────────────────
+  // ─── 股價每 5 分鐘輪詢（onSnapshot 即時推送的備援）─────────
   useEffect(() => {
     // 倒數計時器：每秒 -1
     const tick = setInterval(() => {
@@ -1857,7 +1864,7 @@ function App() {
           // 時間到：靜默刷新股價 + 每日交易
           fetchStocks();
           fetchDaily();
-          return 600;
+          return 300;
         }
         return s - 1;
       });
