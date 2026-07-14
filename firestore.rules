@@ -1,18 +1,60 @@
 rules_version = '2';
+
+// ─────────────────────────────────────────────────────────────
+// 創見新聞監控 — Firestore 安全規則
+// 原則：前端實際讀取的集合開放「公開唯讀」；所有客戶端一律禁止寫入。
+// 寫入僅由 GitHub Actions 的 Firebase Admin SDK 執行（Admin SDK 繞過規則，
+// 因此 write: false 只擋客戶端，不影響排程）。
+//
+// 部署位置：這份規則屬於「資料庫專案 transcend-news-monitor」（舊 Google 帳號），
+// 不是 Hosting 專案 transcend-news-tbm。部署方式見 README「Firestore Rules 部署」。
+// ─────────────────────────────────────────────────────────────
 service cloud.firestore {
   match /databases/{database}/documents {
 
-    // 新聞集合 - 允許讀取（前端網頁），寫入僅限後端（由 Firebase Admin SDK 執行）
+    // 新聞（前端以 collection query 讀取）
     match /news/{articleId} {
-      // 任何人都可以讀取（GitHub Pages 上的前端讀取）
       allow read: if true;
-
-      // 寫入：只允許已驗證的服務帳號（即 GitHub Actions 用的 Admin SDK）
-      // Admin SDK 會繞過這些規則，所以這裡設為 false 即可防止客戶端寫入
       allow write: if false;
     }
 
-    // 其他集合一律拒絕
+    // 即時股價（前端讀 stocks/latest 單一文件，並以 onSnapshot 監聽）
+    match /stocks/latest {
+      allow read: if true;
+      allow write: if false;
+    }
+
+    // 月營收（前端讀 revenue/2451 與競品 3260/8271/4967/5289/4973）
+    match /revenue/{stockCode} {
+      allow read: if true;
+      allow write: if false;
+    }
+
+    // 季度損益（前端讀 financials/2451）
+    match /financials/{stockCode} {
+      allow read: if true;
+      allow write: if false;
+    }
+
+    // 股利（前端讀 dividends/2451）
+    match /dividends/{stockCode} {
+      allow read: if true;
+      allow write: if false;
+    }
+
+    // 競品重大訊息（前端讀 material/competitors 單一文件）
+    match /material/competitors {
+      allow read: if true;
+      allow write: if false;
+    }
+
+    // 每日交易資料（前端讀 daily/2451）
+    match /daily/{stockCode} {
+      allow read: if true;
+      allow write: if false;
+    }
+
+    // 其他未列出的集合一律拒絕（讀＋寫）
     match /{document=**} {
       allow read, write: if false;
     }

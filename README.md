@@ -36,16 +36,45 @@ npm run deploy
 
 ```
 /
-├── index.html                    # 前端網頁（GitHub Pages 托管）
-├── status.json                   # 自動生成，記錄上次抓取時間
-├── firestore.rules               # Firestore 安全規則
+├── public/
+│   └── index.html                # 前端網頁（Firebase Hosting 只部署此目錄）
+├── firestore.rules               # Firestore 安全規則（屬於 transcend-news-monitor 專案）
+├── firebase.json / .firebaserc   # Firebase Hosting 設定（transcend-news-tbm 專案）
 ├── .github/
-│   └── workflows/
-│       └── fetch-news.yml        # GitHub Actions 排程設定
-└── scripts/
-    ├── fetch_news.py             # Python 抓取腳本
-    └── requirements.txt          # Python 相依套件
+│   └── workflows/                # GitHub Actions（fetch-news / update-stocks / cleanup-msn）
+├── scripts/
+│   ├── fetch_news.py             # Python 抓取腳本
+│   └── requirements.txt          # Python 相依套件（固定版本，全部 workflow 共用）
+└── tests/
+    └── test_fetch_news.py        # 純函式單元測試（離線，python3 -m unittest discover -s tests）
 ```
+
+---
+
+## 🔐 Firestore Rules 部署
+
+`firestore.rules` 屬於**資料庫專案 `transcend-news-monitor`**（舊 Google 帳號），
+不是 Hosting 專案 `transcend-news-tbm`，`npm run deploy` **不會**部署規則。修改後請擇一部署：
+
+- **方法 A（建議）Firebase Console**：以擁有 `transcend-news-monitor` 的 Google 帳號登入
+  https://console.firebase.google.com/project/transcend-news-monitor/firestore/rules
+  ，貼上 `firestore.rules` 全文後點「發布」。
+- **方法 B（CLI）**：以有該專案權限的帳號 `firebase login` 後執行：
+  ```bash
+  firebase deploy --only firestore:rules --project transcend-news-monitor
+  ```
+  （需暫時在 `firebase.json` 加入 `"firestore": {"rules": "firestore.rules"}` 區塊；
+  平常不放這段，避免日常 deploy 誤打到錯的專案。）
+
+---
+
+## 🤖 已移除的功能（2026-07）
+
+以下功能已整組移除，如需恢復請參考 git 歷史：
+
+- **Gemini AI 摘要**（前端按鈕、後端摘要、backfill）——原公開 API Key 已撤銷；
+  既有新聞文件中的 `summary` 欄位仍照常顯示
+- **定時郵件**（下午英文上游市場報告、早上繁中科技早報、連線測試）
 
 ---
 
@@ -126,25 +155,10 @@ npm run deploy
 
 ---
 
-### Step 4：啟用 GitHub Pages
+### Step 4：部署前端（Firebase Hosting）
 
-1. Repository「Settings」→「Pages」
-2. Source：「Deploy from a branch」
-3. Branch：`main`，資料夾：`/ (root)`
-4. 點「Save」
-5. 等約 2-3 分鐘，頁面會出現你的網址：
-   `https://你的帳號.github.io/transcend-news-monitor/`
-
----
-
-### Step 5：設定前端 API Key
-
-開啟你的 GitHub Pages 網址後：
-
-1. 點右上角 ⚙️ 設定
-2. 填入 **Claude API Key**（從 https://console.anthropic.com 取得）
-3. 填入 **Firebase 設定**（來自 Step 1 的 `firebaseConfig`）
-4. 點「儲存設定」
+> 前端已改由 **Firebase Hosting** 托管（不再使用 GitHub Pages），見上方「前端部署」。
+> 建議到 Repository Settings → Pages 將 Source 設為「None」，避免無用的 pages build。
 
 ---
 
@@ -152,11 +166,12 @@ npm run deploy
 
 | 檢查項目 | 說明 |
 |---------|------|
-| GitHub Pages 可訪問 | 網址能正常開啟 index.html |
+| 網站可訪問 | https://transcend-news.web.app 能正常開啟 |
 | Firebase 橫幅顯示 | 頁面顯示「Firebase 已連線」 |
 | 手動觸發 Actions | GitHub → Actions → 「自動抓取新聞」→ Run workflow |
-| 自動排程 | 隔天等 08:00 或 16:00 台灣時間後，Actions 自動執行 |
+| 自動排程 | fetch-news 每 30 分鐘、update-stocks 交易時段每 5 分鐘（GitHub 排程常有延遲） |
 | 新聞出現 | 重新整理頁面，新聞應從 Firebase 載入 |
+| 單元測試 | `python3 -m unittest discover -s tests` 全數通過 |
 
 ---
 
@@ -174,10 +189,12 @@ npm run deploy
 
 ## 🔒 安全注意事項
 
-- Claude API Key 儲存在**瀏覽器 localStorage**，不上傳到 GitHub
+- **任何 API Key / Service Account / Secret 一律不得寫入前端或 repository**
+  （本 repo 為公開，寫入即等於洩漏，且會永久留在 Git 歷史中）
 - Firebase Service Account JSON 儲存在 **GitHub Secrets**，安全加密
-- Firestore 規則設定為**只讀**（前端），寫入只允許 Admin SDK（Actions）
-- 建議將 GitHub Repository 設為 **Private**
+- Firestore 規則：前端讀取的集合**公開唯讀**、所有客戶端禁止寫入，寫入只允許 Admin SDK（Actions）
+- `public/index.html` 內的 `firebaseConfig.apiKey` 是 Firebase 前端識別用的公開金鑰，
+  本來就會隨網頁公開，安全性由 Firestore Rules 把關，**不是**需要保密的 Secret
 
 ---
 

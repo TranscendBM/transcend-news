@@ -95,18 +95,8 @@ const FIREBASE_CONFIG = {
   appId:             "1:724058805854:web:ec0afc075f51f093be86cf"
 };
 
-const GEMINI_API_KEY = 'AIzaSyCNxSWC57_SBwvf1JqA-ITw83Eo9IUCLQY';
-// 依序嘗試的模型清單（Google 頻繁更改可用模型名稱）
-const GEMINI_MODELS = [
-  'gemini-2.0-flash',
-  'gemini-2.0-flash-lite',
-  'gemini-2.0-flash-001',
-  'gemini-1.5-flash',
-  'gemini-1.5-flash-latest',
-  'gemini-1.5-flash-001',
-];
-const geminiUrl = (model) =>
-  `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${GEMINI_API_KEY}`;
+// 註：Gemini AI 摘要功能已於 2026-07 移除（原公開 API Key 已撤銷）；
+// 如需恢復請參考 git 歷史。既有新聞文件中的 summary 欄位仍照常顯示。
 const BRAND = '#960014';
 
 // ── PR 重點媒體監控清單 ──
@@ -162,6 +152,42 @@ const STOCK_META = {
   '4967':{ name:'十銓科技', isSelf:false },
   '8271':{ name:'宇瞻',    isSelf:false },
 };
+
+// ═══════════════════════════════════════════════════════════
+// 股價過期判斷（與 scripts/fetch_news.py 的 is_stock_stale 邏輯一致）
+// 交易時段（週一~五 09:00–13:35 台灣時間）中超過 30 分鐘未更新即視為過期；
+// 非交易時段顯示的是最近收盤價，不視為過期。
+// ═══════════════════════════════════════════════════════════
+function twNow() {
+  return new Date(new Date().toLocaleString('en-US', { timeZone: 'Asia/Taipei' }));
+}
+function isTwMarketOpen(tw = twNow()) {
+  const day = tw.getDay();
+  if (day === 0 || day === 6) return false;
+  const mins = tw.getHours() * 60 + tw.getMinutes();
+  return mins >= 9 * 60 && mins <= 13 * 60 + 35;
+}
+function stockUpdatedAtMs(data) {
+  const u = data && data.updatedAt;
+  if (!u) return null;
+  if (typeof u.toDate === 'function') return u.toDate().getTime();  // Firestore Timestamp
+  if (typeof u.seconds === 'number') return u.seconds * 1000;
+  return null;
+}
+function isStockStale(data, staleMinutes = 30) {
+  const t = stockUpdatedAtMs(data);
+  if (!t) return true;                     // 沒有 updatedAt 一律視為過期
+  if (!isTwMarketOpen()) return false;
+  return Date.now() - t > staleMinutes * 60 * 1000;
+}
+function fmtStockUpdated(data) {
+  const t = stockUpdatedAtMs(data);
+  if (!t) return '更新時間不明';
+  const d = new Date(t);
+  const sameDay = d.toDateString() === new Date().toDateString();
+  const hm = d.toLocaleTimeString('zh-TW', { hour: '2-digit', minute: '2-digit', hour12: false });
+  return sameDay ? `更新 ${hm}` : `更新 ${d.getMonth() + 1}/${d.getDate()} ${hm}`;
+}
 
 // ═══════════════════════════════════════════════════════════
 // MOCK — 社群觀測站（示意，PTT RSS 抓到後自動替換）
@@ -686,6 +712,7 @@ function CompetitorNews({ news }) {
 function StockCard({ code, data }) {
   const meta = STOCK_META[code] || {};
   const up = data.changePct > 0, dn = data.changePct < 0;
+  const stale = isStockStale(data);
   return (
     <div className={`p-4 rounded-2xl border transition-all ${meta.isSelf?'border-red-700/40 bg-gradient-to-br from-red-950/25 to-gray-900':'border-gray-700/60 bg-gray-900'}`}>
       <div className="flex justify-between items-start mb-2">
@@ -693,11 +720,19 @@ function StockCard({ code, data }) {
           <p className="text-xs text-gray-500">{code}</p>
           <p className="font-bold text-white">{data.name || meta.name}</p>
         </div>
-        {meta.isSelf && (
-          <span className="text-xs px-2 py-0.5 rounded-full border" style={{ background:'rgba(150,0,20,0.25)', color:'#fca5a5', borderColor:'rgba(220,38,38,0.35)' }}>
-            本公司
-          </span>
-        )}
+        <div className="flex flex-col items-end gap-1">
+          {meta.isSelf && (
+            <span className="text-xs px-2 py-0.5 rounded-full border" style={{ background:'rgba(150,0,20,0.25)', color:'#fca5a5', borderColor:'rgba(220,38,38,0.35)' }}>
+              本公司
+            </span>
+          )}
+          {stale && (
+            <span className="text-xs px-2 py-0.5 rounded-full border" title="交易時段中超過 30 分鐘未更新"
+              style={{ background:'rgba(217,119,6,0.15)', color:'#fbbf24', borderColor:'rgba(217,119,6,0.4)' }}>
+              資料過期
+            </span>
+          )}
+        </div>
       </div>
       <p className="text-2xl font-bold text-white">${data.price ?? '--'}</p>
       <div className={`flex items-center gap-1 text-sm font-semibold mt-1 ${up?'text-green-400':dn?'text-red-400':'text-gray-400'}`}>
@@ -708,6 +743,7 @@ function StockCard({ code, data }) {
         {up?'+':''}{data.change?.toFixed(1)??'--'} ·
         量 {data.volume ? (data.volume/1000).toFixed(0)+'張' : '--'}
       </p>
+      <p className={`text-xs mt-1 ${stale?'text-amber-500/80':'text-gray-600'}`}>{fmtStockUpdated(data)}</p>
     </div>
   );
 }
@@ -1830,9 +1866,6 @@ function App() {
   const [loading,        setLoading]        = useState(true);
   const [connected,      setConnected]      = useState(false);
   const [updated,        setUpdated]        = useState(null);
-  const [aiOpen,         setAiOpen]         = useState(false);
-  const [aiText,         setAiText]         = useState('');
-  const [aiLoading,      setAiLoading]      = useState(false);
   const [stockCountdown, setStockCountdown] = useState(300); // 300s = 5 min（配合 Actions 排程）
 
   // ─── Firebase init ───────────────────────────────────────
@@ -1951,58 +1984,6 @@ function App() {
     } catch(e) { console.error('CompRev:', e); }
   }
 
-  // ─── AI Summary (Gemini) ─────────────────────────────────
-  async function openAI() {
-    setAiOpen(true);
-    setAiLoading(true);
-    setAiText('');
-    try {
-      const recent = sortByDate(news.filter(n=>n.cat==='transcend')).slice(0,20);
-      const prompt = `你是創見資訊（2451）的公關顧問。分析以下近期新聞，給出：
-1. 本週最值得關注的 3 則新聞及原因
-2. 整體媒體情緒（正面/中立/負面比例與原因）
-3. 建議公關行動
-新聞資料：\n${recent.map(n=>`- [${n.mediaName||''}] ${n.title}`).join('\n')}`;
-
-      let result = null;
-      let lastError = '所有模型均無回應';
-      let usedModel = '';
-
-      for (const model of GEMINI_MODELS) {
-        try {
-          const res = await fetch(geminiUrl(model), {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }] })
-          });
-          const json = await res.json();
-          // API 層錯誤（model not found / quota 等）
-          if (json.error) {
-            lastError = `${model}: ${json.error.message}`;
-            continue;
-          }
-          const text = json.candidates?.[0]?.content?.parts?.[0]?.text;
-          if (text) {
-            result = text;
-            usedModel = model;
-            break;
-          }
-        } catch(e) {
-          lastError = `${model}: ${e.message}`;
-        }
-      }
-
-      if (result) {
-        setAiText(`[模型: ${usedModel}]\n\n${result}`);
-      } else {
-        setAiText(`AI 摘要失敗，請確認 Gemini API Key 是否有效。\n\n最後錯誤：${lastError}`);
-      }
-    } catch(e) {
-      setAiText('AI 摘要失敗：' + e.message);
-    }
-    setAiLoading(false);
-  }
-
   // 社群資料（cat=community，PTT Stock 討論創見/2451）
   const community = useMemo(() =>
     sortByDate(news.filter(n => n.cat === 'community')),
@@ -2050,11 +2031,6 @@ function App() {
 
           {/* Action buttons */}
           <div className="flex items-center gap-2 shrink-0">
-            <button onClick={openAI}
-              className="hidden sm:flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium transition-all"
-              style={{ background:'rgba(139,92,246,0.7)', color:'white' }}>
-              ✨ AI 摘要
-            </button>
             <button onClick={fetchAll} disabled={loading}
               className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium transition-all"
               style={{ background:'rgba(255,255,255,0.15)', border:'1px solid rgba(255,255,255,0.2)', color:'white' }}>
@@ -2076,6 +2052,11 @@ function App() {
           <span className="text-gray-700" title="股價自動更新倒數">
             ⏱ {Math.floor(stockCountdown/60)}:{String(stockCountdown%60).padStart(2,'0')}
           </span>
+          {self && isStockStale(self) && (
+            <span className="text-amber-500" title={`交易時段中超過 30 分鐘未更新（${fmtStockUpdated(self)}）`}>
+              ⚠ 股價資料過期
+            </span>
+          )}
           {self && (
             <span className="text-gray-500">
               創見 <span className={`font-semibold ${self.changePct>=0?'text-green-400':'text-red-400'}`}>
@@ -2104,25 +2085,6 @@ function App() {
          <IRTab news={news} stocks={stocks} community={community} revenue={revenue} financials={financials} dividends={dividends} material={material} daily={daily} compRev={compRev} />}
       </main>
 
-      {/* ─────────── AI MODAL ─────────── */}
-      {aiOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4"
-          style={{ background:'rgba(0,0,0,0.7)', backdropFilter:'blur(4px)' }}
-          onClick={e => { if(e.target===e.currentTarget) setAiOpen(false); }}>
-          <div className="bg-gray-900 border border-gray-700 rounded-2xl w-full max-w-2xl shadow-2xl">
-            <div className="flex items-center justify-between px-5 py-4 border-b border-gray-700">
-              <h2 className="font-semibold text-white flex items-center gap-2">✨ AI 新聞摘要 <span className="text-xs text-purple-400">(Gemini AI)</span></h2>
-              <button onClick={() => setAiOpen(false)} className="text-gray-500 hover:text-white text-xl leading-none">×</button>
-            </div>
-            <div className="p-5 max-h-[60vh] overflow-y-auto">
-              {aiLoading
-                ? <div className="flex flex-col items-center gap-3 py-10"><Spinner size="lg" /><p className="text-gray-500 text-sm">Gemini 分析中…</p></div>
-                : <pre className="text-sm text-gray-300 whitespace-pre-wrap leading-relaxed font-sans">{aiText}</pre>
-              }
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   );
 }

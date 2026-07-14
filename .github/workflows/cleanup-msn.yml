@@ -4,6 +4,13 @@ on:
   # ─── 只能手動觸發 ───
   workflow_dispatch:
 
+permissions:
+  contents: read
+
+concurrency:
+  group: cleanup-msn
+  cancel-in-progress: false
+
 jobs:
   cleanup:
     name: 刪除 Firestore 中的 MSN 文章

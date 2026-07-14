@@ -19,6 +19,15 @@ on:
           - afternoon  # 美國市場 + 競品 + 供應商
           - tw_market  # 台灣科技媒體（twMarket）
 
+# status.json commit 已移除，不需要寫入 repository
+permissions:
+  contents: read
+
+# 避免排程重疊執行（前一次還在跑時，新觸發排隊等候而不並行）
+concurrency:
+  group: fetch-news
+  cancel-in-progress: false
+
 jobs:
   fetch:
     name: 抓取並儲存新聞
@@ -56,29 +65,9 @@ jobs:
       - name: 抓取新聞並儲存到 Firebase
         env:
           FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
-          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           FETCH_MODE: ${{ env.FETCH_MODE }}
         run: python scripts/fetch_news.py
 
-      # 6. 更新最後執行時間（寫入 status.json 供前端讀取）
-      - name: 更新執行狀態
-        run: |
-          TAIWAN_TIME=$(TZ='Asia/Taipei' date '+%Y-%m-%d %H:%M:%S')
-          cat > status.json << EOF
-          {
-            "lastFetch": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
-            "lastFetchTW": "$TAIWAN_TIME",
-            "mode": "${{ env.FETCH_MODE }}",
-            "status": "success"
-          }
-          EOF
-
-      # 7. 提交 status.json 回 Repository
-      - name: 提交狀態檔案
-        uses: EndBug/add-and-commit@v9
-        with:
-          add: 'status.json'
-          message: '🤖 自動更新新聞 [${{ env.FETCH_MODE }}] ${{ env.FETCH_MODE }}'
-          default_author: github_actions
-          pull: '--rebase --autostash'
-          push: true
+      # 註：原本會把 status.json commit 回 repository，但前端（Firebase Hosting
+      # 只部署 public/）並未使用該檔案，且每 30 分鐘產生一筆無意義 commit 污染
+      # Git 歷史，已於 2026-07 移除。執行狀態請直接看 Actions 執行紀錄。

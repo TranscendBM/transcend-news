@@ -175,86 +175,7 @@ def get_sources(mode):
         return transcend + us_market + tw_market + competitors + suppliers + community
 
 
-# ─── 郵件媒體來源域名白名單 ───
-_TW_DOMAINS = {
-    'digitimes.com.tw', 'digitimes.com', 'ithome.com.tw', 'epaper.com.tw',
-    'technews.tw', 'bnext.com.tw', 'eettaiwan.com', 'udn.com', 'money.udn.com',
-    'ctee.com.tw', 'chinatimes.com', 'anue.com.tw', 'cnyes.com', 'news.cnyes.com',
-    'ltn.com.tw', 'ec.ltn.com.tw', 'moneydj.com', 'cna.com.tw', 'wealth.com.tw',
-    'storm.mg', 'businessweekly.com.tw', 'cw.com.tw', 'inside.com.tw',
-    'ettoday.net', 'setn.com', 'tvbs.com.tw', 'nextapple.com', 'newtalk.tw',
-    'mnews.tw', 'ustv.com.tw', 'gvm.com.tw', 'moneyweekly.com.tw',
-    'taiwannews.com.tw', 'trendforce.com',
-}
-_US_INTL_DOMAINS = {
-    'trendforce.com', 'reuters.com', 'bloomberg.com', 'techcrunch.com',
-    'eetimes.com', 'electronicsweekly.com', 'anandtech.com', 'tomshardware.com',
-    'semiconductor-today.com', 'techradar.com', 'theverge.com', 'arstechnica.com',
-    'wired.com', 'zdnet.com', 'cnet.com', 'pcmag.com', 'engadget.com',
-    'forbes.com', 'businessinsider.com', 'marketwatch.com', 'wsj.com', 'ft.com',
-    'seekingalpha.com', 'fool.com', 'barrons.com', 'cnbc.com', 'apnews.com',
-    'nytimes.com', 'washingtonpost.com', 'theregister.com', 'extremetech.com',
-    'digitimes.com',   # English version
-    'nikkei.com', 'taiwannews.com.tw', 'taiwanplus.com',
-}
-
-def _link_domain(link):
-    try:
-        from urllib.parse import urlparse
-        return urlparse(link or '').netloc.replace('www.', '').lower()
-    except Exception:
-        return ''
-
-def _is_us_media(article):
-    """文章是否來自美國/國際英文媒體（排除台灣中文媒體與 MSN）"""
-    # usMarket 類別本身就是從美國/國際 RSS 來源抓取，排除 MSN 即可
-    if article.get('cat') == 'usMarket':
-        return 'msn.com' not in _link_domain(article.get('link', ''))
-    domain = _link_domain(article.get('link', ''))
-    if 'msn.com' in domain:
-        return False
-    # Google News RSS 的 link 都是 news.google.com，不能用 domain 判斷
-    if 'google.com' in domain:
-        return True
-    if any(d in domain for d in _TW_DOMAINS if d not in {'trendforce.com', 'taiwannews.com.tw'}):
-        return False
-    return True
-
-def _is_tw_media(article):
-    """文章是否來自台灣媒體"""
-    # twMarket 類別本身就是從台灣科技媒體 RSS 來源抓取
-    if article.get('cat') == 'twMarket':
-        return True
-    domain = _link_domain(article.get('link', ''))
-    # Google News RSS 的 link 都是 news.google.com，改用 mediaName / sourceName 判斷
-    if 'google.com' in domain:
-        media = (article.get('mediaName') or article.get('sourceName') or '').lower()
-        return any(d.replace('.', '') in media.replace('.', '') for d in _TW_DOMAINS)
-    return any(d in domain for d in _TW_DOMAINS)
-
-# ─── 郵件過濾關鍵字 ───
-_TRANSCEND_KW   = ['transcend', '創見', '2451']
-_COMPETITOR_KW  = ['adata', 'a-data', 'kingston', 'teamgroup', 'innodisk',
-                   'lexar', 'pny', 'silicon power', 'patriot', 'corsair',
-                   '威剛', '金士頓', '十銓', '宜鼎', '雷克沙', '必恩威']
-_NEWPRODUCT_KW  = ['launch', 'launches', 'launched', 'release', 'releases',
-                   'released', 'unveil', 'unveils', 'unveiling', 'announces new',
-                   'introduce', 'introduces', 'new product', 'new line',
-                   '推出', '發表', '新品', '發布新', '上市', '首款', '全新']
-
-def _title_has(title, keywords):
-    t = title.lower()
-    return any(kw in t for kw in keywords)
-
-def is_transcend_news(title):
-    return _title_has(title, _TRANSCEND_KW)
-
-def is_competitor_news(title):
-    return _title_has(title, _COMPETITOR_KW)
-
-def is_new_product_news(title):
-    return _title_has(title, _NEWPRODUCT_KW)
-
+# ─── 標題相似度去重工具 ───
 def is_too_similar(article, selected, threshold=0.5):
     """若與已選文章標題關鍵詞重疊率 >= threshold 則視為過度相似"""
     import re
@@ -275,26 +196,6 @@ def is_too_similar(article, selected, threshold=0.5):
         if overlap >= threshold:
             return True
     return False
-
-def pick_diverse(articles, n=5, filters=None):
-    """
-    從 articles 中挑出 n 則：套用 filters 過濾、並確保內容不重複
-    filters: list of callables，回傳 True 表示「應排除」
-    """
-    selected = []
-    for a in articles:
-        if len(selected) >= n:
-            break
-        title = a.get('title', '')
-        if filters and any(f(title) for f in filters):
-            continue
-        if 'msn.com' in (a.get('link') or '').lower():
-            continue
-        if is_too_similar(a, selected):
-            continue
-        selected.append(a)
-    return selected
-
 
 def cleanup_msn_articles(db):
     """刪除 Firestore 中所有 link 含 msn.com 的文章"""
@@ -393,6 +294,65 @@ def parse_date(entry):
 def clean_html(text):
     import re
     return re.sub(r'<[^>]+>', '', text or '').strip()
+
+
+# ══════════════════════════════════════════════════════════════
+# 純函式工具（無外部相依，供主流程與單元測試共用）
+# ══════════════════════════════════════════════════════════════
+
+def normalize_title(title, max_len=30):
+    """標題正規化（去除空白與符號、轉小寫、取前 max_len 字元），用於新聞去重"""
+    import re
+    return re.sub(r'[\s\W]+', '', (title or '')).lower()[:max_len]
+
+
+def is_tw_market_open(dt):
+    """判斷給定「台灣時間」datetime 是否在台股交易時段（週一~五 09:00–13:35，含收盤緩衝）"""
+    if dt.weekday() > 4:          # 5=週六, 6=週日
+        return False
+    minutes = dt.hour * 60 + dt.minute
+    return 9 * 60 <= minutes <= 13 * 60 + 35
+
+
+def is_stock_stale(updated_at, now, stale_minutes=30):
+    """
+    股價資料是否過期：交易時段中超過 stale_minutes 未更新即視為過期。
+    非交易時段顯示的是最近收盤價，不視為過期。
+    updated_at / now 皆為台灣時間 datetime；updated_at 為 None 一律視為過期。
+    （前端 index.html 的過期標示邏輯與此函式一致）
+    """
+    if updated_at is None:
+        return True
+    if not is_tw_market_open(now):
+        return False
+    return (now - updated_at).total_seconds() > stale_minutes * 60
+
+
+def finmind_revenue_period(date_str):
+    """
+    FinMind 月營收 date 欄位（申報月，格式 'YYYY-MM...'）→ 實際營收 (year, month)。
+    申報月比實際營收月晚 1 個月：'2024-03' → (2024, 2)、'2024-01' → (2023, 12)。
+    格式錯誤回傳 None。
+    """
+    try:
+        yr, mon = int(str(date_str)[:4]), int(str(date_str)[5:7])
+    except (ValueError, TypeError):
+        return None
+    if yr < 1000 or not 1 <= mon <= 12:
+        return None
+    if mon == 1:
+        return (yr - 1, 12)
+    return (yr, mon - 1)
+
+
+def roc_date_to_iso(roc_str):
+    """民國日期 '114/04/24' 或 '114-04-24' → '2025-04-24'；無法解析則原樣回傳"""
+    try:
+        s = str(roc_str).strip().replace('-', '/')
+        parts = s.split('/')
+        return f"{int(parts[0]) + 1911}-{parts[1]}-{parts[2]}"
+    except Exception:
+        return roc_str
 
 
 def extract_reporter(raw_author):
@@ -739,15 +699,11 @@ def fetch_monthly_revenue(db, stock_code='2451'):
                 try:
                     # FinMind 欄位: date(YYYY-MM), revenue(元), revenue_year(去年同期,元),
                     #   revenue_month(累計,元), revenue_year_difference(YoY%), revenue_month_difference(MoM%)
-                    date_str = str(row.get('date', ''))  # e.g. "2024-03"
-                    yr  = int(date_str[:4])
-                    mon = int(date_str[5:7])
                     # FinMind date = 申報月（比實際營收月多 1 個月），需減 1 還原
-                    if mon == 1:
-                        mon = 12
-                        yr -= 1
-                    else:
-                        mon -= 1
+                    period = finmind_revenue_period(row.get('date', ''))
+                    if not period:
+                        continue
+                    yr, mon = period
                     rev     = int(str(row.get('revenue', 0) or 0).replace(',', '') or 0)
                     prev_yr = int(str(row.get('revenue_year', 0) or row.get('last_year_revenue', 0) or 0).replace(',', '') or 0)
                     cumrev  = int(str(row.get('revenue_month', 0) or 0).replace(',', '') or 0)
@@ -998,24 +954,19 @@ def fetch_stock_prices(db):
                 print(f"  FinMind {code}: {e}")
 
     if stock_data:
+        # merge=True：只覆蓋本次成功抓到的股票，其他股票保留舊值（不會被刪除）。
+        # 每檔都帶自己的 updatedAt，前端據此標示「資料過期」。
+        missing = [f"{c} {STOCKS[c][0]}" for c in STOCKS if c not in stock_data]
+        if missing:
+            print(f"  ⚠ 本次未更新：{'、'.join(missing)}（stocks/latest 保留舊值，前端將依 updatedAt 標示過期）")
         db.collection('stocks').document('latest').set(stock_data, merge=True)
         print(f"  ✅ 股價已存入 Firebase ({len(stock_data)} 檔)")
     else:
-        print("  ⚠ 股價取得失敗（TWSE + FinMind 均無資料）")
+        print("  ⚠ 股價取得失敗（TWSE + FinMind 均無資料），stocks/latest 未變動")
 
 
 def main():
-    mode          = os.environ.get('FETCH_MODE', 'all')
-    gmail_user    = os.environ.get('GMAIL_USER', '')
-    gmail_pw      = os.environ.get('GMAIL_APP_PASSWORD', '')
-    email_to      = os.environ.get('EMAIL_RECIPIENT', gmail_user) or 'elvis814@gmail.com'
-    gemini_key    = os.environ.get('GEMINI_API_KEY', '')
-    # ── Gemini 功能開關（設為 False 可完全停用，避免 API 費用）──────
-    # 如需重新啟用，將下方改為 GEMINI_ENABLED = True 即可
-    GEMINI_ENABLED = False
-    if not GEMINI_ENABLED:
-        gemini_key = ''
-        print("ℹ️  Gemini AI 功能已停用（GEMINI_ENABLED=False）")
+    mode = os.environ.get('FETCH_MODE', 'all')
 
     print(f"\n{'='*50}")
     print(f"創見資訊新聞監控 — 自動抓取")
@@ -1055,23 +1006,8 @@ def main():
         print(f"❌ Firebase 初始化失敗: {e}")
         sys.exit(1)
 
-    # ─── 下午 3 點英文早報（usMarket）────────────────────────────
-    if mode == 'email_report':
-        send_afternoon_email(db, gmail_user, gmail_pw, email_to, gemini_key)
-        print(f"\n{'='*50}\n下午早報完成！\n{'='*50}\n")
-        return
-
-    # ─── 早上 9 點繁中早報（twMarket）────────────────────────────
-    if mode == 'morning_email':
-        send_morning_email(db, gmail_user, gmail_pw, email_to, gemini_key)
-        print(f"\n{'='*50}\n早上早報完成！\n{'='*50}\n")
-        return
-
-    # ─── 補摘要模式 ───────────────────────────────────────────────
-    if mode == 'backfill_summaries':
-        backfill_summaries(db, gemini_key)
-        print(f"\n{'='*50}\n補摘要完成！\n{'='*50}\n")
-        return
+    # 註：定時郵件（email_report / morning_email）與 Gemini 摘要（backfill_summaries）
+    # 功能已於 2026-07 移除；如需恢復請參考 git 歷史。
 
     # ─── MSN 清理模式 ─────────────────────────────────────────────
     if mode == 'cleanup_msn':
@@ -1097,8 +1033,7 @@ def main():
     for src in sources:
         articles = fetch_source(src)
         for a in articles:
-            import re as _re
-            norm_title = _re.sub(r'[\s\W]+', '', (a.get('title') or '')).lower()[:30]
+            norm_title = normalize_title(a.get('title'))
             if norm_title and norm_title in seen_titles:
                 continue
             if a['link'] and a['link'] in seen_links:
@@ -1108,12 +1043,6 @@ def main():
             all_articles.append(a)
 
     print(f"\n📊 共抓取 {len(all_articles)} 則不重複新聞")
-
-    # ─── Gemini 摘要（上游市場新聞）───
-    if gemini_key:
-        summarize_us_news_with_gemini(all_articles, gemini_key)
-    else:
-        print("\n  [Gemini] 未設定 GEMINI_API_KEY，跳過摘要")
 
     # ─── 儲存到 Firestore ───
     if all_articles:
@@ -1314,14 +1243,7 @@ def fetch_mops_material_news(db):
     }
     BASE_UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
 
-    def roc_to_iso(roc_str):
-        """'114/04/24' or '114-04-24' → '2025-04-24'"""
-        try:
-            s = roc_str.strip().replace('-', '/')
-            parts = s.split('/')
-            return f"{int(parts[0])+1911}-{parts[1]}-{parts[2]}"
-        except Exception:
-            return roc_str
+    roc_to_iso = roc_date_to_iso   # 民國日期轉換（模組層級純函式，見上方定義）
 
     print(f"\n📢 抓取競品重大訊息（MOPS 公開資訊觀測站）...")
     all_records = []
@@ -1463,552 +1385,6 @@ def fetch_mops_material_news(db):
         print(f"  ✅ 重大訊息已儲存 {len(all_records)} 筆（MOPS + FinMind）")
     else:
         print("  ⚠ 未取得重大訊息")
-
-
-def backfill_summaries(db, api_key, batch_size=50):
-    """
-    從 Firestore 撈出所有沒有 summary 的上游市場新聞，
-    用 Gemini 補上摘要後回寫 Firestore。
-    """
-    if not api_key:
-        print("  [backfill] 未設定 GEMINI_API_KEY，跳過")
-        return
-
-    print(f"\n🔄 補摘要模式：查詢沒有 summary 的上游市場新聞...")
-
-    try:
-        docs = (db.collection('news')
-                .order_by('pubDate', direction=firestore.Query.DESCENDING)
-                .limit(500)
-                .stream())
-        candidates = []
-        for doc in docs:
-            d = doc.to_dict()
-            if d.get('cat') in ('usMarket', 'supplier') and not d.get('summary'):
-                candidates.append((doc.id, d))
-        print(f"  找到 {len(candidates)} 則需要補摘要的文章")
-    except Exception as e:
-        print(f"  ✗ Firestore 查詢失敗: {e}")
-        return
-
-    if not candidates:
-        print("  ✅ 所有文章都已有摘要")
-        return
-
-    try:
-        from google import genai
-        client = genai.Client(api_key=api_key)
-        # 動態選模型
-        MODEL = None
-        try:
-            available = [m.name for m in client.models.list()
-                         if 'generateContent' in str(getattr(m, 'supported_actions', None) or getattr(m, 'supported_generation_methods', []))
-                         and 'gemini' in m.name.lower()]
-            preferred = [m for m in available if 'flash' in m and 'thinking' not in m]
-            chosen = preferred or available
-            if chosen:
-                MODEL = chosen[0].replace('models/', '')
-        except Exception:
-            pass
-        if not MODEL:
-            MODEL = 'gemini-1.5-flash'
-        print(f"  使用模型：{MODEL}")
-    except Exception as e:
-        print(f"  ✗ Gemini 初始化失敗: {e}")
-        return
-
-    PROMPT_EN = (
-        'You are a semiconductor and memory industry analyst. '
-        'Summarize the following news in English with 2-3 bullet points. '
-        'Format: •Point one •Point two •Point three (separated by •, no line breaks). '
-        'Each point under 25 words. Output points only, no preamble.\n\n'
-        'Title: {title}\nContent: {content}'
-    )
-    PROMPT_ZH = (
-        '你是專業的半導體暨記憶體產業分析師。'
-        '請用繁體中文，以 2-3 個重點條列摘要以下新聞的核心內容。'
-        '格式：•重點一 •重點二 •重點三（用 • 分隔，不要換行）'
-        '每個重點不超過 30 字，直接輸出重點，不要有前言。\n\n'
-        '標題：{title}\n內文：{content}'
-    )
-
-    updated = 0
-    for i, (doc_id, data) in enumerate(candidates[:batch_size]):
-        title   = data.get('title', '')
-        content = data.get('content', '')
-        if not title:
-            continue
-        try:
-            # usMarket 用英文摘要，twMarket / supplier 用繁中
-            tmpl = PROMPT_EN if data.get('cat') == 'usMarket' else PROMPT_ZH
-            resp = client.models.generate_content(
-                model=MODEL,
-                contents=tmpl.format(title=title, content=content[:800]),
-            )
-            summary = resp.text.strip()
-            db.collection('news').document(doc_id).update({'summary': summary})
-            updated += 1
-            print(f"  [{i+1}/{min(len(candidates), batch_size)}] ✓ {title[:50]}…")
-        except Exception as e:
-            print(f"  [{i+1}/{min(len(candidates), batch_size)}] ✗ {e}")
-        time.sleep(1)
-
-    print(f"\n  ✅ 補摘要完成，共更新 {updated} 則文章")
-
-
-def summarize_us_news_with_gemini(articles, api_key, max_articles=20):
-    """
-    用 Gemini（gemini-2.0-flash）為上游市場新聞生成繁體中文重點摘要
-    摘要格式：•重點一 •重點二 •重點三
-    摘要存入 article['summary']
-    需要 GEMINI_API_KEY（從 aistudio.google.com 產生）
-    """
-    if not api_key:
-        print("  [Gemini] 未設定 GEMINI_API_KEY，跳過摘要")
-        return
-
-    try:
-        from google import genai
-        client = genai.Client(api_key=api_key)
-    except ImportError:
-        print("  [Gemini] 未安裝 google-genai 套件，跳過摘要")
-        return
-    except Exception as e:
-        print(f"  [Gemini] 初始化失敗: {e}")
-        return
-
-    targets = [a for a in articles
-               if a.get('cat') in ('usMarket', 'supplier') and not a.get('summary')]
-    targets = targets[:max_articles]
-
-    if not targets:
-        print("  [Gemini] 無需摘要（無上游新聞或已有 summary）")
-        return
-
-    print(f"\n🤖 Gemini 摘要生成（共 {len(targets)} 則上游市場新聞）...")
-
-    # usMarket 文章用英文摘要，其他用繁中
-    PROMPT_EN = (
-        'You are a semiconductor and memory industry analyst. '
-        'Summarize the following news in English with 2-3 bullet points. '
-        'Format: •Point one •Point two •Point three (separated by •, no line breaks). '
-        'Each point under 25 words. Output points only, no preamble.\n\n'
-        'Title: {title}\nContent: {content}'
-    )
-    PROMPT_ZH = (
-        '你是專業的半導體暨記憶體產業分析師。'
-        '請用繁體中文，以 2-3 個重點條列摘要以下新聞的核心內容。'
-        '格式：•重點一 •重點二 •重點三（用 • 分隔，不要換行）'
-        '每個重點不超過 30 字，直接輸出重點，不要有前言。\n\n'
-        '標題：{title}\n內文：{content}'
-    )
-
-    # 動態查詢可用模型，選出最新的 flash 模型
-    MODEL = None
-    try:
-        available = []
-        for m in client.models.list():
-            name = m.name
-            methods = getattr(m, 'supported_actions', None) or getattr(m, 'supported_generation_methods', [])
-            if 'generateContent' in str(methods) and 'gemini' in name.lower():
-                available.append(name)
-        preferred = [m for m in available if 'flash' in m and 'thinking' not in m]
-        chosen = (preferred or available)
-        if chosen:
-            MODEL = chosen[0].replace('models/', '')
-    except Exception:
-        pass
-    if not MODEL:
-        MODEL = 'gemini-1.5-flash'
-    print(f"  [Gemini] 使用模型：{MODEL}")
-
-    for i, article in enumerate(targets):
-        title   = article.get('title', '')
-        content = article.get('content', '')
-        if not title:
-            continue
-        try:
-            # usMarket 用英文摘要，twMarket / supplier 用繁中
-            tmpl = PROMPT_EN if article.get('cat') == 'usMarket' else PROMPT_ZH
-            prompt = tmpl.format(title=title, content=content[:800])
-            resp = client.models.generate_content(
-                model=MODEL,
-                contents=prompt,
-            )
-            summary = resp.text.strip()
-            article['summary'] = summary
-            print(f"  [{i+1}/{len(targets)}] ✓ {title[:45]}…")
-        except Exception as e:
-            print(f"  [{i+1}/{len(targets)}] ✗ {e}")
-        time.sleep(1)   # 避免超過 rate limit
-
-
-# ══════════════════════════════════════════════════════════════
-# Email 共用工具
-# ══════════════════════════════════════════════════════════════
-
-def _get_gemini_client_and_model(api_key):
-    """初始化 Gemini client 並自動選模型，回傳 (client, model_id) 或 (None, None)"""
-    if not api_key:
-        return None, None
-    try:
-        from google import genai
-        gclient = genai.Client(api_key=api_key)
-        MODEL = None
-        try:
-            available = [m.name for m in gclient.models.list()
-                         if 'generateContent' in str(getattr(m, 'supported_actions', None)
-                                                     or getattr(m, 'supported_generation_methods', []))
-                         and 'gemini' in m.name.lower()]
-            preferred = [m for m in available if 'flash' in m and 'thinking' not in m]
-            chosen = preferred or available
-            if chosen:
-                MODEL = chosen[0].replace('models/', '')
-        except Exception:
-            pass
-        if not MODEL:
-            MODEL = 'gemini-1.5-flash'
-        return gclient, MODEL
-    except Exception as e:
-        print(f"  ⚠ Gemini 初始化失敗: {e}")
-        return None, None
-
-
-def _gemini_summarize(gclient, model, articles, lang='zh'):
-    """對 articles 即時補 Gemini 摘要（修改 article['summary'] in-place）"""
-    if not gclient:
-        return
-    if lang == 'en':
-        PROMPT = (
-            'You are a semiconductor and memory industry analyst. '
-            'Summarize the following news in English with 2-3 bullet points. '
-            'Format: •Point one •Point two •Point three (separated by •, no line breaks). '
-            'Each point under 25 words. Output points only, no preamble.\n\n'
-            'Title: {title}\nContent: {content}'
-        )
-    else:
-        PROMPT = (
-            '你是專業的半導體暨記憶體產業分析師。'
-            '請用繁體中文，以 2-3 個重點條列摘要以下新聞的核心內容。'
-            '格式：•重點一 •重點二 •重點三（用 • 分隔，不要換行）'
-            '每個重點不超過 30 字，直接輸出重點，不要有前言。\n\n'
-            '標題：{title}\n內文：{content}'
-        )
-    for a in articles:
-        if a.get('summary'):
-            continue
-        try:
-            resp = gclient.models.generate_content(
-                model=model,
-                contents=PROMPT.format(
-                    title=a.get('title', ''),
-                    content=a.get('content', '')[:800]
-                ),
-            )
-            a['summary'] = resp.text.strip()
-            print(f"    ✓ {a.get('title','')[:50]}…")
-        except Exception as e:
-            print(f"    ✗ {e}")
-        time.sleep(1)
-
-
-def _fmt_date(pub):
-    if hasattr(pub, 'strftime'):
-        return pub.strftime('%Y-%m-%d')
-    return str(pub)[:10] if pub else '—'
-
-
-def _send_smtp(gmail_user, gmail_app_password, recipient, subject, html):
-    import smtplib, ssl
-    from email.mime.multipart import MIMEMultipart
-    from email.mime.text import MIMEText
-    msg = MIMEMultipart('alternative')
-    msg['Subject'] = subject
-    msg['From']    = gmail_user
-    msg['To']      = recipient
-    msg.attach(MIMEText(html, 'html', 'utf-8'))
-    ctx = ssl.create_default_context()
-    with smtplib.SMTP_SSL('smtp.gmail.com', 465, context=ctx) as server:
-        server.login(gmail_user, gmail_app_password)
-        server.send_message(msg)
-
-
-def _bullet_block_html(summary, color='#374151', bg='#f9fafb', border='#e5e7eb'):
-    if not summary:
-        return ''
-    bullets = [s.strip() for s in summary.split('•') if s.strip()]
-    if not bullets:
-        return ''
-    items = ''.join(
-        f'<li style="margin:4px 0;color:{color};font-size:13px;line-height:1.6">{b}</li>'
-        for b in bullets
-    )
-    return (f'<ul style="margin:10px 0 0 0;padding:10px 10px 10px 28px;'
-            f'background:{bg};border:1px solid {border};border-radius:6px;list-style:disc">'
-            f'{items}</ul>')
-
-
-# ══════════════════════════════════════════════════════════════
-# 下午 3 點英文郵件（usMarket — TrendForce / AI / IPC / AIoT）
-# ══════════════════════════════════════════════════════════════
-
-def _build_afternoon_html(articles, now_tw):
-    BRAND = '#960014'
-    day_map = {'Monday':'Mon','Tuesday':'Tue','Wednesday':'Wed',
-               'Thursday':'Thu','Friday':'Fri'}
-    day = day_map.get(now_tw.strftime('%A'), now_tw.strftime('%A'))
-    date_str = now_tw.strftime(f'%B %-d, %Y ({day})')
-
-    items_html = ''
-    for i, a in enumerate(articles, 1):
-        title  = a.get('title', '(No title)')
-        link   = a.get('link', '#')
-        source = a.get('mediaName') or a.get('sourceName') or 'Unknown'
-        date_f = _fmt_date(a.get('pubDate'))
-        sb     = _bullet_block_html(a.get('summary',''), color='#1e3a5f', bg='#eff6ff', border='#bfdbfe')
-
-        items_html += f'''
-        <div style="background:#fff;border:1px solid #e5e7eb;border-left:4px solid {BRAND};
-                    border-radius:8px;padding:16px;margin-bottom:16px">
-          <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;flex-wrap:wrap">
-            <span style="background:{BRAND};color:white;font-size:11px;font-weight:700;
-                         padding:2px 10px;border-radius:20px">#{i}</span>
-            <span style="color:#6b7280;font-size:12px">{source}</span>
-            <span style="color:#d1d5db;font-size:12px">·</span>
-            <span style="color:#6b7280;font-size:12px">{date_f}</span>
-          </div>
-          <a href="{link}" target="_blank"
-             style="font-size:15px;font-weight:600;color:#111827;text-decoration:none;
-                    line-height:1.4;display:block;margin-bottom:4px">{title}</a>
-          {sb}
-          <a href="{link}" target="_blank"
-             style="display:inline-block;margin-top:10px;font-size:12px;color:{BRAND};
-                    text-decoration:underline;font-weight:500">Read full article →</a>
-        </div>'''
-
-    return f'''<!DOCTYPE html>
-<html lang="en">
-<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"></head>
-<body style="margin:0;padding:0;background:#f3f4f6;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif">
-  <div style="max-width:640px;margin:24px auto;padding:0 16px">
-    <div style="background:{BRAND};border-radius:12px 12px 0 0;padding:24px 28px">
-      <h1 style="color:white;margin:0 0 4px;font-size:20px;font-weight:700">
-        📊 Upstream Market Report
-      </h1>
-      <p style="color:rgba(255,255,255,0.8);margin:0;font-size:13px">
-        {date_str} &nbsp;|&nbsp; Transcend Information (2451) News Monitor
-      </p>
-    </div>
-    <div style="background:white;border-radius:0 0 12px 12px;padding:24px 28px;
-                border:1px solid #e5e7eb;border-top:none">
-      <p style="color:#6b7280;font-size:13px;margin:0 0 20px">
-        Top <strong>5 upstream market stories</strong> today — DRAM, NAND Flash, AI, IPC &amp; AIoT demand.
-        AI-generated key points included.
-      </p>
-      {items_html}
-      <hr style="border:none;border-top:1px solid #f3f4f6;margin:24px 0 16px">
-      <p style="color:#9ca3af;font-size:11px;text-align:center;margin:0;line-height:1.8">
-        Automated email · Sent by GitHub Actions every weekday at <strong>15:00 CST</strong><br>
-        To unsubscribe, disable <code>daily-email.yml</code> in GitHub Actions.
-      </p>
-    </div>
-  </div>
-</body>
-</html>'''
-
-
-def send_afternoon_email(db, gmail_user, gmail_app_password, recipient, gemini_key=''):
-    """下午 3 點：英文上游市場郵件（usMarket，過濾創見/競品/新品）"""
-    print(f"\n📧 準備發送下午英文上游市場早報...")
-    if not gmail_user or not gmail_app_password:
-        print("  ⚠ 未設定 GMAIL_USER / GMAIL_APP_PASSWORD，跳過")
-        return
-
-    now_tw = datetime.datetime.now(datetime.timezone(datetime.timedelta(hours=8)))
-
-    try:
-        docs = (db.collection('news')
-                .order_by('pubDate', direction=firestore.Query.DESCENDING)
-                .limit(1000)
-                .stream())
-        all_news = [doc.to_dict() for doc in docs]
-    except Exception as e:
-        print(f"  ✗ Firestore 查詢失敗: {e}")
-        return
-
-    pool = [a for a in all_news
-            if a.get('cat') == 'usMarket' and _is_us_media(a)]
-    print(f"  usMarket（美國/國際媒體）候選：{len(pool)} 則")
-
-    # 排序：TrendForce 優先 > 有摘要 > 最新
-    def sort_key(a):
-        src = str(a.get('sourceName') or a.get('mediaName') or '')
-        return (1 if 'trendforce' in src.lower() else 0,
-                1 if a.get('summary') else 0,
-                a.get('pubDate').isoformat() if hasattr(a.get('pubDate'), 'isoformat') else str(a.get('pubDate') or ''))
-    pool.sort(key=sort_key, reverse=True)
-
-    FILTERS = [is_transcend_news, is_competitor_news, is_new_product_news]
-    top5 = pick_diverse(pool, n=5, filters=FILTERS)
-    print(f"  過濾後選出 {len(top5)} 則")
-
-    if not top5:
-        print("  ⚠ 無符合條件新聞，跳過寄信")
-        return
-
-    # 強制用英文重新摘要（覆蓋可能存在的舊中文摘要）
-    import re as _re
-    def _has_chinese(s):
-        return bool(_re.search(r'[一-鿿]', s or ''))
-    needs_en = [a for a in top5 if not a.get('summary') or _has_chinese(a.get('summary', ''))]
-    if gemini_key and needs_en:
-        print(f"  🤖 英文摘要補齊（{len(needs_en)} 則）...")
-        gclient, model = _get_gemini_client_and_model(gemini_key)
-        # 清除舊中文摘要，強制重新生成英文版
-        for a in needs_en:
-            a['_old_summary'] = a.pop('summary', None)
-        _gemini_summarize(gclient, model, needs_en, lang='en')
-        # 如果 Gemini 失敗，還原舊摘要
-        for a in needs_en:
-            if not a.get('summary') and a.get('_old_summary'):
-                a['summary'] = a['_old_summary']
-            a.pop('_old_summary', None)
-    elif not gemini_key:
-        print("  ⚠ 未設定 GEMINI_API_KEY，跳過英文摘要補齊")
-
-    html = _build_afternoon_html(top5, now_tw)
-    subject = f"📊 Upstream Market Report {now_tw.strftime('%Y/%m/%d')} | Transcend News Monitor"
-    try:
-        _send_smtp(gmail_user, gmail_app_password, recipient, subject, html)
-        print(f"  ✅ 下午英文早報已寄出 → {recipient}（{len(top5)} 則）")
-    except Exception as e:
-        print(f"  ✗ 寄信失敗: {e}")
-
-
-# ══════════════════════════════════════════════════════════════
-# 早上 9 點繁中郵件（twMarket — 台灣科技媒體）
-# ══════════════════════════════════════════════════════════════
-
-def _build_morning_html(articles, now_tw):
-    BRAND = '#960014'
-    day_map = {'Monday':'週一','Tuesday':'週二','Wednesday':'週三',
-               'Thursday':'週四','Friday':'週五'}
-    day = day_map.get(now_tw.strftime('%A'), now_tw.strftime('%A'))
-    date_str = now_tw.strftime(f'%Y年%-m月%-d日（{day}）')
-
-    items_html = ''
-    for i, a in enumerate(articles, 1):
-        title  = a.get('title', '（無標題）')
-        link   = a.get('link', '#')
-        source = a.get('mediaName') or a.get('sourceName') or '未知來源'
-        date_f = _fmt_date(a.get('pubDate'))
-        sb     = _bullet_block_html(a.get('summary',''), color='#374151', bg='#f9fafb', border='#e5e7eb')
-
-        items_html += f'''
-        <div style="background:#fff;border:1px solid #e5e7eb;border-left:4px solid {BRAND};
-                    border-radius:8px;padding:16px;margin-bottom:16px">
-          <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;flex-wrap:wrap">
-            <span style="background:{BRAND};color:white;font-size:11px;font-weight:700;
-                         padding:2px 10px;border-radius:20px">#{i}</span>
-            <span style="color:#6b7280;font-size:12px">{source}</span>
-            <span style="color:#d1d5db;font-size:12px">·</span>
-            <span style="color:#6b7280;font-size:12px">{date_f}</span>
-          </div>
-          <a href="{link}" target="_blank"
-             style="font-size:15px;font-weight:600;color:#111827;text-decoration:none;
-                    line-height:1.4;display:block;margin-bottom:4px">{title}</a>
-          {sb}
-          <a href="{link}" target="_blank"
-             style="display:inline-block;margin-top:10px;font-size:12px;color:{BRAND};
-                    text-decoration:underline;font-weight:500">查看原文 →</a>
-        </div>'''
-
-    return f'''<!DOCTYPE html>
-<html lang="zh-TW">
-<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"></head>
-<body style="margin:0;padding:0;background:#f3f4f6;
-             font-family:-apple-system,BlinkMacSystemFont,'Segoe UI','Noto Sans TC',sans-serif">
-  <div style="max-width:640px;margin:24px auto;padding:0 16px">
-    <div style="background:{BRAND};border-radius:12px 12px 0 0;padding:24px 28px">
-      <h1 style="color:white;margin:0 0 4px;font-size:20px;font-weight:700">
-        🇹🇼 台灣科技產業早報
-      </h1>
-      <p style="color:rgba(255,255,255,0.8);margin:0;font-size:13px">
-        {date_str} &nbsp;|&nbsp; 創見資訊（2451）新聞監控系統
-      </p>
-    </div>
-    <div style="background:white;border-radius:0 0 12px 12px;padding:24px 28px;
-                border:1px solid #e5e7eb;border-top:none">
-      <p style="color:#6b7280;font-size:13px;margin:0 0 20px">
-        今日台灣科技媒體精選 <strong>5 則重要新聞</strong>，涵蓋 DRAM、Flash、AI、AIoT、IPC 及智慧裝置等產業動態，附 AI 重點摘要。
-      </p>
-      {items_html}
-      <hr style="border:none;border-top:1px solid #f3f4f6;margin:24px 0 16px">
-      <p style="color:#9ca3af;font-size:11px;text-align:center;margin:0;line-height:1.8">
-        此為自動發送郵件 · 由 GitHub Actions 於每個工作日 <strong>09:00</strong> 寄出<br>
-        如需取消訂閱，請至 GitHub Actions 停用 <code>morning-email.yml</code> workflow
-      </p>
-    </div>
-  </div>
-</body>
-</html>'''
-
-
-def send_morning_email(db, gmail_user, gmail_app_password, recipient, gemini_key=''):
-    """早上 9 點：繁體中文台灣科技媒體早報（twMarket，過濾創見/競品/新品）"""
-    print(f"\n📧 準備發送早上繁中台灣科技早報...")
-    if not gmail_user or not gmail_app_password:
-        print("  ⚠ 未設定 GMAIL_USER / GMAIL_APP_PASSWORD，跳過")
-        return
-
-    now_tw = datetime.datetime.now(datetime.timezone(datetime.timedelta(hours=8)))
-
-    try:
-        docs = (db.collection('news')
-                .order_by('pubDate', direction=firestore.Query.DESCENDING)
-                .limit(1000)
-                .stream())
-        all_news = [doc.to_dict() for doc in docs]
-    except Exception as e:
-        print(f"  ✗ Firestore 查詢失敗: {e}")
-        return
-
-    pool = [a for a in all_news
-            if a.get('cat') == 'twMarket' and _is_tw_media(a)]
-    print(f"  twMarket（台灣媒體）候選：{len(pool)} 則")
-
-    if not pool:
-        print("  ⚠ 無台灣市場新聞，跳過寄信")
-        return
-
-    # 排序：有摘要 > 最新
-    def sort_key(a):
-        return (1 if a.get('summary') else 0,
-                a.get('pubDate').isoformat() if hasattr(a.get('pubDate'), 'isoformat') else str(a.get('pubDate') or ''))
-    pool.sort(key=sort_key, reverse=True)
-
-    FILTERS = [is_transcend_news, is_competitor_news, is_new_product_news]
-    top5 = pick_diverse(pool, n=5, filters=FILTERS)
-    print(f"  過濾後選出 {len(top5)} 則")
-
-    if not top5:
-        print("  ⚠ 無符合條件新聞，跳過寄信")
-        return
-
-    # 補摘要（繁中）
-    needs = [a for a in top5 if not a.get('summary')]
-    if needs and gemini_key:
-        print(f"  🤖 即時補摘要（{len(needs)} 則）...")
-        gclient, model = _get_gemini_client_and_model(gemini_key)
-        _gemini_summarize(gclient, model, needs, lang='zh')
-
-    html = _build_morning_html(top5, now_tw)
-    subject = f"🇹🇼 台灣科技產業早報 {now_tw.strftime('%Y/%m/%d')} | 創見資訊新聞監控"
-    try:
-        _send_smtp(gmail_user, gmail_app_password, recipient, subject, html)
-        print(f"  ✅ 早上繁中早報已寄出 → {recipient}（{len(top5)} 則）")
-    except Exception as e:
-        print(f"  ✗ 寄信失敗: {e}")
 
 
 def fetch_daily_trading(db, stock_code='2451'):
