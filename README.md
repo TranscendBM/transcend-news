@@ -12,11 +12,11 @@
 
 ```
 使用者瀏覽器
-     ↕ 讀取新聞資料
-Firebase Firestore（transcend-news-monitor）← GitHub Actions（每 30 分鐘自動抓取）
-     ↑
-Firebase Hosting（站台 transcend-news，public/index.html 前端）
-GitHub（TranscendBM/transcend-news，僅作版本控管與備份）
+     ↕ 讀取新聞資料（股價 onSnapshot 即時推送）
+Firebase Firestore（transcend-news-monitor）← Cloud Functions 排程（transcend-news-tbm / asia-east1）
+     ↑                                          股價每 1 分鐘（交易時段）、新聞每 15 分鐘、
+Firebase Hosting（站台 transcend-news）          社群每 2 小時、財務每日（月初加密）
+GitHub（TranscendBM/transcend-news，版本控管；Actions 僅剩手動備援觸發）
 ```
 
 ## 🚀 前端部署（Firebase Hosting）
@@ -29,6 +29,19 @@ npm run deploy
 
 （需以 tselvis814@gmail.com 登入 firebase CLI；Firebase 專案為 `transcend-news-tbm`、Hosting 站台為 `transcend-news`，
 新聞資料仍存於原 Firebase 專案 `transcend-news-monitor` 的 Firestore。）
+
+## ⏰ 排程部署（Cloud Functions）
+
+排程程式在 `functions/`（Python 3.11、asia-east1），改完後：
+
+```bash
+cd functions && python3.11 -m venv venv && ./venv/bin/pip install -r requirements.txt  # 第一次才需要
+firebase deploy --only functions
+```
+
+跨專案寫入用的金鑰存在 Secret Manager 的 `MONITOR_SERVICE_ACCOUNT`
+（transcend-news-monitor 的 service account JSON），更新方式：
+`firebase functions:secrets:set MONITOR_SERVICE_ACCOUNT --data-file <金鑰.json>`。
 
 ---
 
@@ -170,7 +183,7 @@ npm run deploy
 | 網站可訪問 | https://transcend-news.web.app 能正常開啟 |
 | Firebase 橫幅顯示 | 頁面顯示「Firebase 已連線」 |
 | 手動觸發 Actions | GitHub → Actions → 「自動抓取新聞」→ Run workflow |
-| 自動排程 | fetch-news 每 30 分鐘、update-stocks 交易時段每 5 分鐘（GitHub 排程常有延遲） |
+| 自動排程 | Cloud Functions：股價交易時段每 1 分鐘、新聞每 15 分鐘（見 functions/main.py） |
 | 新聞出現 | 重新整理頁面，新聞應從 Firebase 載入 |
 | 單元測試 | `python3 -m unittest discover -s tests` 全數通過 |
 

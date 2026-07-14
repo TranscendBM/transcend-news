@@ -1,11 +1,8 @@
 name: 自動抓取新聞
 
 on:
-  # ─── 定時排程：每 30 分鐘抓一次，全天 24 小時 ───
-  schedule:
-    - cron: '*/30 * * * *'
-
-  # ─── 手動觸發（可在 GitHub Actions 頁面手動執行）───
+  # 定時排程已於 2026-07 移交 Cloud Functions（functions/main.py news_job 每 15 分鐘），
+  # 此 workflow 僅保留手動觸發作為備援。
   workflow_dispatch:
     inputs:
       mode:

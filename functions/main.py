@@ -1,7 +1,7 @@
 """
 創見新聞監控 — Cloud Functions 排程進入點
 部署於 Firebase 專案 transcend-news-tbm（asia-east1），
-透過 Secret Manager 的 FIREBASE_SERVICE_ACCOUNT 跨專案寫入
+透過 Secret Manager 的 MONITOR_SERVICE_ACCOUNT 跨專案寫入
 舊專案 transcend-news-monitor 的 Firestore。
 
 排程總覽（皆為台灣時間 Asia/Taipei）：
@@ -27,7 +27,7 @@ import fetch_news
 
 TZ = 'Asia/Taipei'
 REGION = 'asia-east1'
-FIREBASE_SERVICE_ACCOUNT = SecretParam('FIREBASE_SERVICE_ACCOUNT')
+MONITOR_SERVICE_ACCOUNT = SecretParam('MONITOR_SERVICE_ACCOUNT')
 
 _db = None
 
@@ -36,7 +36,7 @@ def get_db():
     """以 Secret 中的 service account 初始化（跨專案指向 transcend-news-monitor）"""
     global _db
     if _db is None:
-        sa_dict = json.loads(FIREBASE_SERVICE_ACCOUNT.value.strip())
+        sa_dict = json.loads(MONITOR_SERVICE_ACCOUNT.value.strip())
         cred = credentials.Certificate(sa_dict)
         if not firebase_admin._apps:
             firebase_admin.initialize_app(cred)
@@ -53,7 +53,7 @@ def _tw_now():
 @scheduler_fn.on_schedule(
     schedule='* 9-13 * * 1-5', timezone=TZ, region=REGION,
     memory=MemoryOption.MB_256, timeout_sec=120,
-    secrets=[FIREBASE_SERVICE_ACCOUNT])
+    secrets=[MONITOR_SERVICE_ACCOUNT])
 def stocks_job(event: scheduler_fn.ScheduledEvent) -> None:
     now = _tw_now().replace(tzinfo=None)
     if not fetch_news.is_tw_market_open(now):
@@ -66,7 +66,7 @@ def stocks_job(event: scheduler_fn.ScheduledEvent) -> None:
 @scheduler_fn.on_schedule(
     schedule='*/15 * * * *', timezone=TZ, region=REGION,
     memory=MemoryOption.MB_512, timeout_sec=540,
-    secrets=[FIREBASE_SERVICE_ACCOUNT])
+    secrets=[MONITOR_SERVICE_ACCOUNT])
 def news_job(event: scheduler_fn.ScheduledEvent) -> None:
     fetch_news.fetch_and_save_news(get_db(), mode='all')
 
@@ -75,7 +75,7 @@ def news_job(event: scheduler_fn.ScheduledEvent) -> None:
 @scheduler_fn.on_schedule(
     schedule='10 8-22/2 * * *', timezone=TZ, region=REGION,
     memory=MemoryOption.MB_512, timeout_sec=540,
-    secrets=[FIREBASE_SERVICE_ACCOUNT])
+    secrets=[MONITOR_SERVICE_ACCOUNT])
 def community_job(event: scheduler_fn.ScheduledEvent) -> None:
     fetch_news.fetch_and_save_community(get_db())
 
@@ -84,7 +84,7 @@ def community_job(event: scheduler_fn.ScheduledEvent) -> None:
 @scheduler_fn.on_schedule(
     schedule='40 13,17 * * 1-5', timezone=TZ, region=REGION,
     memory=MemoryOption.MB_256, timeout_sec=300,
-    secrets=[FIREBASE_SERVICE_ACCOUNT])
+    secrets=[MONITOR_SERVICE_ACCOUNT])
 def trading_job(event: scheduler_fn.ScheduledEvent) -> None:
     db = get_db()
     fetch_news.fetch_stock_prices(db)   # 收盤價一併校正
@@ -95,7 +95,7 @@ def trading_job(event: scheduler_fn.ScheduledEvent) -> None:
 @scheduler_fn.on_schedule(
     schedule='30 17 * * *', timezone=TZ, region=REGION,
     memory=MemoryOption.MB_512, timeout_sec=540,
-    secrets=[FIREBASE_SERVICE_ACCOUNT])
+    secrets=[MONITOR_SERVICE_ACCOUNT])
 def finance_job(event: scheduler_fn.ScheduledEvent) -> None:
     fetch_news.fetch_all_financials(get_db())
 
@@ -104,6 +104,6 @@ def finance_job(event: scheduler_fn.ScheduledEvent) -> None:
 @scheduler_fn.on_schedule(
     schedule='15 9-18 1-10 * *', timezone=TZ, region=REGION,
     memory=MemoryOption.MB_512, timeout_sec=540,
-    secrets=[FIREBASE_SERVICE_ACCOUNT])
+    secrets=[MONITOR_SERVICE_ACCOUNT])
 def finance_early_month_job(event: scheduler_fn.ScheduledEvent) -> None:
     fetch_news.fetch_all_financials(get_db())
