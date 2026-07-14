@@ -1,5 +1,18 @@
 {
   "projects": {
     "default": "transcend-news-tbm"
-  }
+  },
+  "targets": {
+    "transcend-news-tbm": {
+      "hosting": {
+        "main": [
+          "transcend-news"
+        ],
+        "old": [
+          "transcend-news-tbm"
+        ]
+      }
+    }
+  },
+  "etags": {}
 }

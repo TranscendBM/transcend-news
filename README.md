@@ -3,7 +3,8 @@
 > **Transcend Information (2451) News Intelligence**
 > Firebase Hosting 前端 + GitHub Actions 自動排程 + Firebase Firestore 雲端儲存
 
-**正式網址：https://transcend-news-tbm.web.app**
+**正式網址：https://transcend-news.web.app**
+（舊網址 transcend-news-tbm.web.app 已 301 轉址到新網址）
 
 ---
 
@@ -14,7 +15,7 @@
      ↕ 讀取新聞資料
 Firebase Firestore（transcend-news-monitor）← GitHub Actions（每 30 分鐘自動抓取）
      ↑
-Firebase Hosting（transcend-news-tbm，public/index.html 前端）
+Firebase Hosting（站台 transcend-news，public/index.html 前端）
 GitHub（TranscendBM/transcend-news，僅作版本控管與備份）
 ```
 
@@ -26,7 +27,7 @@ GitHub（TranscendBM/transcend-news，僅作版本控管與備份）
 npm run deploy
 ```
 
-（需以 tselvis814@gmail.com 登入 firebase CLI；Hosting 專案為 `transcend-news-tbm`，
+（需以 tselvis814@gmail.com 登入 firebase CLI；Firebase 專案為 `transcend-news-tbm`、Hosting 站台為 `transcend-news`，
 新聞資料仍存於原 Firebase 專案 `transcend-news-monitor` 的 Firestore。）
 
 ---
