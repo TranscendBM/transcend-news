@@ -1,0 +1,7 @@
+{
+  "name": "transcend-news",
+  "private": true,
+  "scripts": {
+    "deploy": "npx -y firebase-tools deploy --only hosting"
+  }
+}

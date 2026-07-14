@@ -1,7 +1,9 @@
 # 創見資訊新聞監控系統
 
 > **Transcend Information (2451) News Intelligence**
-> GitHub Pages 前端 + GitHub Actions 自動排程 + Firebase Firestore 雲端儲存
+> Firebase Hosting 前端 + GitHub Actions 自動排程 + Firebase Firestore 雲端儲存
+
+**正式網址：https://transcend-news-tbm.web.app**
 
 ---
 
@@ -10,10 +12,22 @@
 ```
 使用者瀏覽器
      ↕ 讀取新聞資料
-Firebase Firestore ← GitHub Actions（08:00 / 16:00 台灣時間自動抓取）
+Firebase Firestore（transcend-news-monitor）← GitHub Actions（每 30 分鐘自動抓取）
      ↑
-GitHub Pages（index.html 前端）
+Firebase Hosting（transcend-news-tbm，public/index.html 前端）
+GitHub（TranscendBM/transcend-news，僅作版本控管與備份）
 ```
+
+## 🚀 前端部署（Firebase Hosting）
+
+改完 `public/index.html` 後：
+
+```bash
+npm run deploy
+```
+
+（需以 tselvis814@gmail.com 登入 firebase CLI；Hosting 專案為 `transcend-news-tbm`，
+新聞資料仍存於原 Firebase 專案 `transcend-news-monitor` 的 Firestore。）
 
 ---
 
