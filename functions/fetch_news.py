@@ -110,6 +110,8 @@ def get_sources(mode):
         {'label': 'TrendForce DRAM',     'url': 'https://news.google.com/rss/search?q=TrendForce+DRAM+memory&hl=en&gl=US&ceid=US:en', 'cat': 'usMarket'},
         {'label': 'TrendForce NAND',     'url': 'https://news.google.com/rss/search?q=TrendForce+NAND+flash+storage&hl=en&gl=US&ceid=US:en', 'cat': 'usMarket'},
         {'label': 'TrendForce Flash',    'url': 'https://news.google.com/rss/search?q=TrendForce+flash+storage+market&hl=en&gl=US&ceid=US:en', 'cat': 'usMarket'},
+        # ─── Kingston 金士頓（記憶體模組龍頭，上游市場觀測）───
+        {'label': 'Kingston EN', 'url': 'https://news.google.com/rss/search?q=%22Kingston+Technology%22+OR+%22Kingston+FURY%22+memory+OR+SSD+OR+DRAM&hl=en&gl=US&ceid=US:en', 'cat': 'usMarket'},
         # ─── 應用端需求：AI / IPC / AIoT / 終端裝置 ───
         {'label': 'HBM Market',           'url': 'https://news.google.com/rss/search?q=HBM+high+bandwidth+memory+market+2025&hl=en&gl=US&ceid=US:en', 'cat': 'usMarket'},
         {'label': 'HBM AI Demand',        'url': 'https://news.google.com/rss/search?q=HBM+AI+GPU+memory+demand+supply&hl=en&gl=US&ceid=US:en', 'cat': 'usMarket'},
@@ -156,6 +158,7 @@ def get_sources(mode):
         {'label': 'SanDisk 威騰',    'url': 'https://news.google.com/rss/search?q=SanDisk+威騰+儲存&hl=zh-TW&gl=TW&ceid=TW:zh-Hant', 'cat': 'supplier', 'brand': 'SanDisk/WD'},
         {'label': '慧榮 SMI',        'url': 'https://news.google.com/rss/search?q=慧榮+Silicon+Motion&hl=zh-TW&gl=TW&ceid=TW:zh-Hant', 'cat': 'supplier', 'brand': 'SMI'},
         {'label': '群聯 Phison',     'url': 'https://news.google.com/rss/search?q=群聯+Phison&hl=zh-TW&gl=TW&ceid=TW:zh-Hant', 'cat': 'supplier', 'brand': 'Phison'},
+        {'label': '金士頓 Kingston', 'url': 'https://news.google.com/rss/search?q=金士頓+Kingston+記憶體+OR+SSD&hl=zh-TW&gl=TW&ceid=TW:zh-Hant', 'cat': 'supplier', 'brand': 'Kingston'},
         {'label': '瑞昱 Realtek',    'url': 'https://news.google.com/rss/search?q=瑞昱+Realtek&hl=zh-TW&gl=TW&ceid=TW:zh-Hant', 'cat': 'supplier', 'brand': 'Realtek'},
     ]
 
