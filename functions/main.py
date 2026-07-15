@@ -39,7 +39,10 @@ def get_db():
         sa_dict = json.loads(MONITOR_SERVICE_ACCOUNT.value.strip())
         cred = credentials.Certificate(sa_dict)
         if not firebase_admin._apps:
-            firebase_admin.initialize_app(cred)
+            # 必須明確指定 projectId：Cloud Functions 環境的 FIREBASE_CONFIG
+            # 會把預設專案設成本專案（transcend-news-tbm），優先權高於金鑰，
+            # 不指定的話 Firestore 會寫錯專案。
+            firebase_admin.initialize_app(cred, {'projectId': sa_dict['project_id']})
         _db = firestore.client()
         print(f"✅ Firestore 已連線（專案 {sa_dict.get('project_id')}）")
     return _db
