@@ -1870,22 +1870,29 @@ function App() {
 
   // ─── Firebase init ───────────────────────────────────────
   useEffect(() => {
-    try {
-      if (!firebase.apps.length) firebase.initializeApp(FIREBASE_CONFIG);
-      window._db = firebase.firestore();
-      setConnected(true);
-      fetchAll();
-      // 股價即時監聽：GitHub Actions 一寫入 stocks/latest，頁面立即更新（免重整）
-      const unsubStocks = window._db.collection('stocks').doc('latest')
-        .onSnapshot(
-          doc => { if (doc.exists) { setStocks(doc.data()); setStockCountdown(300); } },
-          err => console.error('Stocks listen:', err)
-        );
-      return () => unsubStocks();
-    } catch(e) {
-      console.error('Firebase:', e);
-      setLoading(false);
-    }
+    let unsubStocks = null;
+    (async () => {
+      try {
+        if (!firebase.apps.length) firebase.initializeApp(FIREBASE_CONFIG);
+        window._db = firebase.firestore();
+        // 離線快取：資料存在瀏覽器 IndexedDB，第二次開啟起可立即顯示上次資料
+        // 再於背景同步（必須在任何查詢之前啟用；多分頁同開時可能失敗，屬正常）
+        try { await window._db.enablePersistence({ synchronizeTabs: true }); }
+        catch(e) { console.warn('離線快取未啟用（不影響功能）:', e.code || e); }
+        setConnected(true);
+        fetchAll();
+        // 股價即時監聽：排程一寫入 stocks/latest，頁面立即更新（免重整）
+        unsubStocks = window._db.collection('stocks').doc('latest')
+          .onSnapshot(
+            doc => { if (doc.exists) { setStocks(doc.data()); setStockCountdown(300); } },
+            err => console.error('Stocks listen:', err)
+          );
+      } catch(e) {
+        console.error('Firebase:', e);
+        setLoading(false);
+      }
+    })();
+    return () => { if (unsubStocks) unsubStocks(); };
   }, []);
 
   // ─── 股價每 5 分鐘輪詢（onSnapshot 即時推送的備援）─────────
@@ -1913,15 +1920,27 @@ function App() {
   }
 
   async function fetchNews() {
+    const baseQuery = () => window._db.collection('news')
+      .where('pubDate', '>=', new Date('2026-01-01T00:00:00+08:00'))
+      .orderBy('pubDate', 'desc');
+    const apply = snap => setNews(snap.docs
+      .map(d => ({ id:d.id, ...d.data() }))
+      .filter(n => !n.link?.includes('msn.com')));
     try {
-      const snap = await window._db.collection('news')
-        .where('pubDate', '>=', new Date('2026-01-01T00:00:00+08:00'))
-        .orderBy('pubDate', 'desc')
-        .limit(2000)
-        .get();
-      setNews(snap.docs
-        .map(d => ({ id:d.id, ...d.data() }))
-        .filter(n => !n.link?.includes('msn.com')));
+      // 三段式載入：目標是把「開頁到看到內容」壓到最短
+      // ① 本機快取（第二次開啟起幾乎 0 等待；首次無快取會拋錯，忽略即可）
+      let hasCache = false;
+      try {
+        const cached = await baseQuery().limit(2000).get({ source: 'cache' });
+        if (!cached.empty) { apply(cached); hasCache = true; setLoading(false); }
+      } catch(e) { /* 首次開啟無快取，屬正常 */ }
+      // ② 無快取時先抓最新 300 則快速首屏
+      if (!hasCache) {
+        apply(await baseQuery().limit(300).get());
+        setLoading(false);
+      }
+      // ③ 完整 2000 則背景補齊（統計卡「本月/本年」數字以此為準）
+      apply(await baseQuery().limit(2000).get());
     } catch(e) { console.error('News:', e); }
   }
 
