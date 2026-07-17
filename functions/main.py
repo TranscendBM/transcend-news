@@ -7,7 +7,6 @@
 排程總覽（皆為台灣時間 Asia/Taipei）：
   stocks_job     交易日 09:00–13:35 每 1 分鐘   即時股價
   news_job       每 15 分鐘                     RSS 新聞
-  community_job  每 2 小時（08–22 時）           CMoney + PTT 社群討論
   trading_job    交易日 13:40 / 17:10           每日開收盤 + 三大法人
   finance_job    每天 17:30                     月營收/季損益/股利/重大訊息
   finance_early_month_job  每月 1–10 日 09–18 時每小時（申報期加密）
@@ -117,15 +116,7 @@ def news_job(event: scheduler_fn.ScheduledEvent) -> None:
                 ttl_minutes=12)
 
 
-# ─── 社群討論（CMoney + PTT，爬蟲較慢）：08–22 時每 2 小時 ───
-@scheduler_fn.on_schedule(
-    schedule='10 8-22/2 * * *', timezone=TZ, region=REGION,
-    memory=MemoryOption.MB_512, timeout_sec=540, max_instances=1,
-    secrets=[MONITOR_SERVICE_ACCOUNT])
-def community_job(event: scheduler_fn.ScheduledEvent) -> None:
-    _run_locked('community', lambda db: fetch_news.fetch_and_save_community(db),
-                ttl_minutes=12)
-
+# 註：community_job（CMoney/PTT 股市網路輿情）已於 2026-07 隨前端區塊一併移除
 
 # ─── 每日交易資料（開收盤 + 三大法人）：收盤後與法人公布後各一次 ───
 @scheduler_fn.on_schedule(

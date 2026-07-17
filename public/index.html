@@ -825,126 +825,6 @@ function detectStockCode(title, content) {
   return null;
 }
 
-function StockSentimentForum({ community }) {
-  const [sentFilter,  setSentFilter]  = useState('all');
-  const [stockFilter, setStockFilter] = useState('all');
-
-  const allPosts = useMemo(() => {
-    const allKws = Object.values(STOCK_KW_MAP).flat();
-    const base = community && community.length > 0
-      ? sortByDate(community)
-          .filter(n => {
-            // 排除 PTT 貼文
-            const src = (n.mediaName || n.sourceName || '').toLowerCase();
-            const lnk = (n.link || '').toLowerCase();
-            if (src.includes('ptt') || lnk.includes('ptt.cc')) return false;
-            const t = (n.title + ' ' + (n.content || '')).toLowerCase();
-            return allKws.some(kw => t.includes(kw));
-          })
-          .slice(0, 80)
-          .map(n => ({
-            id:        n.id,
-            src:       n.mediaName || n.sourceName || '股市討論',
-            title:     n.title,
-            link:      n.link || '#',
-            s:         n.sentiment || getSentiment(n.title, n.content),
-            time:      fmtDate(n.pubDate),
-            author:    n.rawAuthor || '',
-            stockCode: detectStockCode(n.title, n.content),
-          }))
-      : MOCK_COMMUNITY.filter(p => !p.src?.includes('PTT'))
-          .map(p => ({ ...p, stockCode: detectStockCode(p.title, '') }));
-    return base;
-  }, [community]);
-
-  const shown = useMemo(() => {
-    let list = allPosts;
-    if (sentFilter  !== 'all') list = list.filter(p => p.s         === sentFilter);
-    if (stockFilter !== 'all') list = list.filter(p => p.stockCode === stockFilter);
-    return list;
-  }, [allPosts, sentFilter, stockFilter]);
-
-  const isReal = community && community.length > 0;
-
-  return (
-    <Card title="創見與競品 股市網路輿情" icon="💬">
-      {/* 快速連結：各股 CMoney 討論頁 */}
-      <div className="flex flex-wrap gap-1.5 mb-3">
-        {Object.entries(STOCK_CMONEY).map(([code, href]) => {
-          const color = COMP_REV_META[code]?.color || '#6b7280';
-          return (
-            <a key={code} href={href} target="_blank" rel="noreferrer"
-              className="flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-medium transition-all"
-              style={{ border:`1px solid ${color}44`, background:`${color}11`, color }}>
-              {code} {STOCK_META[code]?.name} ↗
-            </a>
-          );
-        })}
-      </div>
-
-      {/* 股票篩選 */}
-      <div className="flex flex-wrap gap-1.5 mb-2">
-        <TabBtn active={stockFilter==='all'} onClick={()=>setStockFilter('all')}>全部</TabBtn>
-        {Object.keys(STOCK_KW_MAP).map(code => {
-          const color = COMP_REV_META[code]?.color || '#6b7280';
-          return (
-            <TabBtn key={code} active={stockFilter===code} onClick={()=>setStockFilter(code)}>
-              <span className="inline-block w-2 h-2 rounded-full mr-1" style={{ background: color }} />
-              {code} {STOCK_META[code]?.name}
-            </TabBtn>
-          );
-        })}
-      </div>
-
-      {/* 情緒篩選 */}
-      <div className="flex gap-1.5 mb-3">
-        {[['all','全部'],['positive','正面'],['neutral','中立'],['negative','負面']].map(([v,l]) => (
-          <TabBtn key={v} active={sentFilter===v} onClick={()=>setSentFilter(v)}>{l}</TabBtn>
-        ))}
-      </div>
-
-      {/* 文章列表 */}
-      {shown.length > 0 ? (
-        <div className="space-y-2 max-h-[500px] overflow-y-auto pr-1">
-          {shown.map((p, i) => {
-            const cColor = COMP_REV_META[p.stockCode]?.color || '#6b7280';
-            const cName  = p.stockCode ? `${p.stockCode} ${STOCK_META[p.stockCode]?.name || ''}` : null;
-            return (
-              <a key={p.id || i} href={p.link||'#'} target="_blank" rel="noreferrer"
-                className="block p-3 rounded-xl bg-gray-800/40 border border-gray-700/40 hover:border-gray-600 transition-all group">
-                <div className="flex items-start gap-2">
-                  {cName && (
-                    <span className="text-xs font-bold px-1.5 py-0.5 rounded shrink-0"
-                      style={{ background:`${cColor}22`, color: cColor, border:`1px solid ${cColor}44` }}>
-                      {cName}
-                    </span>
-                  )}
-                  <p className="text-sm text-gray-200 group-hover:text-white line-clamp-2 flex-1 leading-snug">{p.title}</p>
-                  <SentBadge s={p.s} />
-                </div>
-                <div className="flex items-center gap-1.5 mt-1.5 text-xs">
-                  <span className="font-semibold" style={{ color: SRC_COLOR[p.src] || '#f87171' }}>{p.src}</span>
-                  {p.author && <><span className="text-gray-700">·</span><span className="text-gray-500">{p.author}</span></>}
-                  <span className="text-gray-700">·</span>
-                  <span className="text-gray-500">{p.time}</span>
-                </div>
-              </a>
-            );
-          })}
-        </div>
-      ) : (
-        <p className="text-sm text-gray-600 text-center py-6">目前無相關討論</p>
-      )}
-      {!isReal && (
-        <p className="text-xs text-gray-700 text-center mt-3">示意資料 · PTT Stock RSS 啟用後自動更新</p>
-      )}
-    </Card>
-  );
-}
-
-// 舊元件名稱相容
-function CommunityMonitor({ community }) { return <StockSentimentForum community={community} />; }
-
 // ═══════════════════════════════════════════════════════════
 // IR TAB — 月營收 SVG 圖表（純 SVG，無外部依賴，viewBox 自動縮放）
 // ═══════════════════════════════════════════════════════════
@@ -1840,7 +1720,6 @@ function IRTab({ news, stocks, community, revenue, financials, dividends, materi
       )}
 
       <DailyTrading daily={daily} />
-      <StockSentimentForum community={community} />
       <CompetitorMaterial material={material} />
       <RevenueChart revenue={revenue} />
       <CompetitorRevenueChart revenue={revenue} compRev={compRev} />
@@ -1896,6 +1775,7 @@ function App() {
     return () => {
       if (unsubStocks) unsubStocks();
       if (window._newsUnsub) { window._newsUnsub(); window._newsUnsub = null; }
+      if (window._newsCancelRetry) { window._newsCancelRetry(); window._newsCancelRetry = null; }
       window._newsRetryRest = null;
     };
   }, []);
@@ -1970,7 +1850,12 @@ function App() {
     let restLoading = false;
     let lastCursorDoc = null;                   // 最新補抓游標（供手動刷新/自動重試）
     let autoRetries = 0;
+    let retryTimer = null;                      // 自動重試 timer ID（唯一，可取消）
     const MAX_AUTO_RETRIES = 2;                 // 有上限的短時間自動重試
+
+    const cancelRetryTimer = () => {
+      if (retryTimer !== null) { clearTimeout(retryTimer); retryTimer = null; }
+    };
 
     const fetchRest = async (cursorDoc) => {
       if (fullLoaded || restLoading || !cursorDoc) return;
@@ -1984,20 +1869,28 @@ function App() {
         rest.docs.forEach(d => store.set(d.id, toObj(d)));
         publish();
         fullLoaded = true;                      // 只有 server 查詢成功才標記完成
+        cancelRetryTimer();                     // 成功：取消任何待執行的自動重試
       } catch (e) {
         // 失敗：fullLoaded 維持 false。重試管道有三：
         // ①短時間自動重試（有上限）②下一次 server snapshot ③使用者手動刷新
         console.error('News rest 補抓失敗（將自動重試，或按「重新整理」）:', e);
         if (autoRetries < MAX_AUTO_RETRIES) {
           autoRetries++;
-          setTimeout(() => fetchRest(lastCursorDoc), 5000 * autoRetries);
+          cancelRetryTimer();                   // 建新排程前先取消舊 timer，確保同時最多一個
+          retryTimer = setTimeout(() => {
+            retryTimer = null;
+            fetchRest(lastCursorDoc);
+          }, 5000 * autoRetries);
         }
       } finally {
         restLoading = false;
       }
     };
-    // 手動刷新重試 hook（fetchRest 內的 fullLoaded/restLoading 檢查天然防重複）
-    window._newsRetryRest = () => fetchRest(lastCursorDoc);
+    // 手動刷新重試 hook：先取消排程中的自動重試再立即補抓
+    //（fetchRest 內的 fullLoaded/restLoading 檢查天然防重複）
+    window._newsRetryRest = () => { cancelRetryTimer(); fetchRest(lastCursorDoc); };
+    // 供 useEffect cleanup 取消 timer：頁面卸載後不得再執行 fetchRest／更新畫面
+    window._newsCancelRetry = cancelRetryTimer;
 
     try {
       // ① 本機快取整批出圖（0 次伺服器讀取；第二次開啟起幾乎秒開）
@@ -2025,10 +1918,13 @@ function App() {
           if (!fullLoaded) fetchRest(lastCursorDoc);
         }
       }, err => {
-        // 監聽器永久錯誤：清理狀態，讓使用者按「重新整理」時能重建監聽
+        // 監聽器永久錯誤：取消待執行的重試 timer、清理狀態，
+        // 讓使用者按「重新整理」時能重建監聽
         console.error('News listen 中斷（按「重新整理」可重建）:', err);
+        cancelRetryTimer();
         window._newsUnsub = null;
         window._newsRetryRest = null;
+        window._newsCancelRetry = null;
       });
     } catch (e) { console.error('News:', e); }
   }

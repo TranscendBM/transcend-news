@@ -536,5 +536,49 @@ class TestFetchSourceTimeout(unittest.TestCase):
                          'RSS 抓取必須帶 timeout，避免單一來源卡死排程')
 
 
+class TestMaterialNews(unittest.TestCase):
+    """創見與競品重大訊息：日期正規化 + 累積合併（只留重訊）"""
+
+    def test_material_date_to_iso(self):
+        self.assertEqual(fetch_news.material_date_to_iso('1150717'), '2026-07-17')   # 民國緊湊
+        self.assertEqual(fetch_news.material_date_to_iso('115/07/17'), '2026-07-17') # 民國斜線
+        self.assertEqual(fetch_news.material_date_to_iso('20260717'), '2026-07-17')  # 西元緊湊
+        self.assertEqual(fetch_news.material_date_to_iso('2026-07-17'), '2026-07-17')
+        self.assertEqual(fetch_news.material_date_to_iso(''), '')
+        self.assertEqual(fetch_news.material_date_to_iso('garbage'), '')
+
+    def _rec(self, code, date, summary, source='TWSE'):
+        return {'code': code, 'date': date, 'summary': summary, 'source': source}
+
+    def test_merge_purges_legacy_non_material_records(self):
+        """舊時代混入的新聞/股民評論（無 source 標記）必須被清除"""
+        legacy = [{'code': '2451', 'date': '2026-04-17', 'summary': '焦點股》宇瞻Q1獲利驚人'},
+                  {'code': '4973', 'date': '2026-04-15', 'summary': '終於把出息賣壓甩掉了'}]
+        merged, changed = fetch_news.merge_material_records(legacy, [])
+        self.assertEqual(merged, [], '無 source 的舊紀錄應全部清除')
+        self.assertTrue(changed)
+
+    def test_merge_accumulates_daily_records(self):
+        day1 = [self._rec('2451', '2026-07-17', '召開法人說明會')]
+        merged, _ = fetch_news.merge_material_records([], day1)
+        day2 = [self._rec('3260', '2026-07-18', '董事會決議股利分派', source='TPEX')]
+        merged, changed = fetch_news.merge_material_records(merged, day2)
+        self.assertEqual(len(merged), 2, '每日資料必須累積，不得整批覆蓋')
+        self.assertTrue(changed)
+        self.assertEqual(merged[0]['date'], '2026-07-18', '需依日期新→舊排序')
+
+    def test_merge_dedupes_same_announcement(self):
+        rec = self._rec('2451', '2026-07-17', '召開法人說明會')
+        merged, _ = fetch_news.merge_material_records([], [rec])
+        merged2, changed = fetch_news.merge_material_records(merged, [dict(rec)])
+        self.assertEqual(len(merged2), 1, '同一則重訊重跑不得重複')
+        self.assertFalse(changed, '無新增時不應標記為有變更')
+
+    def test_merge_respects_cap(self):
+        many = [self._rec('2451', f'2026-01-{(i % 28) + 1:02d}', f'重訊{i}') for i in range(600)]
+        merged, _ = fetch_news.merge_material_records([], many, cap=500)
+        self.assertEqual(len(merged), 500)
+
+
 if __name__ == '__main__':
     unittest.main()

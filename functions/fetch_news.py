@@ -679,197 +679,6 @@ def release_lock(db, name, token):
         return False
 
 
-def fetch_cmoney_forum(stock_code='2451', limit=30):
-    """從 CMoney 股市爆料同學會抓取指定股票討論"""
-    import re, json
-    from bs4 import BeautifulSoup
-
-    url = f'https://www.cmoney.tw/forum/stock/{stock_code}'
-    headers = {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
-        'Accept-Language': 'zh-TW,zh;q=0.9,en;q=0.8',
-        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-        'Referer': 'https://www.cmoney.tw/',
-    }
-    articles = []
-    try:
-        r = requests.get(url, headers=headers, timeout=15)
-        r.raise_for_status()
-
-        # ── 方法 1：Next.js __NEXT_DATA__ SSR JSON ──────────────
-        match = re.search(
-            r'<script id="__NEXT_DATA__" type="application/json">(.*?)</script>',
-            r.text, re.DOTALL
-        )
-        if match:
-            data = json.loads(match.group(1))
-            props = data.get('props', {}).get('pageProps', {})
-            posts = (props.get('articles') or props.get('posts') or
-                     props.get('data', {}).get('articles') or
-                     props.get('initialData', {}).get('articles') or [])
-            for p in posts[:limit]:
-                title   = (p.get('title') or p.get('content', '')[:80]).strip()
-                content = str(p.get('content') or p.get('body') or '')[:500]
-                link    = p.get('url') or p.get('link') or f'{url}#{p.get("id","")}'
-                created = p.get('createdAt') or p.get('created_at') or p.get('publishTime') or ''
-                try:
-                    pub_date = datetime.datetime.fromisoformat(
-                        str(created).replace('Z', '+00:00')
-                    ) if created else datetime.datetime.now(datetime.timezone.utc)
-                except Exception:
-                    pub_date = datetime.datetime.now(datetime.timezone.utc)
-                articles.append(_cmoney_article(title, content, link, pub_date,
-                                                p.get('author') or p.get('userName') or ''))
-
-        # ── 方法 2：BeautifulSoup HTML 解析（備援）──────────────
-        if not articles:
-            soup = BeautifulSoup(r.text, 'lxml')
-            for sel in ['.forum-post', '.article-item', '[class*="PostItem"]',
-                        '[class*="post-item"]', '[class*="articleItem"]']:
-                post_els = soup.select(sel)
-                if post_els:
-                    for el in post_els[:limit]:
-                        title_el   = el.select_one('h2,h3,.title,[class*="title"],[class*="Title"]')
-                        content_el = el.select_one('p,.content,[class*="content"],[class*="Content"]')
-                        link_el    = el.select_one('a[href]')
-                        title   = title_el.get_text(strip=True)   if title_el   else ''
-                        content = content_el.get_text(strip=True)[:500] if content_el else ''
-                        href    = link_el['href'] if link_el else ''
-                        if href.startswith('/'):
-                            href = 'https://www.cmoney.tw' + href
-                        if not title and not content:
-                            continue
-                        articles.append(_cmoney_article(
-                            title or content[:80], content,
-                            href or url, datetime.datetime.now(datetime.timezone.utc), ''))
-                    break
-
-        print(f'  ✓ CMoney 爆料同學會: {len(articles)} 則討論')
-    except Exception as e:
-        print(f'  ✗ CMoney 抓取失敗: {e}')
-    return articles
-
-
-def _cmoney_article(title, content, link, pub_date, author):
-    return {
-        'id':         make_article_id(link, title),
-        'title':      title[:200],
-        'content':    content[:500],
-        'link':       link,
-        'pubDate':    pub_date,
-        'sentiment':  analyze_sentiment(title, content),
-        'cat':        'community',
-        'brand':      None,
-        'sourceName': '股市爆料同學會',
-        'mediaName':  '股市爆料同學會 (CMoney)',
-        'rawAuthor':  str(author),
-        'fetchedAt':  datetime.datetime.now(datetime.timezone.utc),
-        'fetchMode':  'community',
-    }
-
-
-def fetch_ptt_stock_forum(limit=20):
-    """從 PTT Stock 版抓取標題含創見/2451 的文章（含推文數）"""
-    import re
-    from bs4 import BeautifulSoup
-
-    HEADERS = {
-        'Cookie': 'over18=1',
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-    }
-    KW = ['創見', '2451']
-    articles = []
-
-    try:
-        # 取得最新頁碼
-        r = requests.get('https://www.ptt.cc/bbs/Stock/index.html',
-                         headers=HEADERS, timeout=10)
-        soup = BeautifulSoup(r.text, 'lxml')
-        prev = soup.select_one('.btn-group-paging a:nth-child(2)')
-        latest_idx = 0
-        if prev:
-            m = re.search(r'index(\d+)', prev.get('href', ''))
-            if m:
-                latest_idx = int(m.group(1)) + 1
-
-        # 掃最近 15 頁（約 3 天）
-        for idx in range(latest_idx, max(latest_idx - 15, 1), -1):
-            if len(articles) >= limit:
-                break
-            try:
-                pr = requests.get(
-                    f'https://www.ptt.cc/bbs/Stock/index{idx}.html',
-                    headers=HEADERS, timeout=10)
-                page_soup = BeautifulSoup(pr.text, 'lxml')
-            except Exception:
-                continue
-
-            for entry in page_soup.select('.r-ent'):
-                title_el = entry.select_one('.title a')
-                if not title_el:
-                    continue
-                title = title_el.get_text(strip=True)
-                if not any(kw in title for kw in KW):
-                    continue
-
-                post_url = 'https://www.ptt.cc' + title_el['href']
-                try:
-                    ar = requests.get(post_url, headers=HEADERS, timeout=10)
-                    psoup = BeautifulSoup(ar.text, 'lxml')
-
-                    # 內文（移除 metadata 行）
-                    main = psoup.select_one('#main-content')
-                    content = ''
-                    if main:
-                        for tag in main.select('.article-metaline,.article-metaline-right,.push'):
-                            tag.decompose()
-                        content = main.get_text(separator=' ', strip=True)[:500]
-
-                    # 標題或內文都沒有關鍵字 → 跳過
-                    combined = title + ' ' + content
-                    if not any(kw in combined for kw in KW):
-                        continue
-
-                    # 日期
-                    metas = psoup.select('.article-meta-value')
-                    pub_date = datetime.datetime.now(datetime.timezone.utc)
-                    if len(metas) >= 4:
-                        try:
-                            pub_date = datetime.datetime.strptime(
-                                metas[3].get_text(strip=True), '%a %b %d %H:%M:%S %Y'
-                            ).replace(tzinfo=datetime.timezone.utc)
-                        except Exception:
-                            pass
-
-                    author     = metas[0].get_text(strip=True) if metas else ''
-                    push_count = len(psoup.select('.push'))
-
-                    articles.append({
-                        'id':         make_article_id(post_url, title),
-                        'title':      title,
-                        'content':    content,
-                        'link':       post_url,
-                        'pubDate':    pub_date,
-                        'sentiment':  analyze_sentiment(title, content),
-                        'cat':        'community',
-                        'brand':      None,
-                        'sourceName': 'PTT Stock',
-                        'mediaName':  'PTT Stock',
-                        'rawAuthor':  author,
-                        'fetchedAt':  datetime.datetime.now(datetime.timezone.utc),
-                        'fetchMode':  'community',
-                        'pushCount':  push_count,
-                    })
-                    time.sleep(1)   # PTT rate limiting
-                except Exception as e:
-                    print(f'  ⚠ PTT 文章失敗: {e}')
-
-        print(f'  ✓ PTT Stock: {len(articles)} 則創見相關討論')
-    except Exception as e:
-        print(f'  ✗ PTT 抓取失敗: {e}')
-    return articles
-
-
 def fetch_monthly_revenue(db, stock_code='2451'):
     """從公開資訊觀測站（MOPS）抓取月營收並存入 Firebase revenue/{stock_code}"""
     import re
@@ -1252,20 +1061,6 @@ def fetch_and_save_news(db, mode='all'):
     return len(all_articles)
 
 
-def fetch_and_save_community(db):
-    """抓取社群討論（CMoney + PTT）並存入 Firestore；回傳儲存篇數"""
-    print(f"\n💬 抓取社群討論...")
-    community_articles = []
-    community_articles += fetch_cmoney_forum('2451')
-    community_articles += fetch_ptt_stock_forum()
-
-    if community_articles:
-        print(f"\n💾 儲存社群討論到 Firebase（僅新增/變更）...")
-        stats = save_new_articles(db, community_articles)
-        print(f"✅ 社群討論完成：新增 {stats['added']} / 更新 {stats['updated']} / 跳過 {stats['skipped']}")
-    return len(community_articles)
-
-
 def fetch_all_financials(db):
     """財務類低頻資料一次抓齊：月營收（含競品）、季損益、股利、重大訊息"""
     fetch_monthly_revenue(db, '2451')
@@ -1308,8 +1103,8 @@ def main():
         return
 
     # ─── 完整抓取 ───
+    # 註：社群輿情抓取（CMoney/PTT）已於 2026-07 隨前端區塊一併移除
     fetch_and_save_news(db, mode)
-    fetch_and_save_community(db)
     fetch_stock_prices(db)
 
     # ─── 每日交易資料（開收盤 + 三大法人）───
@@ -1429,183 +1224,141 @@ def fetch_quarterly_financials(db, stock_code='2451'):
         print("  ⚠ 未解析到季度損益（請把上方除錯輸出貼給開發者）")
 
 
+# ══════════════════════════════════════════════════════════════
+# 創見與競品「重大訊息」（IR 新訊）
+# 資料源：TWSE OpenAPI（上市）+ TPEx OpenAPI（上櫃）的「每日重大訊息」。
+# 舊 MOPS ajax 端點與 FinMind TaiwanStockMaterial 已失效（2026-07 實測皆
+# 無資料），且四月前舊資料混入新聞/股民評論；改為：每日抓取官方重訊、
+# 與既有紀錄「累積合併」，並只保留帶合法 source 標記的重大訊息
+# （首次寫入時順帶清除舊時代的非重訊內容）。
+# ══════════════════════════════════════════════════════════════
+
+MATERIAL_SOURCES = ('TWSE', 'TPEX', 'MOPS', 'FinMind')   # 合法重訊來源標記
+MATERIAL_CAP = 500
+
+# 上市（TWSE）/ 上櫃（TPEx）分流
+MATERIAL_TWSE_CODES = {'2451': '創見資訊', '4967': '十銓科技', '8271': '宇瞻科技'}
+MATERIAL_TPEX_CODES = {'3260': '威剛科技', '4973': '廣穎電通', '5289': '宜鼎國際'}
+MATERIAL_HIGHLIGHT_KW = ['董事會', '股東會', '法人說明會', '股利', '盈餘分配', '現金增資',
+                         '減資', '下市', '合併', '購併', '私募', '庫藏股', '資產重估', '重大訊息']
+
+
+def material_date_to_iso(val):
+    """重訊日期正規化：'1150717'/'115/07/17'（民國）、'20260717'/'2026-07-17'（西元）→ ISO；無法解析回傳 ''"""
+    s = str(val or '').strip().replace('-', '/').replace('.', '/')
+    if '/' in s:
+        parts = s.split('/')
+        if len(parts) == 3 and all(p.strip().isdigit() for p in parts):
+            y = int(parts[0])
+            y = y + 1911 if y < 1911 else y
+            return f"{y}-{int(parts[1]):02d}-{int(parts[2]):02d}"
+        return ''
+    digits = ''.join(c for c in s if c.isdigit())
+    if len(digits) == 7:      # 民國 yyymmdd
+        return f"{int(digits[:3]) + 1911}-{digits[3:5]}-{digits[5:7]}"
+    if len(digits) == 8:      # 西元 yyyymmdd
+        return f"{digits[:4]}-{digits[4:6]}-{digits[6:8]}"
+    return ''
+
+
+def _material_key(r):
+    return f"{r.get('code')}_{r.get('date')}_{str(r.get('summary', ''))[:30]}"
+
+
+def merge_material_records(existing, new_records, cap=MATERIAL_CAP):
+    """
+    合併既有與新抓到的重訊（純函式）：
+    - 只保留帶合法 source 標記者 → 清除舊時代混入的新聞/股民評論
+    - 以 (code, date, 主旨前30字) 去重，日期新→舊排序，上限 cap 筆
+    回傳 (merged, changed)
+    """
+    kept = [r for r in (existing or []) if r.get('source') in MATERIAL_SOURCES]
+    purged = len(existing or []) - len(kept)
+    seen = {_material_key(r) for r in kept}
+    added = 0
+    for r in new_records:
+        k = _material_key(r)
+        if k in seen:
+            continue
+        seen.add(k)
+        kept.append(r)
+        added += 1
+    kept.sort(key=lambda x: str(x.get('date', '')), reverse=True)
+    merged = kept[:cap]
+    changed = added > 0 or purged > 0 or len(merged) != len(existing or [])
+    return merged, changed
+
+
+def _mk_material_record(code, name, date_iso, subject, source):
+    kw = [k for k in MATERIAL_HIGHLIGHT_KW if k in subject]
+    return {
+        'code': code, 'name': name, 'date': date_iso,
+        'summary': subject[:300], 'link': '',
+        'highlight': len(kw) > 0, 'highlightKw': kw,
+        'source': source,
+    }
+
+
 def fetch_mops_material_news(db):
-    """
-    從公開資訊觀測站（MOPS）直接抓取競品重大訊息
-    主資料源：MOPS ajax_t05st01 POST API
-    備援：FinMind TaiwanStockMaterial
-    存入 Firebase material/competitors
-    """
-    from bs4 import BeautifulSoup
-    import re as _re
-
-    COMP_STOCKS = {
-        '2451': '創見資訊',
-        '3260': '威剛科技',
-        '4967': '十銓科技',
-        '4973': '廣穎電通',
-        '5289': '宜鼎國際',
-        '8271': '宇瞻科技',
-    }
-    HIGHLIGHT_KW = ['董事會', '股東會', '法人說明會', '股利', '盈餘分配', '現金增資', '減資',
-                    '下市', '合併', '購併', '私募', '庫藏股', '資產重估', '重大訊息']
-
-    now_tw   = datetime.datetime.now(datetime.timezone(datetime.timedelta(hours=8)))
-    roc_year = now_tw.year - 1911
-    BASE_URL = 'https://mops.twse.com.tw'
-
-    mops_headers = {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-        'Content-Type': 'application/x-www-form-urlencoded',
-        'Referer':      f'{BASE_URL}/mops/web/t05st01',
-        'Origin':       BASE_URL,
-        'Accept':       'text/html,application/xhtml+xml',
-        'Accept-Language': 'zh-TW,zh;q=0.9',
-    }
+    """抓取創見與競品「每日重大訊息」並累積存入 material/competitors（只留重訊）"""
     BASE_UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+    print(f"\n📢 抓取創見與競品重大訊息（TWSE/TPEx OpenAPI）...")
+    new_records = []
 
-    roc_to_iso = roc_date_to_iso   # 民國日期轉換（模組層級純函式，見上方定義）
+    # ── 上市（TWSE OpenAPI，每日重大訊息）──
+    try:
+        r = requests.get('https://openapi.twse.com.tw/v1/opendata/t187ap04_L',
+                         headers={'User-Agent': BASE_UA, 'Accept': 'application/json'}, timeout=20)
+        rows = r.json() if r.status_code == 200 else []
+        for row in rows:
+            code = str(row.get('公司代號', '')).strip()
+            if code not in MATERIAL_TWSE_CODES:
+                continue
+            subject = str(row.get('主旨 ') or row.get('主旨') or '').strip()
+            date_iso = material_date_to_iso(row.get('發言日期') or row.get('出表日期'))
+            if not subject or not date_iso:
+                continue
+            new_records.append(_mk_material_record(
+                code, MATERIAL_TWSE_CODES[code], date_iso, subject, 'TWSE'))
+        print(f"  [TWSE] 今日全市場 {len(rows)} 筆，我方公司 {sum(1 for x in new_records if x['source']=='TWSE')} 筆")
+    except Exception as e:
+        print(f"  ⚠ [TWSE OpenAPI] 失敗: {e}")
 
-    print(f"\n📢 抓取競品重大訊息（MOPS 公開資訊觀測站）...")
-    all_records = []
-    seen_keys   = set()
+    # ── 上櫃（TPEx OpenAPI，每日重大訊息）──
+    try:
+        r = requests.get('https://www.tpex.org.tw/openapi/v1/mopsfin_t187ap04_O',
+                         headers={'User-Agent': BASE_UA, 'Accept': 'application/json'}, timeout=20)
+        rows = r.json() if r.status_code == 200 else []
+        for row in rows:
+            code = str(row.get('SecuritiesCompanyCode') or row.get('公司代號') or '').strip()
+            if code not in MATERIAL_TPEX_CODES:
+                continue
+            subject = str(row.get('主旨') or row.get('主旨 ') or '').strip()
+            date_iso = material_date_to_iso(row.get('發言日期') or row.get('Date'))
+            if not subject or not date_iso:
+                continue
+            new_records.append(_mk_material_record(
+                code, MATERIAL_TPEX_CODES[code], date_iso, subject, 'TPEX'))
+        print(f"  [TPEx] 今日全市場 {len(rows)} 筆，我方公司 {sum(1 for x in new_records if x['source']=='TPEX')} 筆")
+    except Exception as e:
+        print(f"  ⚠ [TPEx OpenAPI] 失敗: {e}")
 
-    # ── 主資料源：MOPS ajax_t05st01 ─────────────────────────────
-    for code, name in COMP_STOCKS.items():
-        found = 0
-        for yr_off in [0, -1]:                     # 本年度 + 上年度
-            yr = roc_year + yr_off
-            try:
-                payload = (f'step=1&colorchg=1&co_id={code}'
-                           f'&year={yr}&mtype=F&b_date=&e_date=&encodeURIComponent=1')
-                resp = requests.post(
-                    f'{BASE_URL}/mops/web/ajax_t05st01',
-                    data=payload, headers=mops_headers, timeout=20
-                )
-                # MOPS 頁面多為 Big5
-                for enc in ['big5', 'utf-8', 'cp950']:
-                    try:
-                        resp.encoding = enc
-                        if '主旨' in resp.text or '發言日期' in resp.text:
-                            break
-                    except Exception:
-                        continue
+    # ── 與既有紀錄累積合併（並清除舊時代非重訊內容）──
+    ref = db.collection('material').document('competitors')
+    try:
+        snap = ref.get()
+        existing = (snap.to_dict() or {}).get('records', []) if getattr(snap, 'exists', False) else []
+    except Exception as e:
+        print(f"  ⚠ 讀取既有重訊失敗，中止本次更新（避免覆蓋）: {e}")
+        return
 
-                soup  = BeautifulSoup(resp.text, 'lxml')
-                # 找含「主旨」header 的表格
-                tables = soup.find_all('table')
-                for table in tables:
-                    hdrs = [th.get_text(strip=True) for th in table.find_all('th')]
-                    if not any('主旨' in h or '說明' in h for h in hdrs):
-                        continue
-
-                    # 確認各欄 index
-                    date_idx    = next((i for i, h in enumerate(hdrs) if '日期' in h), None)
-                    subject_idx = next((i for i, h in enumerate(hdrs) if '主旨' in h or '說明' in h), None)
-                    if subject_idx is None:
-                        continue
-
-                    for row in table.find_all('tr')[1:]:
-                        tds = row.find_all('td')
-                        if len(tds) <= subject_idx:
-                            continue
-
-                        # 日期：從指定欄或搜尋 ROC 格式
-                        date_iso = ''
-                        if date_idx is not None and date_idx < len(tds):
-                            txt = tds[date_idx].get_text(strip=True)
-                            m = _re.search(r'\d{3}[/\-]\d{2}[/\-]\d{2}', txt)
-                            if m:
-                                date_iso = roc_to_iso(m.group())
-                        if not date_iso:
-                            for td in tds:
-                                m = _re.search(r'\d{3}[/\-]\d{2}[/\-]\d{2}', td.get_text(strip=True))
-                                if m:
-                                    date_iso = roc_to_iso(m.group())
-                                    break
-
-                        # 主旨 + 連結
-                        subj_td = tds[subject_idx]
-                        subject = subj_td.get_text(strip=True)
-                        a_tag   = subj_td.find('a')
-                        link    = ''
-                        if a_tag:
-                            href = a_tag.get('href', '') or a_tag.get('onclick', '')
-                            if href.startswith('http'):
-                                link = href
-                            elif href.startswith('/'):
-                                link = BASE_URL + href
-
-                        if not subject or len(subject) < 5 or not date_iso:
-                            continue
-                        key = f"{code}_{date_iso}_{subject[:30]}"
-                        if key in seen_keys:
-                            continue
-                        seen_keys.add(key)
-
-                        highlight_kw = [kw for kw in HIGHLIGHT_KW if kw in subject]
-                        all_records.append({
-                            'code':        code,
-                            'name':        name,
-                            'date':        date_iso,
-                            'summary':     subject[:300],
-                            'link':        link,
-                            'highlight':   len(highlight_kw) > 0,
-                            'highlightKw': highlight_kw,
-                            'source':      'MOPS',
-                        })
-                        found += 1
-
-            except Exception as e:
-                print(f"  [{code} {yr}年 MOPS] 失敗: {e}")
-
-        if found > 0:
-            print(f"  ✓ [{code} {name}] MOPS 取得 {found} 筆")
-
-    # ── FinMind TaiwanStockMaterial（MOPS 有無資料都跑，確保不漏資料）────
-    print(f"  [FinMind 補全] 為所有公司補充 FinMind 重大訊息...")
-    import json as _json
-    for code, name in COMP_STOCKS.items():
-        try:
-            url = (f'https://api.finmindtrade.com/api/v4/data'
-                   f'?dataset=TaiwanStockMaterial&data_id={code}'
-                   f'&start_date={now_tw.year-2}-01-01&token=')
-            r = requests.get(url, headers={'User-Agent': BASE_UA}, timeout=20)
-            rows = _json.loads(r.text).get('data', []) if r.status_code == 200 else []
-            added = 0
-            for row in rows:
-                date_iso = str(row.get('date', ''))[:10]
-                subject  = (row.get('summary', '') or row.get('subject', '') or
-                            row.get('title', '') or row.get('announcement', '')).strip()
-                link     = row.get('link', '') or ''
-                if not subject or not date_iso:
-                    continue
-                key = f"{code}_{date_iso}_{subject[:30]}"
-                if key in seen_keys:
-                    continue
-                seen_keys.add(key)
-                highlight_kw = [kw for kw in HIGHLIGHT_KW if kw in subject]
-                all_records.append({
-                    'code': code, 'name': name, 'date': date_iso,
-                    'summary': subject[:300], 'link': link,
-                    'highlight': len(highlight_kw) > 0,
-                    'highlightKw': highlight_kw, 'source': 'FinMind',
-                })
-                added += 1
-            if added > 0:
-                print(f"  ✓ [{code} {name}] FinMind 新增 {added} 筆（共 {len(rows)} 筆）")
-        except Exception as e:
-            print(f"  [{code} FinMind] 失敗: {e}")
-
-    if all_records:
-        all_records.sort(key=lambda x: x['date'], reverse=True)
-        db.collection('material').document('competitors').set({
-            'records':   all_records[:500],
-            'updatedAt': firestore.SERVER_TIMESTAMP,
-        })
-        print(f"  ✅ 重大訊息已儲存 {len(all_records)} 筆（MOPS + FinMind）")
+    merged, changed = merge_material_records(existing, new_records)
+    if changed:
+        ref.set({'records': merged, 'updatedAt': firestore.SERVER_TIMESTAMP})
+        print(f"  ✅ 重訊已更新：新增 {len(new_records)} 筆（合併後共 {len(merged)} 筆，僅保留官方重大訊息）")
     else:
-        print("  ⚠ 未取得重大訊息")
+        print(f"  ✅ 重訊無新增（既有 {len(merged)} 筆）")
+
 
 
 def fetch_daily_trading(db, stock_code='2451'):

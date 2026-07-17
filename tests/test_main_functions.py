@@ -182,7 +182,7 @@ class TestRunLocked(unittest.TestCase):
 
 class TestScheduledEntrypoints(unittest.TestCase):
     def test_all_jobs_have_max_instances_1(self):
-        jobs = [main.stocks_job, main.news_job, main.community_job,
+        jobs = [main.stocks_job, main.news_job,
                 main.trading_job, main.finance_job, main.finance_early_month_job]
         for job in jobs:
             self.assertEqual(job._schedule_opts.get('max_instances'), 1,
@@ -191,7 +191,7 @@ class TestScheduledEntrypoints(unittest.TestCase):
     def test_lock_ttl_exceeds_function_timeout(self):
         """鎖 TTL 必須大於函式 timeout，否則執行中的鎖可能被誤接管"""
         # (job, 對應 _run_locked ttl_minutes)——與 main.py 內設定同步維護
-        ttls = {'stocks_job': 3, 'news_job': 12, 'community_job': 12,
+        ttls = {'stocks_job': 3, 'news_job': 12,
                 'trading_job': 8, 'finance_job': 12, 'finance_early_month_job': 12}
         for job_name, ttl in ttls.items():
             timeout_sec = getattr(main, job_name)._schedule_opts['timeout_sec']
