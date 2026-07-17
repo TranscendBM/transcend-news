@@ -224,5 +224,317 @@ class TestRevenueDateConversion(unittest.TestCase):
         self.assertEqual(fetch_news.roc_date_to_iso('not-a-date-x'), 'not-a-date-x')
 
 
+# ══════════════════════════════════════════════════════════════
+# Fake Firestore（記憶體版，供去重與鎖測試；不連任何外部服務）
+# ══════════════════════════════════════════════════════════════
+
+class _FakeSnap:
+    def __init__(self, data):
+        self._data = data
+    @property
+    def exists(self):
+        return self._data is not None
+    def to_dict(self):
+        return self._data
+
+
+class _FakeDocRef:
+    def __init__(self, db, path):
+        self.db, self.path = db, path
+    def get(self, transaction=None):
+        if self.db.fail_get_paths and any(self.path.startswith(p) for p in self.db.fail_get_paths):
+            raise RuntimeError(f'simulated read failure: {self.path}')
+        self.db.reads += 1
+        return _FakeSnap(self.db.store.get(self.path))
+    def set(self, data, merge=False):
+        self.db.writes += 1
+        if merge and self.path in self.db.store:
+            self.db.store[self.path] = {**self.db.store[self.path], **data}
+        else:
+            self.db.store[self.path] = dict(data)
+    def create(self, data):
+        if self.path in self.db.store:
+            raise RuntimeError('AlreadyExists')
+        self.db.writes += 1
+        self.db.store[self.path] = dict(data)
+    def delete(self):
+        self.db.store.pop(self.path, None)
+
+
+class _FakeTxn:
+    """模擬 Firestore transaction：fn 內讀到最新狀態、set/delete 直接生效。
+    （真實 transaction 的序列化語意由循序執行天然滿足）"""
+    def __init__(self, db):
+        self.db = db
+    def set(self, ref, data, merge=False):
+        ref.set(data, merge=merge)
+    def delete(self, ref):
+        ref.delete()
+
+
+class _FakeCollection:
+    def __init__(self, db, name):
+        self.db, self.name = db, name
+    def document(self, doc_id):
+        return _FakeDocRef(self.db, f'{self.name}/{doc_id}')
+
+
+class _FakeBatch:
+    def __init__(self, db):
+        self.db, self.ops = db, []
+    def set(self, ref, data, merge=False):
+        self.ops.append((ref, data, merge))
+    def commit(self):
+        self.db.batch_commits += 1
+        for ref, data, merge in self.ops:
+            ref.set(data, merge=merge)
+
+
+class FakeDB:
+    def __init__(self):
+        self.store = {}
+        self.reads = self.writes = self.batch_commits = self.txn_count = 0
+        self.fail_get_paths = set()   # 加入路徑前綴可模擬讀取失敗
+    def collection(self, name):
+        return _FakeCollection(self, name)
+    def batch(self):
+        return _FakeBatch(self)
+    def run_in_transaction(self, fn):
+        self.txn_count += 1
+        return fn(_FakeTxn(self))
+    def news_doc_count(self):
+        return sum(1 for k in self.store if k.startswith('news/'))
+
+
+def _mk_article(i, title='標題', content='內文', doc_id=None):
+    import hashlib as _hl
+    return {
+        'id': doc_id or _hl.md5(str(i).encode()).hexdigest()[:20],   # 與正式 id 同為 hex
+        'title': f'{title}{i}', 'content': content,
+        'link': f'https://example.com/{i}', 'pubDate': datetime.datetime(2026, 7, 1, tzinfo=TZ_UTC),
+        'sentiment': 'neutral', 'cat': 'transcend', 'brand': None,
+        'sourceName': 'src', 'mediaName': 'media', 'rawAuthor': '',
+        'fetchedAt': datetime.datetime.now(TZ_UTC), 'fetchMode': 'all',
+    }
+
+
+class TestArticleContentHash(unittest.TestCase):
+    def test_stable_for_same_content(self):
+        a, b = _mk_article(1), _mk_article(1)
+        b['fetchedAt'] = datetime.datetime(2030, 1, 1, tzinfo=TZ_UTC)   # 非內容欄位
+        b['fetchMode'] = 'different'
+        self.assertEqual(fetch_news.article_content_hash(a),
+                         fetch_news.article_content_hash(b))
+
+    def test_changes_when_content_changes(self):
+        a, b = _mk_article(1), _mk_article(1)
+        b['content'] = '更新後的內文'
+        self.assertNotEqual(fetch_news.article_content_hash(a),
+                            fetch_news.article_content_hash(b))
+
+    def test_push_count_participates(self):
+        a, b = _mk_article(1), _mk_article(1)
+        b['pushCount'] = 99
+        self.assertNotEqual(fetch_news.article_content_hash(a),
+                            fetch_news.article_content_hash(b))
+
+
+class TestSaveNewArticlesDedup(unittest.TestCase):
+    """核心保證：相同文章連續執行兩次，第二次不得產生任何寫入"""
+
+    def setUp(self):
+        self.db = FakeDB()
+        self.now = datetime.datetime(2026, 7, 15, 9, 0, tzinfo=TZ_UTC)
+
+    def test_first_run_writes_all(self):
+        arts = [_mk_article(i) for i in range(5)]
+        stats = fetch_news.save_new_articles(self.db, arts, now=self.now)
+        self.assertEqual(stats, {'added': 5, 'updated': 0, 'skipped': 0})
+        self.assertEqual(self.db.news_doc_count(), 5)
+
+    def test_second_run_same_articles_writes_nothing(self):
+        arts = [_mk_article(i) for i in range(5)]
+        fetch_news.save_new_articles(self.db, arts, now=self.now)
+        writes_after_first = self.db.writes
+        stats = fetch_news.save_new_articles(self.db, arts, now=self.now)
+        self.assertEqual(stats, {'added': 0, 'updated': 0, 'skipped': 5})
+        self.assertEqual(self.db.writes, writes_after_first,
+                         '第二次執行不得有任何 Firestore 寫入（含索引）')
+
+    def test_changed_article_is_updated_others_skipped(self):
+        arts = [_mk_article(i) for i in range(5)]
+        fetch_news.save_new_articles(self.db, arts, now=self.now)
+        arts[2] = dict(arts[2], content='內容更新了')
+        stats = fetch_news.save_new_articles(self.db, arts, now=self.now)
+        self.assertEqual(stats, {'added': 0, 'updated': 1, 'skipped': 4})
+        self.assertEqual(self.db.store[f"news/{arts[2]['id']}"]['content'], '內容更新了')
+
+    def test_skipped_article_fetchedAt_not_refreshed(self):
+        arts = [_mk_article(0)]
+        doc_path = f"news/{arts[0]['id']}"
+        fetch_news.save_new_articles(self.db, arts, now=self.now)
+        original = self.db.store[doc_path]['fetchedAt']
+        later = [dict(_mk_article(0), fetchedAt=datetime.datetime(2030, 1, 1, tzinfo=TZ_UTC))]
+        fetch_news.save_new_articles(self.db, later, now=self.now)
+        self.assertEqual(self.db.store[doc_path]['fetchedAt'], original,
+                         '未變更文章的 fetchedAt 不得被刷新')
+
+    def test_batch_chunking_over_400(self):
+        arts = [_mk_article(i) for i in range(950)]
+        fetch_news.save_new_articles(self.db, arts, now=self.now)
+        self.assertEqual(self.db.news_doc_count(), 950)
+        self.assertEqual(self.db.batch_commits, 3, '950 筆應分 400/400/150 三批')
+
+    def test_index_pruned_after_retention(self):
+        # 兩篇文章刻意放同一分片（id 開頭同字元），驗證保留期瘦身
+        a_old = _mk_article(0, doc_id='a' + '0' * 19)
+        a_new = _mk_article(1, doc_id='a' + '1' * 19)
+        shard = f"meta/{fetch_news._shard_doc_id(a_old['id'])}"
+        fetch_news.save_new_articles(self.db, [a_old], now=self.now)
+        old_now = self.now + datetime.timedelta(days=fetch_news.NEWS_INDEX_RETENTION_DAYS + 1)
+        fetch_news.save_new_articles(self.db, [a_new], now=old_now)
+        hashes = self.db.store[shard]['hashes']
+        self.assertNotIn(a_old['id'], hashes, '超過保留期的索引條目應被清除')
+        self.assertIn(a_new['id'], hashes)
+
+    # ── Codex 複查新增：索引讀取失敗必須中止、不得覆蓋索引 ──────
+    def test_index_read_failure_aborts_without_any_write(self):
+        self.db.store['meta/existing'] = {'x': 1}
+        self.db.fail_get_paths.add('meta/newsIndex')
+        with self.assertRaises(RuntimeError):
+            fetch_news.save_new_articles(self.db, [_mk_article(0)], now=self.now)
+        self.assertEqual(self.db.news_doc_count(), 0, '索引讀取失敗時不得寫入任何文章')
+        self.assertEqual(self.db.writes, 0, '索引讀取失敗時不得有任何寫入（含覆蓋索引）')
+
+    # ── Codex 複查新增：並行更新索引不得 lost-update ──────────────
+    def test_txn_merge_preserves_entries_written_by_other_job(self):
+        art = _mk_article(0, doc_id='b' + '0' * 19)
+        shard = f"meta/{fetch_news._shard_doc_id(art['id'])}"
+        # 模擬 community_job 已寫入同分片的另一條目（在本 job 讀索引之後）
+        other_id = 'b' + 'f' * 19
+        self.db.store[shard] = {'hashes': {other_id: {'h': 'xxxx', 't': '20260714'}}}
+        fetch_news.save_new_articles(self.db, [art], now=self.now)
+        hashes = self.db.store[shard]['hashes']
+        self.assertIn(other_id, hashes, '其他 job 的索引條目不得被蓋掉（lost update）')
+        self.assertIn(art['id'], hashes)
+
+    def test_news_and_community_sequential_updates_both_persist(self):
+        news_art = _mk_article(0, doc_id='c' + '0' * 19)
+        comm_art = _mk_article(1, doc_id='c' + '1' * 19)   # 同分片
+        fetch_news.save_new_articles(self.db, [news_art], now=self.now)
+        fetch_news.save_new_articles(self.db, [comm_art], now=self.now)
+        # 兩者都在索引中：重跑各自 job 都應 skipped，不重寫
+        s1 = fetch_news.save_new_articles(self.db, [news_art], now=self.now)
+        s2 = fetch_news.save_new_articles(self.db, [comm_art], now=self.now)
+        self.assertEqual((s1['skipped'], s2['skipped']), (1, 1))
+
+    def test_index_updates_go_through_transaction(self):
+        fetch_news.save_new_articles(self.db, [_mk_article(0)], now=self.now)
+        self.assertGreater(self.db.txn_count, 0, '索引回寫必須走 transaction')
+
+    # ── Codex 複查新增：分片與大小保護 ───────────────────────────
+    def test_shard_doc_id_mapping(self):
+        self.assertEqual(fetch_news._shard_doc_id('abc'), 'newsIndex_a')
+        self.assertEqual(fetch_news._shard_doc_id('F00'), 'newsIndex_f')
+        self.assertEqual(fetch_news._shard_doc_id('zzz'), 'newsIndex_0')  # 非 hex fallback
+        self.assertEqual(fetch_news._shard_doc_id(''), 'newsIndex_0')
+
+    def test_shard_hard_cap_keeps_newest(self):
+        with unittest.mock.patch.object(fetch_news, 'NEWS_INDEX_MAX_ENTRIES_PER_SHARD', 3):
+            shard = 'meta/newsIndex_d'
+            self.db.store[shard] = {'hashes': {
+                f'd{i}': {'h': 'h', 't': f'2026070{i}'} for i in range(1, 4)   # d1..d3
+            }}
+            art = _mk_article(9, doc_id='d' + '9' * 19)
+            fetch_news.save_new_articles(self.db, [art], now=self.now)
+            hashes = self.db.store[shard]['hashes']
+            self.assertEqual(len(hashes), 3, '超過硬上限時分片必須被裁切')
+            self.assertIn(art['id'], hashes, '裁切須保留最新條目')
+            self.assertNotIn('d1', hashes, '裁切須淘汰最舊條目')
+
+
+class TestLeaseLock(unittest.TestCase):
+    def setUp(self):
+        self.db = FakeDB()
+        self.now = datetime.datetime(2026, 7, 15, 9, 0, tzinfo=TZ_UTC)
+
+    def test_is_lock_expired_pure(self):
+        self.assertTrue(fetch_news.is_lock_expired(None, self.now))
+        self.assertTrue(fetch_news.is_lock_expired({}, self.now))
+        self.assertTrue(fetch_news.is_lock_expired(
+            {'expiresAt': self.now - datetime.timedelta(seconds=1)}, self.now))
+        self.assertFalse(fetch_news.is_lock_expired(
+            {'expiresAt': self.now + datetime.timedelta(minutes=5)}, self.now))
+
+    def test_acquire_returns_unique_token(self):
+        t1 = fetch_news.acquire_lock(self.db, 'news', ttl_minutes=10, now=self.now)
+        self.assertIsInstance(t1, str)
+        fetch_news.release_lock(self.db, 'news', t1)
+        t2 = fetch_news.acquire_lock(self.db, 'news', ttl_minutes=10, now=self.now)
+        self.assertNotEqual(t1, t2, '每次持鎖必須產生唯一 owner token')
+
+    def test_second_acquire_blocked_while_held(self):
+        self.assertIsNotNone(fetch_news.acquire_lock(self.db, 'news', ttl_minutes=10, now=self.now))
+        self.assertIsNone(fetch_news.acquire_lock(self.db, 'news', ttl_minutes=10,
+                                                  now=self.now + datetime.timedelta(minutes=1)),
+                          '鎖仍有效時，重複執行必須被擋下')
+
+    def test_expired_lock_taken_over_in_transaction(self):
+        fetch_news.acquire_lock(self.db, 'news', ttl_minutes=10, now=self.now)
+        later = self.now + datetime.timedelta(minutes=11)
+        txn_before = self.db.txn_count
+        token = fetch_news.acquire_lock(self.db, 'news', ttl_minutes=10, now=later)
+        self.assertIsNotNone(token, '過期鎖（前次異常中止）必須可被接管')
+        self.assertGreater(self.db.txn_count, txn_before, '接管必須在 transaction 內完成')
+
+    def test_double_takeover_only_one_wins(self):
+        """兩個執行個體同時對過期鎖接管：transaction 重讀最新狀態，僅一個成功"""
+        fetch_news.acquire_lock(self.db, 'news', ttl_minutes=10, now=self.now)
+        later = self.now + datetime.timedelta(minutes=11)   # 原鎖已過期
+        token_a = fetch_news.acquire_lock(self.db, 'news', ttl_minutes=10, now=later)
+        token_b = fetch_news.acquire_lock(self.db, 'news', ttl_minutes=10, now=later)
+        self.assertIsNotNone(token_a, '先提交者接管成功')
+        self.assertIsNone(token_b, '後提交者在 txn 內看到新鎖（未過期），必須失敗')
+
+    def test_old_owner_cannot_delete_new_owner_lock(self):
+        """舊執行者逾時後鎖被接管，其 finally 的 release 不得刪掉接管者的鎖"""
+        stale_token = fetch_news.acquire_lock(self.db, 'news', ttl_minutes=10, now=self.now)
+        later = self.now + datetime.timedelta(minutes=11)
+        new_token = fetch_news.acquire_lock(self.db, 'news', ttl_minutes=10, now=later)
+        released = fetch_news.release_lock(self.db, 'news', stale_token)
+        self.assertFalse(released, '舊 token 的 release 必須失敗')
+        self.assertIn('meta/lock_news', self.db.store, '接管者的鎖必須仍然存在')
+        self.assertEqual(self.db.store['meta/lock_news']['owner'], new_token)
+        self.assertTrue(fetch_news.release_lock(self.db, 'news', new_token),
+                        '接管者本人的 release 必須成功')
+
+    def test_release_with_none_token_is_noop(self):
+        fetch_news.acquire_lock(self.db, 'news', ttl_minutes=10, now=self.now)
+        self.assertFalse(fetch_news.release_lock(self.db, 'news', None))
+        self.assertIn('meta/lock_news', self.db.store)
+
+    def test_release_allows_reacquire(self):
+        token = fetch_news.acquire_lock(self.db, 'news', ttl_minutes=10, now=self.now)
+        self.assertTrue(fetch_news.release_lock(self.db, 'news', token))
+        self.assertIsNotNone(fetch_news.acquire_lock(self.db, 'news', ttl_minutes=10, now=self.now))
+
+    def test_locks_are_independent_by_name(self):
+        self.assertIsNotNone(fetch_news.acquire_lock(self.db, 'news', ttl_minutes=10, now=self.now))
+        self.assertIsNotNone(fetch_news.acquire_lock(self.db, 'finance', ttl_minutes=10, now=self.now))
+
+
+class TestFetchSourceTimeout(unittest.TestCase):
+    def test_rss_fetched_via_requests_with_timeout(self):
+        fake_resp = types.SimpleNamespace(content=b'<rss></rss>')
+        with unittest.mock.patch.object(fetch_news.requests, 'get',
+                                        return_value=fake_resp) as mget, \
+             unittest.mock.patch.object(fetch_news.feedparser, 'parse',
+                                        return_value=types.SimpleNamespace(entries=[])):
+            fetch_news.fetch_source({'label': 't', 'url': 'https://x.test/rss', 'cat': 'transcend'})
+        _, kwargs = mget.call_args
+        self.assertEqual(kwargs.get('timeout'), fetch_news.RSS_TIMEOUT,
+                         'RSS 抓取必須帶 timeout，避免單一來源卡死排程')
+
+
 if __name__ == '__main__':
     unittest.main()

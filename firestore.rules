@@ -3,8 +3,12 @@ rules_version = '2';
 // ─────────────────────────────────────────────────────────────
 // 創見新聞監控 — Firestore 安全規則
 // 原則：前端實際讀取的集合開放「公開唯讀」；所有客戶端一律禁止寫入。
-// 寫入僅由 GitHub Actions 的 Firebase Admin SDK 執行（Admin SDK 繞過規則，
-// 因此 write: false 只擋客戶端，不影響排程）。
+// 寫入僅由 Admin SDK 執行——正式排程為 Cloud Functions（transcend-news-tbm
+// 專案的 functions/main.py），GitHub Actions 僅保留手動備援觸發。
+// Admin SDK 繞過規則，因此 write: false 只擋客戶端，不影響排程。
+//
+// 內部集合 meta/*（排程鎖 lock_*、去重索引分片 newsIndex_0..f）
+// 由檔末的預設拒絕涵蓋：客戶端不可讀寫，僅 Admin SDK 存取。
 //
 // 部署位置：這份規則屬於「資料庫專案 transcend-news-monitor」（舊 Google 帳號），
 // 不是 Hosting 專案 transcend-news-tbm。部署方式見 README「Firestore Rules 部署」。

@@ -1893,7 +1893,11 @@ function App() {
         setLoading(false);
       }
     })();
-    return () => { if (unsubStocks) unsubStocks(); };
+    return () => {
+      if (unsubStocks) unsubStocks();
+      if (window._newsUnsub) { window._newsUnsub(); window._newsUnsub = null; }
+      window._newsRetryRest = null;
+    };
   }, []);
 
   // ─── 股價每 5 分鐘輪詢（onSnapshot 即時推送的備援）─────────
@@ -1921,28 +1925,112 @@ function App() {
   }
 
   async function fetchNews() {
+    // 已建立即時監聽器：更新由 listener 自動推送，不重建查詢；
+    // 但若 cursor 補抓曾失敗（fullLoaded=false），手動刷新在此重試補抓
+    if (window._newsUnsub) {
+      if (window._newsRetryRest) window._newsRetryRest();
+      return;
+    }
+
     const baseQuery = () => window._db.collection('news')
       .where('pubDate', '>=', new Date('2026-01-01T00:00:00+08:00'))
       .orderBy('pubDate', 'desc');
-    const apply = snap => setNews(snap.docs
-      .map(d => ({ id:d.id, ...d.data() }))
-      .filter(n => !n.link?.includes('msn.com')));
+    const toObj = d => ({ id: d.id, ...d.data() });
+
+    // 以 id → 文章 的 Map 合併各來源（快取整批 / 監聽最新段 / cursor 舊文段），
+    // 保證無重複項；發佈前重新依 pubDate 排序，保證順序正確。
+    const store = new Map();
+    const publish = () => {
+      const ms = v => (v?.toDate ? v.toDate().getTime() : new Date(v || 0).getTime());
+      const arr = [...store.values()]
+        .filter(n => !n.link?.includes('msn.com'))
+        .sort((a, b) => ms(b.pubDate) - ms(a.pubDate))
+        .slice(0, 2000);
+      setNews(arr);
+      setLoading(false);
+    };
+
+    // 讀取量說明（docChanges 數量≠計費讀取數，不可作為依據）：
+    // 有本機快取時，監聽「通常」以續傳方式只讀取異動文件；但 listener 中斷
+    // 超過約 30 分鐘後重新連線，可能被視為新查詢而重新計算最新 300 則的讀取。
+    // 快取能大幅降低讀取量，但不保證永遠只計異動文件。
+    // 受控驗證方式：
+    // 1. 挑排程空檔（或暫停排程），記下 Firebase Console → Firestore →
+    //    使用情況（或 GCP Monitoring 指標 firestore.googleapis.com/document/read_count）目前讀取數
+    // 2. 用無痕視窗（乾淨快取）開一次頁面 → 讀取數應增加約 2000（300+1700）
+    // 3. 關閉後以一般視窗（有快取）立即再開一次 → 增量應遠小於 2000
+    //
+    // 載入狀態機：
+    //   fullLoaded  = 已擁有完整資料 —— 只有「快取本身已達完整 2000 筆」或
+    //                 「cursor 補抓確實成功」才為 true（快取非空≠完整，
+    //                 例如上次首載中斷可能只留下 300 筆的部分快取）
+    //   restLoading = cursor 補抓進行中 —— 防止 onSnapshot 連續觸發時
+    //                 同時發出多個後續查詢
+    let fullLoaded = false;
+    let restLoading = false;
+    let lastCursorDoc = null;                   // 最新補抓游標（供手動刷新/自動重試）
+    let autoRetries = 0;
+    const MAX_AUTO_RETRIES = 2;                 // 有上限的短時間自動重試
+
+    const fetchRest = async (cursorDoc) => {
+      if (fullLoaded || restLoading || !cursorDoc) return;
+      restLoading = true;                       // 查詢開始：只設 restLoading
+      try {
+        const rest = await baseQuery()
+          .startAfter(cursorDoc)                // 排除式游標：與最新 300 零重疊
+          .limit(1700)
+          .get({ source: 'server' });           // 明確 server：預設 get() 斷線時可能
+                                                // 回退部分快取，不得據此視為完整
+        rest.docs.forEach(d => store.set(d.id, toObj(d)));
+        publish();
+        fullLoaded = true;                      // 只有 server 查詢成功才標記完成
+      } catch (e) {
+        // 失敗：fullLoaded 維持 false。重試管道有三：
+        // ①短時間自動重試（有上限）②下一次 server snapshot ③使用者手動刷新
+        console.error('News rest 補抓失敗（將自動重試，或按「重新整理」）:', e);
+        if (autoRetries < MAX_AUTO_RETRIES) {
+          autoRetries++;
+          setTimeout(() => fetchRest(lastCursorDoc), 5000 * autoRetries);
+        }
+      } finally {
+        restLoading = false;
+      }
+    };
+    // 手動刷新重試 hook（fetchRest 內的 fullLoaded/restLoading 檢查天然防重複）
+    window._newsRetryRest = () => fetchRest(lastCursorDoc);
+
     try {
-      // 三段式載入：目標是把「開頁到看到內容」壓到最短
-      // ① 本機快取（第二次開啟起幾乎 0 等待；首次無快取會拋錯，忽略即可）
-      let hasCache = false;
+      // ① 本機快取整批出圖（0 次伺服器讀取；第二次開啟起幾乎秒開）
       try {
         const cached = await baseQuery().limit(2000).get({ source: 'cache' });
-        if (!cached.empty) { apply(cached); hasCache = true; setLoading(false); }
-      } catch(e) { /* 首次開啟無快取，屬正常 */ }
-      // ② 無快取時先抓最新 300 則快速首屏
-      if (!hasCache) {
-        apply(await baseQuery().limit(300).get());
-        setLoading(false);
-      }
-      // ③ 完整 2000 則背景補齊（統計卡「本月/本年」數字以此為準）
-      apply(await baseQuery().limit(2000).get());
-    } catch(e) { console.error('News:', e); }
+        if (!cached.empty) {
+          cached.docs.forEach(d => store.set(d.id, toObj(d)));
+          publish();
+          if (cached.size >= 2000) fullLoaded = true;   // 快取完整才算載入完成
+        }
+      } catch (e) { /* 首次造訪無快取，屬正常 */ }
+
+      // ② 只監聽「最新 300 則」範圍：新新聞即時推送、既有文章更新同步
+      window._newsUnsub = baseQuery().limit(300).onSnapshot(snap => {
+        if (snap.metadata.fromCache && snap.empty) return;   // 首次無快取的空快取事件
+        snap.docChanges().forEach(c => {
+          if (c.type !== 'removed') store.set(c.doc.id, toObj(c.doc));
+          // removed 僅代表移出「最新300」窗口，文章本身仍在，保留即可
+        });
+        publish();
+
+        // ③ 資料尚不完整（無快取首次造訪、或部分快取）→ cursor 補抓其餘文件
+        if (!snap.metadata.fromCache && snap.size > 0) {
+          lastCursorDoc = snap.docs[snap.size - 1];   // 隨時保存最新游標
+          if (!fullLoaded) fetchRest(lastCursorDoc);
+        }
+      }, err => {
+        // 監聽器永久錯誤：清理狀態，讓使用者按「重新整理」時能重建監聽
+        console.error('News listen 中斷（按「重新整理」可重建）:', err);
+        window._newsUnsub = null;
+        window._newsRetryRest = null;
+      });
+    } catch (e) { console.error('News:', e); }
   }
 
   async function fetchStocks() {

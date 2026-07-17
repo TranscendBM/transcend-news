@@ -1,7 +1,8 @@
 """
-創見資訊新聞監控系統 — 自動抓取腳本
-由 GitHub Actions 排程執行（台灣時間 08:00 / 16:00）
-儲存結果到 Firebase Firestore
+創見資訊新聞監控系統 — 抓取邏輯
+正式排程：Cloud Functions（見 main.py，部署於 transcend-news-tbm）
+手動備援：GitHub Actions workflow_dispatch（python functions/fetch_news.py）
+儲存結果到 Firebase Firestore（transcend-news-monitor 專案）
 """
 
 import os
@@ -10,6 +11,7 @@ import hashlib
 import datetime
 import sys
 import time
+import uuid
 import requests
 import feedparser
 import firebase_admin
@@ -376,10 +378,18 @@ def extract_reporter(raw_author):
     return a if (is_cn or is_en) else None
 
 
+RSS_TIMEOUT = 15   # 秒；RSS 來源逾時上限（feedparser 自抓網路沒有 timeout，會卡死排程）
+
+
 def fetch_source(src, retry=2):
     for attempt in range(retry + 1):
         try:
-            feed = feedparser.parse(src['url'])
+            # 先用 requests（帶 timeout）取回內容，再交給 feedparser 解析，
+            # 避免單一來源無回應拖垮整個排程
+            resp = requests.get(src['url'], timeout=RSS_TIMEOUT, headers={
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+            })
+            feed = feedparser.parse(resp.content)
             items = []
             kw_filter = src.get('filter')
             for entry in feed.entries[:30]:
@@ -441,7 +451,7 @@ def fetch_source(src, retry=2):
 
 
 def save_to_firestore(db, articles):
-    """批次寫入 Firestore，每 400 筆一批"""
+    """批次寫入 Firestore，每 400 筆一批（低於單批 500 上限）"""
     batch_size = 400
     saved = 0
     for i in range(0, len(articles), batch_size):
@@ -453,6 +463,220 @@ def save_to_firestore(db, articles):
         batch.commit()
         saved += len(chunk)
     return saved
+
+
+# ── 文章內容雜湊：判斷「內容是否真的變了」用 ──────────────────
+# 只納入穩定的內容欄位；fetchedAt / fetchMode 這類每次執行都會變的欄位
+# 不參與雜湊，否則永遠判定為「有變更」。
+_HASH_FIELDS = ('title', 'content', 'link', 'sentiment', 'cat', 'brand',
+                'sourceName', 'mediaName', 'rawAuthor', 'pushCount')
+
+
+def article_content_hash(article):
+    """對文章的穩定內容欄位計算雜湊（含 pubDate），內容不變則雜湊不變"""
+    pub = article.get('pubDate')
+    pub_s = pub.isoformat() if hasattr(pub, 'isoformat') else str(pub or '')
+    parts = [pub_s] + [str(article.get(f) or '') for f in _HASH_FIELDS]
+    return hashlib.md5('\x1f'.join(parts).encode('utf-8')).hexdigest()[:16]
+
+
+# ── 去重索引（分片設計）──────────────────────────────────────
+# meta/newsIndex_0 … newsIndex_f 共 16 個分片文件，依文章 id（md5 hex）
+# 第一個字元分片，內容為 hashes: {文章id → {h: 內容雜湊, t: YYYYMMDD}}。
+#
+# 為什麼要分片（1 MiB / 40,000 index-entry 上限評估）：
+#   90 天保留窗口估計約 2~4 萬篇不重複文章。單一文件時
+#   大小 ≈ 45B × 36K ≈ 1.6MB（超過 1 MiB 上限）、
+#   map 葉欄位自動索引項 ≈ 4 × 36K ≈ 144K（超過 40K 上限）。
+#   分 16 片後每片 ≈ 2.3K 條 ≈ 100KB / 9K 索引項，皆有數倍餘裕；
+#   另設 NEWS_INDEX_MAX_ENTRIES_PER_SHARD 硬上限做大小保護。
+NEWS_INDEX_COLLECTION = 'meta'
+NEWS_INDEX_RETENTION_DAYS = 90            # 需大於 fetch_source 的 60 天舊文窗口
+NEWS_INDEX_MAX_ENTRIES_PER_SHARD = 6000   # 硬上限：約 <300KB、<24K 索引項/分片
+_HEX_CHARS = set('0123456789abcdef')
+
+
+def _shard_doc_id(article_id):
+    """文章 id（md5 hex）→ 索引分片文件 id；非 hex 開頭一律落到 0 號分片"""
+    c = (article_id or '0')[0].lower()
+    return f"newsIndex_{c if c in _HEX_CHARS else '0'}"
+
+
+def _run_in_transaction(db, fn):
+    """
+    在 Firestore transaction 內執行 fn(txn)。
+    測試用 FakeDB 提供 run_in_transaction(fn) 介面時改用之（語意相同：
+    fn 內的讀取看到的是最新狀態、寫入原子生效）。
+    """
+    if hasattr(db, 'run_in_transaction'):
+        return db.run_in_transaction(fn)
+    transaction = db.transaction()
+    return firestore.transactional(fn)(transaction)
+
+
+def _txn_merge_index_shard(db, shard_id, new_entries, cutoff):
+    """
+    以 transaction 將 new_entries 合併進索引分片：
+    txn 內重新讀取最新分片內容再合併，消除 news_job / community_job
+    並行修改索引時的 lost-update 競態（後寫者不會蓋掉先寫者的條目）。
+    同時做保留期瘦身與分片大小硬上限保護。
+    """
+    ref = db.collection(NEWS_INDEX_COLLECTION).document(shard_id)
+
+    def fn(txn):
+        snap = ref.get(transaction=txn)
+        current = {}
+        if getattr(snap, 'exists', False):
+            current = (snap.to_dict() or {}).get('hashes', {}) or {}
+        merged = {**current, **new_entries}
+        pruned = {k: v for k, v in merged.items() if v.get('t', '') >= cutoff}
+        if len(pruned) > NEWS_INDEX_MAX_ENTRIES_PER_SHARD:
+            newest = sorted(pruned.items(), key=lambda kv: kv[1].get('t', ''),
+                            reverse=True)[:NEWS_INDEX_MAX_ENTRIES_PER_SHARD]
+            pruned = dict(newest)
+        txn.set(ref, {'hashes': pruned, 'updatedAt': firestore.SERVER_TIMESTAMP})
+
+    _run_in_transaction(db, fn)
+
+
+def save_new_articles(db, articles, now=None):
+    """
+    只寫入「新文章」或「內容確實變更」的文章，避免每 15 分鐘重寫舊新聞。
+    已存在且未變更的文章完全不碰（不 set、不 update、不刷新 fetchedAt）。
+
+    索引讀取失敗時**中止本次儲存**（拋出例外）：絕不以空索引繼續寫入，
+    否則會誤判全部為新文章、且回寫時覆蓋掉原索引。
+
+    回傳 dict(added=…, updated=…, skipped=…)。
+    """
+    if not articles:
+        return {'added': 0, 'updated': 0, 'skipped': 0}
+    now = now or datetime.datetime.now(datetime.timezone(datetime.timedelta(hours=8)))
+    today = now.strftime('%Y%m%d')
+
+    # ① 讀取相關索引分片；任何一片讀取失敗 → 中止（不寫入任何文章）
+    shard_ids = sorted({_shard_doc_id(a['id']) for a in articles})
+    index = {}
+    try:
+        for sid in shard_ids:
+            snap = db.collection(NEWS_INDEX_COLLECTION).document(sid).get()
+            if getattr(snap, 'exists', False):
+                index.update((snap.to_dict() or {}).get('hashes', {}) or {})
+    except Exception as e:
+        raise RuntimeError(f'newsIndex 分片 {sid} 讀取失敗，中止本次儲存'
+                           f'（避免以空索引重寫全部文章/覆蓋索引）: {e}') from e
+
+    # ② 比對內容雜湊，找出需要寫入的文章
+    to_write = []
+    new_entries_by_shard = {}
+    added = updated = skipped = 0
+    for a in articles:
+        h = article_content_hash(a)
+        entry = index.get(a['id'])
+        if entry and entry.get('h') == h:
+            skipped += 1
+            continue
+        updated += 1 if entry else 0
+        added += 0 if entry else 1
+        to_write.append(a)
+        new_entries_by_shard.setdefault(_shard_doc_id(a['id']), {})[a['id']] = {'h': h, 't': today}
+
+    # ③ 先寫文章、後更新索引：順序不可顛倒——若先記索引而文章寫入失敗，
+    #    文章會被永久誤判為「已存在」而漏寫；反向失敗只是下次多寫一次（冪等）。
+    if to_write:
+        save_to_firestore(db, to_write)
+
+    # ④ transaction 逐分片合併回寫（見 _txn_merge_index_shard）
+    cutoff = (now - datetime.timedelta(days=NEWS_INDEX_RETENTION_DAYS)).strftime('%Y%m%d')
+    for sid, entries in new_entries_by_shard.items():
+        _txn_merge_index_shard(db, sid, entries, cutoff)
+
+    print(f"  📊 寫入統計：新增 {added} / 更新 {updated} / 跳過(未變更) {skipped}")
+    return {'added': added, 'updated': updated, 'skipped': skipped}
+
+
+# ══════════════════════════════════════════════════════════════
+# 排程執行鎖（Firestore lease lock，transaction 原子操作）
+# 防止排程因外部服務延遲而與下一次觸發重疊執行。
+# - 取得/過期接管都在 transaction 內完成，兩個執行個體同時搶鎖只會有一個成功
+# - 每次持鎖產生唯一 owner token（UUID），release 只刪除 token 相符的鎖，
+#   舊執行者不可能誤刪已被接管的新鎖
+# - 鎖有到期時間（lease）：函式異常死掉時，過期後可被接管，不會永久鎖死。
+#   TTL 必須大於該排程函式的 timeout。
+# ══════════════════════════════════════════════════════════════
+
+def is_lock_expired(lock_dict, now):
+    """純函式：鎖文件內容是否已過期（不存在/缺欄位一律視為過期）"""
+    if not lock_dict:
+        return True
+    exp = lock_dict.get('expiresAt')
+    if exp is None:
+        return True
+    return exp <= now
+
+
+def _lock_ref(db, name):
+    return db.collection('meta').document(f'lock_{name}')
+
+
+def acquire_lock(db, name, ttl_minutes=15, now=None):
+    """
+    以 transaction 原子性取得排程鎖。
+    成功回傳本次持鎖的 owner token（uuid 字串，交給 release_lock 用）；
+    他人持鎖中（未過期）回傳 None，呼叫端應跳過本次執行。
+    過期鎖的接管同樣在 transaction 內：txn 重讀最新狀態，
+    兩個執行個體同時接管時只有先提交者成功。
+    """
+    now = now or datetime.datetime.now(datetime.timezone.utc)
+    token = uuid.uuid4().hex
+    ref = _lock_ref(db, name)
+    payload = {
+        'owner':      token,
+        'revision':   os.environ.get('K_REVISION', 'local'),
+        'acquiredAt': now,
+        'expiresAt':  now + datetime.timedelta(minutes=ttl_minutes),
+    }
+
+    def fn(txn):
+        snap = ref.get(transaction=txn)
+        current = snap.to_dict() if getattr(snap, 'exists', False) else None
+        if current is not None and not is_lock_expired(current, now):
+            return None                      # 他人持鎖中
+        if current is not None:
+            print(f"  🔓 鎖 {name} 已過期（前次執行可能異常中止），接管")
+        txn.set(ref, payload)
+        return token
+
+    try:
+        return _run_in_transaction(db, fn)
+    except Exception as e:
+        print(f"  ⚠ 取得鎖 {name} 失敗，保守跳過本次執行: {e}")
+        return None
+
+
+def release_lock(db, name, token):
+    """
+    釋放排程鎖（呼叫端應放在 finally 內）。
+    transaction 內檢查 owner token：只刪除自己持有的鎖；
+    鎖已被接管（token 不符）時不動作，回傳 False。
+    """
+    if not token:
+        return False
+    ref = _lock_ref(db, name)
+
+    def fn(txn):
+        snap = ref.get(transaction=txn)
+        current = snap.to_dict() if getattr(snap, 'exists', False) else None
+        if current and current.get('owner') == token:
+            txn.delete(ref)
+            return True
+        return False
+
+    try:
+        return _run_in_transaction(db, fn)
+    except Exception as e:
+        print(f"  ⚠ 釋放鎖 {name} 失敗（將於到期後自動失效）: {e}")
+        return False
 
 
 def fetch_cmoney_forum(stock_code='2451', limit=30):
@@ -1015,9 +1239,9 @@ def fetch_and_save_news(db, mode='all'):
     print(f"\n📊 共抓取 {len(all_articles)} 則不重複新聞")
 
     if all_articles:
-        print(f"\n💾 儲存到 Firebase Firestore...")
-        saved = save_to_firestore(db, all_articles)
-        print(f"✅ 成功儲存 {saved} 則新聞")
+        print(f"\n💾 儲存到 Firebase Firestore（僅新增/變更）...")
+        stats = save_new_articles(db, all_articles)
+        print(f"✅ 新聞儲存完成：新增 {stats['added']} / 更新 {stats['updated']} / 跳過 {stats['skipped']}")
     else:
         print("⚠ 沒有新聞可儲存")
 
@@ -1036,9 +1260,9 @@ def fetch_and_save_community(db):
     community_articles += fetch_ptt_stock_forum()
 
     if community_articles:
-        print(f"\n💾 儲存社群討論到 Firebase...")
-        save_to_firestore(db, community_articles)
-        print(f"✅ 社群討論已儲存 {len(community_articles)} 則")
+        print(f"\n💾 儲存社群討論到 Firebase（僅新增/變更）...")
+        stats = save_new_articles(db, community_articles)
+        print(f"✅ 社群討論完成：新增 {stats['added']} / 更新 {stats['updated']} / 跳過 {stats['skipped']}")
     return len(community_articles)
 
 

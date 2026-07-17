@@ -1,7 +1,8 @@
 # 創見資訊新聞監控系統
 
 > **Transcend Information (2451) News Intelligence**
-> Firebase Hosting 前端 + GitHub Actions 自動排程 + Firebase Firestore 雲端儲存
+> Firebase Hosting 前端 + Cloud Functions 自動排程 + Firebase Firestore 雲端儲存
+>（GitHub 僅作版本控管；Actions 只保留手動備援觸發）
 
 **正式網址：https://transcend-news.web.app**
 （舊網址 transcend-news-tbm.web.app 已 301 轉址到新網址）
@@ -39,9 +40,30 @@ cd functions && python3.11 -m venv venv && ./venv/bin/pip install -r requirement
 firebase deploy --only functions
 ```
 
-跨專案寫入用的金鑰存在 Secret Manager 的 `MONITOR_SERVICE_ACCOUNT`
-（transcend-news-monitor 的 service account JSON），更新方式：
-`firebase functions:secrets:set MONITOR_SERVICE_ACCOUNT --data-file <金鑰.json>`。
+### 跨專案 Firestore 與 Secret Manager
+
+- 排程函式部署在 **transcend-news-tbm**，但資料寫入**舊專案 transcend-news-monitor** 的 Firestore。
+- 跨專案身分使用 monitor 專案的 service account 金鑰，存放於 tbm 專案的
+  **Secret Manager**（名稱 `MONITOR_SERVICE_ACCOUNT`；不得放進 repo 或程式碼）。更新金鑰：
+  ```bash
+  firebase functions:secrets:set MONITOR_SERVICE_ACCOUNT --data-file <金鑰.json>
+  ```
+- 程式初始化時**必須明確指定 projectId**（`functions/main.py get_db()`）：
+  Cloud Functions 的 `FIREBASE_CONFIG` 預設專案是 tbm，不指定會寫錯資料庫。
+
+### 必要 IAM 權限
+
+| 身分 | 權限 | 用途 |
+|---|---|---|
+| 部署者（tselvis814）| tbm 專案 Owner/Editor | `firebase deploy` |
+| Functions 執行身分（`<專案編號>-compute@developer.gserviceaccount.com`）| `secretmanager.secretAccessor`（deploy 時 CLI 自動授予）| 讀取 MONITOR_SERVICE_ACCOUNT |
+| monitor 專案 service account（金鑰內容本身）| 該專案 Firebase Admin SDK 預設角色 | 寫入 Firestore（繞過 Security Rules）|
+
+### 防重疊與冪等
+
+每個排程函式設 `max_instances=1`，並以 Firestore lease lock（`meta/lock_*`）
+防止執行重疊；鎖有 TTL，函式異常中止會自動過期被接管。新聞寫入採內容雜湊
+去重（`meta/newsIndex`），只寫入新增或內容變更的文章，重跑不產生重複寫入。
 
 ---
 
@@ -60,8 +82,11 @@ firebase deploy --only functions
 │   ├── fetch_news.py             # 抓取邏輯（Functions 與 Actions 共用）
 │   └── requirements.txt          # Python 相依套件（固定版本）
 └── tests/
-    └── test_fetch_news.py        # 純函式單元測試（離線，python3 -m unittest discover -s tests）
+    ├── test_fetch_news.py        # 抓取邏輯單元測試（含去重/鎖/逾時，全離線）
+    └── test_main_functions.py    # Cloud Functions 進入點測試（全離線）
 ```
+
+執行測試：`python3 -m unittest discover -s tests`（不需網路、不碰任何外部服務）
 
 ---
 
@@ -92,87 +117,30 @@ firebase deploy --only functions
 
 ---
 
-## 🚀 完整部署步驟
+## 🚀 從零重建（新環境部署步驟）
 
-### Step 1：建立 Firebase 專案
+### Step 1：資料庫專案（現行為 transcend-news-monitor）
 
-1. 前往 https://console.firebase.google.com
-2. 點「新增專案」，輸入名稱（例如 `transcend-news`），建立專案
-3. 在左側選單點「Firestore Database」→「建立資料庫」
-   - 選擇地區（建議 `asia-east1` 台灣/香港附近）
-   - 選擇「Production mode」（之後套用我們的安全規則）
+1. Firebase Console 建立專案，啟用 **Firestore**（地區建議 `asia-east1`、Production mode）
+2. 「Firestore → 規則」貼上本 repo 的 `firestore.rules` 發布
+3. 「專案設定 → 服務帳號 → Generate new private key」下載 JSON
+   （**妥善保管，絕不進 repo / GitHub / 程式碼**）
 
-4. 取得 **Web 設定**：
-   - 左上齒輪 → 「專案設定」→「一般」
-   - 下方「您的應用程式」→ 點「</> Web」圖示
-   - 填寫應用程式名稱，複製出現的 `firebaseConfig` 物件
+### Step 2：Hosting + Functions 專案（現行為 transcend-news-tbm，需 Blaze 方案）
 
-   ```javascript
-   // 你會看到像這樣的設定
-   const firebaseConfig = {
-     apiKey: "AIzaSy...",
-     authDomain: "transcend-news.firebaseapp.com",
-     projectId: "transcend-news",
-     storageBucket: "transcend-news.appspot.com",
-     messagingSenderId: "123456789",
-     appId: "1:123:web:abc"
-   };
-   ```
+```bash
+firebase login                       # 具 tbm 專案權限的帳號
+firebase functions:secrets:set MONITOR_SERVICE_ACCOUNT --data-file <Step1 的金鑰.json>
+cd functions && python3.11 -m venv venv && ./venv/bin/pip install -r requirements.txt && cd ..
+firebase deploy --only functions,hosting
+```
 
-5. 取得 **Service Account（給 GitHub Actions 用）**：
-   - 「專案設定」→「服務帳號」
-   - 點「Generate new private key」→「Generate key」
-   - 下載 JSON 檔（重要：妥善保管，不要上傳到 GitHub！）
+（若前端 `firebaseConfig` 指向新的資料庫專案，記得同步更新 `public/index.html`）
 
-6. 套用 **Firestore 安全規則**：
-   - 左側選單「Firestore Database」→「規則」
-   - 把 `firestore.rules` 的內容貼入，點「發布」
+### Step 3：GitHub 備援（選用）
 
----
-
-### Step 2：建立 GitHub Repository
-
-1. 前往 https://github.com/new
-2. Repository name：`transcend-news-monitor`（或自訂）
-3. Visibility：**Private**（建議，保護設定）
-4. 點「Create repository」
-
-5. 上傳這個資料夾的所有檔案到 Repository：
-
-   **方法 A：網頁上傳（最簡單）**
-   - 點「uploading an existing file」
-   - 把 `index.html`、`firestore.rules`、`README.md` 拖進去
-   - 再分別建立 `.github/workflows/fetch-news.yml` 和 `scripts/` 目錄下的檔案
-   - 每次點「Commit changes」
-
-   **方法 B：使用 git 指令（有安裝 git 的話）**
-   ```bash
-   git init
-   git add .
-   git commit -m "初始化創見新聞監控系統"
-   git remote add origin https://github.com/你的帳號/transcend-news-monitor.git
-   git push -u origin main
-   ```
-
----
-
-### Step 3：設定 GitHub Secrets
-
-這是最重要的步驟！把 Firebase 服務帳號金鑰安全地存入 GitHub：
-
-1. 在 GitHub Repository 頁面點「Settings」
-2. 左側「Secrets and variables」→「Actions」
-3. 點「New repository secret」
-4. Name：`FIREBASE_SERVICE_ACCOUNT`
-5. Value：把 Step 1 下載的 JSON 檔**全部內容**貼上
-6. 點「Add secret」
-
----
-
-### Step 4：部署前端（Firebase Hosting）
-
-> 前端已改由 **Firebase Hosting** 托管（不再使用 GitHub Pages），見上方「前端部署」。
-> 建議到 Repository Settings → Pages 將 Source 設為「None」，避免無用的 pages build。
+repo Settings → Secrets and variables → Actions → Secrets 新增
+`FIREBASE_SERVICE_ACCOUNT` = Step 1 的 JSON 全文，供手動觸發的備援 workflow 使用。
 
 ---
 
@@ -182,22 +150,21 @@ firebase deploy --only functions
 |---------|------|
 | 網站可訪問 | https://transcend-news.web.app 能正常開啟 |
 | Firebase 橫幅顯示 | 頁面顯示「Firebase 已連線」 |
-| 手動觸發 Actions | GitHub → Actions → 「自動抓取新聞」→ Run workflow |
 | 自動排程 | Cloud Functions：股價交易時段每 1 分鐘、新聞每 15 分鐘（見 functions/main.py） |
-| 新聞出現 | 重新整理頁面，新聞應從 Firebase 載入 |
+| 排程日誌 | `firebase functions:log --project transcend-news-tbm` 或 Firebase Console |
+| 新聞出現 | 開啟頁面，新聞應從 Firebase 載入（新新聞會即時推送） |
 | 單元測試 | `python3 -m unittest discover -s tests` 全數通過 |
 
 ---
 
-## ⚙️ 手動觸發抓取
+## ⚙️ 手動備援觸發（GitHub Actions）
 
-不需要等排程，隨時可以手動執行：
+正式排程由 Cloud Functions 負責；GitHub Actions 僅保留**手動觸發**作為備援
+（Cloud Functions 故障時使用）：
 
-1. GitHub Repository → 點「Actions」分頁
-2. 左側點「自動抓取新聞」
-3. 右側點「Run workflow」→ 選擇模式（all / morning / afternoon）
-4. 點「Run workflow」
-5. 等約 2-3 分鐘，重新整理前端網頁即可看到新聞
+1. GitHub Repository → 「Actions」分頁
+2. 選「自動抓取新聞」（或「Update Stock Prices」）→「Run workflow」
+3. 等約 2-3 分鐘，重新整理前端網頁
 
 ---
 
@@ -205,8 +172,10 @@ firebase deploy --only functions
 
 - **任何 API Key / Service Account / Secret 一律不得寫入前端或 repository**
   （本 repo 為公開，寫入即等於洩漏，且會永久留在 Git 歷史中）
-- Firebase Service Account JSON 儲存在 **GitHub Secrets**，安全加密
-- Firestore 規則：前端讀取的集合**公開唯讀**、所有客戶端禁止寫入，寫入只允許 Admin SDK（Actions）
+- Service Account JSON 僅存兩處加密服務：**GCP Secret Manager**（`MONITOR_SERVICE_ACCOUNT`，
+  供 Cloud Functions）與 **GitHub Secrets**（`FIREBASE_SERVICE_ACCOUNT`，供手動備援）
+- Firestore 規則：前端讀取的集合**公開唯讀**、所有客戶端禁止寫入，
+  寫入只允許 Admin SDK（Cloud Functions 排程／Actions 備援）
 - `public/index.html` 內的 `firebaseConfig.apiKey` 是 Firebase 前端識別用的公開金鑰，
   本來就會隨網頁公開，安全性由 Firestore Rules 把關，**不是**需要保密的 Secret
 
@@ -214,11 +183,15 @@ firebase deploy --only functions
 
 ## 🐛 常見問題
 
-**Q：Actions 執行失敗？**
-A：點 Actions → 失敗的任務 → 查看 log。最常見原因是 `FIREBASE_SERVICE_ACCOUNT` Secret 未設定或格式錯誤。
+**Q：排程沒有跑／資料沒更新？**
+A：`firebase functions:log --project transcend-news-tbm` 看日誌。常見原因：
+Secret `MONITOR_SERVICE_ACCOUNT` 未設定或格式錯誤（日誌會有明確錯誤訊息）、
+前次執行持鎖中（日誌顯示「鎖 xxx 使用中，跳過本次」屬正常防重疊行為）。
 
 **Q：前端顯示空白？**
-A：確認 Firebase 設定正確填入，且 Firestore 中已有資料（先手動觸發一次 Actions）。
+A：確認 Firestore 中已有資料（可先手動觸發一次備援 workflow），並看瀏覽器 Console 錯誤。
 
-**Q：GitHub Actions 免費嗎？**
-A：Public Repository 免費無限制；Private Repository 每月有 2,000 分鐘免費額度（每次執行約 2 分鐘，每天 2 次 = 每月 ~120 分鐘，綽綽有餘）。
+**Q：費用？**
+A：Functions 於 Blaze 方案下執行，目前用量在免費額度內（月費趨近 $0）；
+新聞寫入已做內容雜湊去重，未變更文章不重寫，Firestore 寫入量大幅降低。
+建議在 GCP 帳單設定預算警示。
