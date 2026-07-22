@@ -366,6 +366,25 @@ function getBriefingMeta(article) {
   return { ...primary, score:primary.score + recency + (isSelf?20:0) + (keyMedia?8:0), reasons };
 }
 
+function getActionSuggestion(article, meta) {
+  const text = `${article.title || ''} ${article.content || ''}`.toLowerCase();
+  const isSelf = /創見|transcend information/i.test(text) && article.cat === 'transcend';
+  const actions = {
+    risk: isSelf
+      ? '立即確認事件影響，準備內部說明與對外回應重點。'
+      : '持續追蹤後續發展，評估是否影響創見品牌或產品。',
+    finance: isSelf
+      ? '核對公開資訊與官網內容，整理可供主管使用的財務重點。'
+      : '整理與創見的營運差異，納入下一次競品報告。',
+    opportunity: isSelf
+      ? '評估延伸新聞稿、官網或社群曝光，放大正面聲量。'
+      : '比較產品賣點與市場定位，更新競品資料。',
+    market: '整理對記憶體價格、供應與產品策略的可能影響。',
+    news: '確認與創見的關聯性，再決定是否持續追蹤。',
+  };
+  return actions[meta.kind] || actions.news;
+}
+
 const EXCLUDED_NEWS_PHRASES = ['創見文化事業'];
 function isExcludedNews(n) {
   const text = `${n?.title || ''} ${n?.content || ''}`.toLowerCase();
@@ -450,20 +469,29 @@ function NewsFilterToolbar({ query, setQuery, media, setMedia, sentiment, setSen
   );
 }
 
-function PRBriefing({ articles }) {
+function TodayBriefing({ articles }) {
   const items = useMemo(() => {
-    const weekAgo = Date.now() - 7*24*60*60*1000;
-    const recent = articles.filter(n => {
+    const now = new Date();
+    const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    const today = articles.filter(n => {
       const d = n.pubDate?.toDate ? n.pubDate.toDate() : new Date(n.pubDate || 0);
-      return d.getTime() >= weekAgo;
+      return d.getTime() >= todayStart.getTime();
     });
-    const base = recent.length ? recent : articles;
-    return dedupeArticlesByTitle(sortByDate(base))
-      .map(article => ({ article, meta:getBriefingMeta(article) }))
+    return dedupeArticlesByTitle(sortByDate(today))
+      .map(article => {
+        const meta = getBriefingMeta(article);
+        return { article, meta, action:getActionSuggestion(article, meta) };
+      })
       .filter(item => item.meta.kind !== 'news')
       .sort((a,b) => b.meta.score-a.meta.score)
-      .slice(0,5);
+      .slice(0,6);
   }, [articles]);
+
+  const summary = useMemo(() => ({
+    important: items.length,
+    risks: items.filter(item => item.meta.kind === 'risk').length,
+    competitors: items.filter(item => item.article.cat === 'competitor').length,
+  }), [items]);
 
   const badgeClass = {
     risk:'bg-red-900/40 text-red-300 border-red-700/50',
@@ -474,14 +502,29 @@ function PRBriefing({ articles }) {
   };
 
   return (
-    <Card title="本週重點情報" icon="✨">
-      <div className="flex items-center justify-between gap-3 -mt-1 mb-3">
-        <p className="text-xs text-gray-500">依事件、時效與媒體重要性自動整理</p>
+    <Card title="今日情報快報" icon="☀️">
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 -mt-1 mb-3">
+        <p className="text-xs text-gray-500">今天的重要消息與建議下一步</p>
         <span className="text-[10px] px-2 py-1 rounded-full bg-gray-800 text-gray-500 whitespace-nowrap">規則分析 · 零 API 費用</span>
       </div>
       {items.length > 0 ? (
-        <div className="grid grid-cols-1 lg:grid-cols-5 gap-2">
-          {items.map(({article,meta},i) => (
+        <>
+          <div className="grid grid-cols-3 gap-2 mb-3">
+            <div className="rounded-xl bg-gray-800/40 border border-gray-700/40 px-3 py-2">
+              <p className="text-[10px] text-gray-500">重要消息</p>
+              <p className="text-lg font-bold text-ink">{summary.important}<span className="text-xs font-normal text-gray-500 ml-1">則</span></p>
+            </div>
+            <div className="rounded-xl bg-red-900/40 border border-red-700/50 px-3 py-2">
+              <p className="text-[10px] text-red-300">風險提醒</p>
+              <p className="text-lg font-bold text-red-300">{summary.risks}<span className="text-xs font-normal ml-1">則</span></p>
+            </div>
+            <div className="rounded-xl bg-blue-900/60 border border-blue-700/50 px-3 py-2">
+              <p className="text-[10px] text-blue-300">競品動態</p>
+              <p className="text-lg font-bold text-blue-300">{summary.competitors}<span className="text-xs font-normal ml-1">則</span></p>
+            </div>
+          </div>
+          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-2">
+          {items.map(({article,meta,action},i) => (
             <a key={article.id||i} href={article.link||'#'} target="_blank" rel="noreferrer"
               className="group rounded-xl border border-gray-700/40 bg-gray-800/40 hover:bg-gray-800 hover:border-gray-600 p-3 transition-all min-w-0">
               <div className="flex items-center justify-between gap-2 mb-2">
@@ -489,11 +532,16 @@ function PRBriefing({ articles }) {
                 <span className="text-[10px] text-gray-600">{fmtDate(article.pubDate)}</span>
               </div>
               <p className="content-title text-xs font-semibold leading-relaxed line-clamp-3 transition-colors">{article.title}</p>
-              <p className="text-[10px] text-gray-500 mt-2 line-clamp-2">{meta.reasons.join(' · ')}</p>
+              <p className="text-[10px] text-gray-500 mt-2">入選原因：{meta.reasons.join(' · ')}</p>
+              <div className="mt-2 pt-2 border-t border-gray-700/40">
+                <p className="text-[10px] font-semibold text-secondary mb-0.5">建議下一步</p>
+                <p className="text-[11px] text-gray-500 leading-relaxed">{action}</p>
+              </div>
             </a>
           ))}
-        </div>
-      ) : <div className="py-6 text-center text-sm text-gray-600">目前沒有符合條件的重點情報</div>}
+          </div>
+        </>
+      ) : <div className="py-6 text-center text-sm text-gray-600">今天目前沒有需要處理的重要情報</div>}
     </Card>
   );
 }
@@ -1618,7 +1666,7 @@ function PRTab({ news }) {
 
   return (
     <div className="space-y-4 fade-in">
-      <PRBriefing articles={news.filter(isBriefingCandidate)} />
+      <TodayBriefing articles={news.filter(isBriefingCandidate)} />
 
       {/* 統計卡片 + 各媒體篇數圖 */}
       <PRStatsPanel articles={validTranscend} />
