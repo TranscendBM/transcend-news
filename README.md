@@ -16,9 +16,55 @@
      ↕ 讀取新聞資料（股價 onSnapshot 即時推送）
 Firebase Firestore（transcend-news-monitor）← Cloud Functions 排程（transcend-news-tbm / asia-east1）
      ↑                                          股價每 1 分鐘（交易時段）、新聞每 15 分鐘、
-Firebase Hosting（站台 transcend-news）          社群每 2 小時、財務每日（月初加密）
+Firebase Hosting（站台 transcend-news）          財務每日（月初加密）
 GitHub（TranscendBM/transcend-news，版本控管；Actions 僅剩手動備援觸發）
 ```
+
+## 🤖 零預算 AI 工作流（第一階段）
+
+這個階段不呼叫 Gemini、OpenAI 或其他付費 AI API，也不會自動對外發布內容。
+
+```
+新聞排程 → 透明規則判斷相關性與優先順序 → Firestore ai_jobs（私有待辦）
+                                                   ↓
+公司電腦 ← 本機 Ollama / Gemma 產生摘要與分類 → ai_insights（私有結果）
+```
+
+- `functions/intelligence.py`：雲端的免費規則層，只把相關新聞排入待辦；待辦不複製內文。
+- `tools/local_ai_worker.py`：在公司電腦上主動取得待辦，只允許連到本機
+  `127.0.0.1` / `localhost` 的 Ollama；分析結果不會傳給外部 AI 廠商。
+- 沒有 Ollama 時可用 `--rules-only`，先產生規則版摘要，整條流程仍可運作。
+- `ai_jobs` 與 `ai_insights` 沒有列入公開集合，現行 Firestore Rules 的預設拒絕
+  會阻擋瀏覽器客戶端讀寫；只有 Admin SDK 可存取。
+
+### 公司電腦執行方式
+
+建議使用 Google Application Default Credentials（ADC），避免另外下載長期
+Service Account 金鑰：
+
+```bash
+gcloud auth application-default login
+export FIREBASE_PROJECT_ID=transcend-news-monitor
+python3 -m venv .venv-local-ai
+.venv-local-ai/bin/pip install -r tools/requirements.txt
+```
+
+先以完全不用模型的模式驗證一輪：
+
+```bash
+.venv-local-ai/bin/python tools/local_ai_worker.py --once --rules-only
+```
+
+已在電腦安裝 Ollama 與本機模型後，再執行：
+
+```bash
+ollama pull gemma3:4b
+.venv-local-ai/bin/python tools/local_ai_worker.py --once --model gemma3:4b
+```
+
+程式會驗證模型輸出、最多重試 3 次，並用 owner lease 避免兩個 worker
+同時處理同一筆。新聞文字一律視為不可信外部資料，不會授予模型工具、
+系統指令或對外發送能力。
 
 ## 🚀 前端部署（Firebase Hosting）
 
@@ -80,10 +126,16 @@ firebase deploy --only functions
 ├── functions/
 │   ├── main.py                   # Cloud Functions 排程進入點（部署於 transcend-news-tbm）
 │   ├── fetch_news.py             # 抓取邏輯（Functions 與 Actions 共用）
+│   ├── intelligence.py           # 零成本相關性、優先順序與事件規則
 │   └── requirements.txt          # Python 相依套件（固定版本）
+├── tools/
+│   ├── local_ai_worker.py        # 公司電腦上的 Ollama / 規則處理程式
+│   └── requirements.txt          # 本機 worker 相依套件
 └── tests/
-    ├── test_fetch_news.py        # 抓取邏輯單元測試（含去重/鎖/逾時，全離線）
-    └── test_main_functions.py    # Cloud Functions 進入點測試（全離線）
+    ├── test_fetch_news.py        # 抓取、去重、鎖與 AI 待辦整合測試
+    ├── test_intelligence.py       # 相關性與風險規則測試
+    ├── test_local_ai_worker.py    # 本機端點、輸出與防衝突測試
+　　└── test_main_functions.py    # Cloud Functions 進入點測試（全離線）
 ```
 
 執行測試：`python3 -m unittest discover -s tests`（不需網路、不碰任何外部服務）

@@ -17,6 +17,8 @@ import feedparser
 import firebase_admin
 from firebase_admin import credentials, firestore
 
+import intelligence
+
 # ─── 情緒關鍵字 ───
 POS_KW = ['獲獎','表揚','優勝','榮獲','營收','新高','成長','獲利','上漲','突破',
            '合作','推出','創新','領先','冠軍','熱銷','供不應求','超預期','亮眼',
@@ -465,6 +467,27 @@ def save_to_firestore(db, articles):
     return saved
 
 
+def enqueue_ai_jobs(db, articles):
+    """把值得分析的新文章放入 ai_jobs，供公司電腦上的本機 AI worker 處理。"""
+    jobs = []
+    for article in articles:
+        content_hash = article_content_hash(article)
+        job = intelligence.build_ai_job(article, content_hash, firestore.SERVER_TIMESTAMP)
+        if job:
+            jobs.append(job)
+
+    batch_size = 400
+    for i in range(0, len(jobs), batch_size):
+        batch = db.batch()
+        for job in jobs[i:i + batch_size]:
+            ref = db.collection('ai_jobs').document(job['articleId'])
+            batch.set(ref, job, merge=True)
+        batch.commit()
+    if jobs:
+        print(f"  🤖 本機 AI 待分析工作：{len(jobs)} 筆")
+    return len(jobs)
+
+
 # ── 文章內容雜湊：判斷「內容是否真的變了」用 ──────────────────
 # 只納入穩定的內容欄位；fetchedAt / fetchMode 這類每次執行都會變的欄位
 # 不參與雜湊，否則永遠判定為「有變更」。
@@ -581,10 +604,12 @@ def save_new_articles(db, articles, now=None):
         to_write.append(a)
         new_entries_by_shard.setdefault(_shard_doc_id(a['id']), {})[a['id']] = {'h': h, 't': today}
 
-    # ③ 先寫文章、後更新索引：順序不可顛倒——若先記索引而文章寫入失敗，
-    #    文章會被永久誤判為「已存在」而漏寫；反向失敗只是下次多寫一次（冪等）。
+    # ③ 先寫文章並建立 AI 待辦、最後才更新索引：順序不可顛倒。
+    #    若先記索引，後續寫入失敗時會被永久誤判為已處理；
+    #    現在這個順序若在索引階段失敗，下次只會冪等地重試。
     if to_write:
         save_to_firestore(db, to_write)
+        enqueue_ai_jobs(db, to_write)
 
     # ④ transaction 逐分片合併回寫（見 _txn_merge_index_shard）
     cutoff = (now - datetime.timedelta(days=NEWS_INDEX_RETENTION_DAYS)).strftime('%Y%m%d')

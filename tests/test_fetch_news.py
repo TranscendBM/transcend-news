@@ -385,6 +385,32 @@ class TestSaveNewArticlesDedup(unittest.TestCase):
         self.assertEqual(self.db.news_doc_count(), 950)
         self.assertEqual(self.db.batch_commits, 3, '950 筆應分 400/400/150 三批')
 
+    def test_category_name_alone_does_not_enqueue_ai_job(self):
+        art = _mk_article(0)  # cat=transcend，但標題與內文都未提及公司
+        fetch_news.save_new_articles(self.db, [art], now=self.now)
+        self.assertNotIn(f"ai_jobs/{art['id']}", self.db.store)
+
+    def test_relevant_article_enqueues_idempotent_ai_job(self):
+        art = _mk_article(0, title='創見推出工控 SSD 新品')
+        fetch_news.save_new_articles(self.db, [art], now=self.now)
+        job_path = f"ai_jobs/{art['id']}"
+        self.assertEqual(self.db.store[job_path]['status'], 'pending')
+        self.assertEqual(self.db.store[job_path]['articleId'], art['id'])
+        writes_after_first = self.db.writes
+        fetch_news.save_new_articles(self.db, [art], now=self.now)
+        self.assertEqual(self.db.writes, writes_after_first,
+                         '文章未變時不得重置 AI 待辦')
+
+    def test_changed_relevant_article_refreshes_ai_job_hash(self):
+        art = _mk_article(0, title='創見推出 SSD')
+        fetch_news.save_new_articles(self.db, [art], now=self.now)
+        job_path = f"ai_jobs/{art['id']}"
+        old_hash = self.db.store[job_path]['contentHash']
+        changed = dict(art, content='新增供應鏈與產能說明')
+        fetch_news.save_new_articles(self.db, [changed], now=self.now)
+        self.assertNotEqual(self.db.store[job_path]['contentHash'], old_hash)
+        self.assertEqual(self.db.store[job_path]['status'], 'pending')
+
     def test_index_pruned_after_retention(self):
         # 兩篇文章刻意放同一分片（id 開頭同字元），驗證保留期瘦身
         a_old = _mk_article(0, doc_id='a' + '0' * 19)
