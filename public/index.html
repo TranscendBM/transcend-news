@@ -76,6 +76,11 @@
   .light-theme table { color:#334155; }
   .light-theme input,
   .light-theme select { color:#1f2937; background:#fff; border-color:#d1d5db; }
+  /* 統一文字色彩：主資訊深灰、次要資訊灰藍、互動標題使用品牌紅。 */
+  .light-theme .text-ink { color:#1f2937 !important; }
+  .light-theme .text-secondary { color:#475569 !important; }
+  .light-theme .content-title { color:#334155 !important; }
+  .light-theme .group:hover .content-title { color:var(--brand) !important; }
   .light-theme button:focus-visible,
   .light-theme a:focus-visible { outline:3px solid rgba(150,0,20,.22); outline-offset:2px; }
 
@@ -370,7 +375,7 @@ function NewsCard({ article }) {
     <a href={article.link||'#'} target="_blank" rel="noreferrer"
       className="flex items-start gap-2.5 p-3 rounded-xl bg-gray-800/40 hover:bg-gray-800 border border-gray-700/40 hover:border-gray-600 transition-all group cursor-pointer">
       <div className="flex-1 min-w-0">
-        <p className="text-sm text-gray-200 group-hover:text-white line-clamp-2 leading-snug">{article.title}</p>
+        <p className="content-title text-sm line-clamp-2 leading-snug transition-colors">{article.title}</p>
         <div className="flex items-center gap-1.5 mt-1.5 text-xs text-gray-500">
           <span className="font-medium" style={{ color:'#f87171' }}>{media}</span>
           <span>·</span>
@@ -383,7 +388,7 @@ function NewsCard({ article }) {
 }
 
 // ═══════════════════════════════════════════════════════════
-// PR 過濾函式 — 排除 CMoney / 股市爆料同學會 / 券商明細
+// PR 過濾函式 — 排除 CMoney / 股市爆料同學會 / 券商明細 / 鉅亨盤中速報
 // ═══════════════════════════════════════════════════════════
 function isValidTranscendPR(n) {
   if (n.cat !== 'transcend') return false;
@@ -394,6 +399,9 @@ function isValidTranscendPR(n) {
   const link  = (n.link || '').toLowerCase();
   const media = (n.mediaName || n.sourceName || '').toLowerCase();
   if (link.includes('cmoney') || media.includes('cmoney') || media.includes('爆料')) return false;
+  // 「盤中速報」屬自動股價快訊，避免淹沒真正的媒體報導。
+  const isCnyes = link.includes('cnyes.com') || media.includes('鉅亨') || media.includes('cnyes');
+  if (isCnyes && (n.title || '').includes('盤中速報')) return false;
   // 排除券商個股歷史明細類頁面
   const title = n.title || '';
   const BLOCKED = ['明細','歷史明細','庫存','個股異動','集保','買賣明細','交割明細','籌碼'];
@@ -465,7 +473,7 @@ function USNewsCard({ article }) {
             </span>
           )}
         </div>
-        <p className="text-sm text-gray-200 group-hover:text-white line-clamp-2 leading-snug">{article.title}</p>
+        <p className="content-title text-sm line-clamp-2 leading-snug transition-colors">{article.title}</p>
         {bullets.length > 0 && (
           <div className="mt-2 rounded-lg px-2.5 py-2 space-y-0.5"
                style={{ background:'#f8fbff', border:'1px solid #dbeafe' }}>
@@ -533,7 +541,7 @@ function USMarketTab({ news }) {
       {/* 統計卡片 */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
         {[
-          { label:'本期新聞', val:timeFiltered.length, sub:'供應鏈＋市場', cls:'text-white' },
+          { label:'本期新聞', val:timeFiltered.length, sub:'供應鏈＋市場', cls:'text-ink' },
           { label:'正面消息', val:pos, sub:timeFiltered.length?`${Math.round(pos/timeFiltered.length*100)}% 佔比`:'', cls:'text-green-400' },
           { label:'負面消息', val:neg, sub:timeFiltered.length?`${Math.round(neg/timeFiltered.length*100)}% 佔比`:'', cls:'text-red-400' },
           { label:'最多討論', val:topBrand?.[0]||'—', sub:`${topBrand?.[1]||0} 則`, cls:'text-blue-300', big:false },
@@ -704,7 +712,7 @@ function KeyMediaPanel({ articles }) {
               <span className={`text-xs tabular-nums w-8 text-right font-semibold ${s.monthCount>0?'text-yellow-400':'text-gray-600'}`}>
                 {s.monthCount}
               </span>
-              <span className={`text-xs tabular-nums w-8 text-right font-bold ${s.yearCount>0?'text-white':'text-gray-600'}`}>
+              <span className={`text-xs tabular-nums w-8 text-right font-bold ${s.yearCount>0?'text-ink':'text-gray-600'}`}>
                 {s.yearCount}
               </span>
             </div>
@@ -794,7 +802,7 @@ function StockCard({ code, data }) {
       <div className="flex justify-between items-start mb-2">
         <div>
           <p className="text-xs text-gray-500">{code}</p>
-          <p className="font-bold text-white">{data.name || meta.name}</p>
+          <p className="font-bold text-ink">{data.name || meta.name}</p>
         </div>
         <div className="flex flex-col items-end gap-1">
           {meta.isSelf && (
@@ -810,7 +818,7 @@ function StockCard({ code, data }) {
           )}
         </div>
       </div>
-      <p className="text-2xl font-bold text-white">${data.price ?? '--'}</p>
+      <p className="text-2xl font-bold text-ink">${data.price ?? '--'}</p>
       <div className={`flex items-center gap-1 text-sm font-semibold mt-1 ${up?'text-green-400':dn?'text-red-400':'text-gray-400'}`}>
         <span>{up?'▲':dn?'▼':'─'}</span>
         <span>{up?'+':''}{data.changePct?.toFixed(2)??'--'}%</span>
@@ -1046,7 +1054,7 @@ function RevenueChart({ revenue }) {
                 {recent12.map((r, i) => (
                   <tr key={i} className="border-b border-gray-800/40 hover:bg-gray-800/20">
                     <td className="py-1.5 pr-3 text-gray-300 tabular-nums">{r.label}</td>
-                    <td className="text-right py-1.5 pr-3 text-white tabular-nums font-medium">
+                    <td className="text-right py-1.5 pr-3 text-ink tabular-nums font-medium">
                       {fmtRev(r.revenue)}
                     </td>
                     <td className="text-right py-1.5 pr-3 text-gray-500 tabular-nums">
@@ -1089,7 +1097,7 @@ function RevenueChart({ revenue }) {
             {[...annualData].reverse().map((y, i) => (
               <tr key={i} className="border-b border-gray-800/40 hover:bg-gray-800/20">
                 <td className="py-1.5 pr-3 text-gray-300 font-medium tabular-nums">{y.year}</td>
-                <td className="text-right py-1.5 pr-3 text-white tabular-nums font-medium">{fmtRev(y.total)}</td>
+                <td className="text-right py-1.5 pr-3 text-ink tabular-nums font-medium">{fmtRev(y.total)}</td>
                 <td className={`text-right py-1.5 pr-3 font-bold tabular-nums ${y.yoy==null?'text-gray-600':y.yoy>0?'text-green-400':y.yoy<0?'text-red-400':'text-gray-400'}`}>
                   {y.yoy == null ? '—' : (y.yoy > 0 ? '+' : '') + y.yoy + '%'}
                 </td>
@@ -1180,7 +1188,7 @@ function TermTip({ label, tip }) {
           <span style={{
             position:'absolute', top:'100%', left:'50%', transform:'translateX(-50%)',
             width:0, height:0, borderLeft:'5px solid transparent',
-            borderRight:'5px solid transparent', borderTop:'5px solid #374151',
+            borderRight:'5px solid transparent', borderTop:'5px solid #ffffff',
           }} />
         </span>,
         document.body
@@ -1236,7 +1244,7 @@ function QuarterlyPnL({ financials }) {
                   <td className="text-right py-1.5 pr-3 tabular-nums">{pctCell(q.grossMargin)}</td>
                   <td className="text-right py-1.5 pr-3 tabular-nums">{pctCell(q.opMargin)}</td>
                   <td className="text-right py-1.5 pr-3 tabular-nums">{pctCell(q.netMargin)}</td>
-                  <td className={`text-right py-1.5 pr-0 font-bold tabular-nums ${(q.eps||0)>0?'text-white':(q.eps||0)<0?'text-red-400':'text-gray-500'}`}>
+                  <td className={`text-right py-1.5 pr-0 font-bold tabular-nums ${(q.eps||0)>0?'text-ink':(q.eps||0)<0?'text-red-400':'text-gray-500'}`}>
                     {q.eps != null ? `$${Number(q.eps).toFixed(2)}` : '—'}
                   </td>
                 </tr>
@@ -1312,7 +1320,7 @@ function DividendHistory({ dividends }) {
                   <td className="text-right py-1.5 pr-3 text-blue-400 tabular-nums">
                     {r.stockDividend > 0 ? `$${Number(r.stockDividend).toFixed(2)}` : '—'}
                   </td>
-                  <td className="text-right py-1.5 text-white tabular-nums font-bold">
+                  <td className="text-right py-1.5 text-ink tabular-nums font-bold">
                     ${Number(r.totalDividend > 0 ? r.totalDividend : (r.cashDividend + r.stockDividend)).toFixed(2)}
                   </td>
                 </tr>
@@ -1392,7 +1400,7 @@ function CompetitorMaterial({ material }) {
                   <span className="text-gray-500 shrink-0 tabular-nums">{r.date}</span>
                   {r.link
                     ? <a href={r.link} target="_blank" rel="noopener noreferrer"
-                        className="text-gray-300 flex-1 leading-relaxed hover:text-white hover:underline transition-colors">
+                        className="content-title flex-1 leading-relaxed hover:underline transition-colors">
                         {r.summary}
                       </a>
                     : <span className="text-gray-300 flex-1 leading-relaxed">{r.summary}</span>
@@ -1534,12 +1542,12 @@ function DailyTrading({ daily }) {
             {[['開盤', daily.open], ['收盤', daily.close], ['最高', daily.high], ['最低', daily.low]].map(([k,v]) => (
               <div key={k} className="flex justify-between text-xs">
                 <span className="text-gray-500">{k}</span>
-                <span className="text-white tabular-nums">{v != null ? v : '—'}</span>
+                <span className="text-ink tabular-nums">{v != null ? v : '—'}</span>
               </div>
             ))}
             <div className="flex justify-between text-xs border-t border-gray-700/40 pt-1 mt-1">
               <span className="text-gray-500">交易量</span>
-              <span className="text-white tabular-nums">{daily.volume ? fmtK(daily.volume) + ' 股' : '—'}</span>
+              <span className="text-ink tabular-nums">{daily.volume ? fmtK(daily.volume) + ' 股' : '—'}</span>
             </div>
           </div>
         </div>
