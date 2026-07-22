@@ -38,6 +38,13 @@ class TestRuleAnalysis(unittest.TestCase):
         self.assertEqual(result['impact'], 'risk')
         self.assertTrue(result['requiresReview'])
 
+    def test_same_name_cultural_company_is_excluded(self):
+        value = article(title='創見文化事業有限公司推出新書')
+        result = intelligence.analyze_article_rules(value)
+        self.assertFalse(result['relevant'])
+        self.assertEqual(result['entities'], [])
+        self.assertIsNone(intelligence.build_ai_job(value, 'hash', 'server-time'))
+
     def test_competitor_and_industry_are_detected(self):
         result = intelligence.analyze_article_rules(article(
             title='威剛擴大 NAND 與 SSD 產品線'))

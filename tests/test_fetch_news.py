@@ -561,6 +561,26 @@ class TestFetchSourceTimeout(unittest.TestCase):
         self.assertEqual(kwargs.get('timeout'), fetch_news.RSS_TIMEOUT,
                          'RSS 抓取必須帶 timeout，避免單一來源卡死排程')
 
+    def test_same_name_cultural_company_is_not_fetched(self):
+        fake_resp = types.SimpleNamespace(content=b'<rss></rss>')
+        entries = [
+            types.SimpleNamespace(
+                title='創見文化事業有限公司推出新書',
+                link='https://example.com/culture', summary='書店與出版消息',
+                published_parsed=(2026, 7, 22, 1, 0, 0, 0, 0, 0)),
+            types.SimpleNamespace(
+                title='創見資訊推出工控 SSD',
+                link='https://example.com/ssd', summary='記憶體產品消息',
+                published_parsed=(2026, 7, 22, 1, 0, 0, 0, 0, 0)),
+        ]
+        with unittest.mock.patch.object(fetch_news.requests, 'get', return_value=fake_resp), \
+             unittest.mock.patch.object(fetch_news.feedparser, 'parse',
+                                        return_value=types.SimpleNamespace(entries=entries)):
+            articles = fetch_news.fetch_source({
+                'label': '創見資訊', 'url': 'https://x.test/rss', 'cat': 'transcend'
+            })
+        self.assertEqual([a['title'] for a in articles], ['創見資訊推出工控 SSD'])
+
 
 class TestMaterialNews(unittest.TestCase):
     """創見與競品重大訊息：日期正規化 + 累積合併（只留重訊）"""

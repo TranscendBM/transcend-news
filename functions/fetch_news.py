@@ -407,6 +407,11 @@ def fetch_source(src, retry=2):
                     continue
 
                 content = clean_html(getattr(entry, 'summary', '') or getattr(entry, 'description', ''))[:500]
+
+                # 排除同名但與創見資訊無關的公司，避免寫入 Firestore 與 AI 待辦。
+                if intelligence.is_excluded_article({'title': title, 'content': content}):
+                    continue
+
                 pub_date = parse_date(entry)
 
                 # ─── 60 天舊文過濾：跳過超過 60 天的文章 ───

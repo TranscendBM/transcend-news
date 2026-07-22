@@ -12,6 +12,9 @@ WORKFLOW_VERSION = 'local-ai-v1'
 RULE_VERSION = 'rules-v1'
 QUEUE_THRESHOLD = 20
 
+# 與創見資訊同名、但實際上是其他公司的固定誤判詞。
+EXCLUDED_ARTICLE_PHRASES = ('創見文化事業',)
+
 COMPANIES = {
     # 不使用單獨的英文字 transcend：它也是常見動詞，容易誤判。
     '2451': {'name': '創見資訊', 'aliases': ('創見', 'transcend information')},
@@ -63,6 +66,12 @@ def _matched_terms(text, terms):
     return [term for term in terms if term.lower() in text]
 
 
+def is_excluded_article(article):
+    """判斷文章是否明確屬於同名但無關的公司。"""
+    visible_text = ' '.join(str(article.get(k) or '') for k in ('title', 'content')).lower()
+    return any(phrase.lower() in visible_text for phrase in EXCLUDED_ARTICLE_PHRASES)
+
+
 def _contains_alias(text, alias):
     value = alias.lower()
     if re.fullmatch(r'[a-z0-9 ]+', value):
@@ -72,6 +81,19 @@ def _contains_alias(text, alias):
 
 def analyze_article_rules(article):
     """以透明規則產生初步情報標籤，不使用付費 AI。"""
+    if is_excluded_article(article):
+        return {
+            'ruleVersion': RULE_VERSION,
+            'relevant': False,
+            'relevanceScore': 0,
+            'importanceScore': 0,
+            'eventType': 'other',
+            'entities': [],
+            'impact': 'neutral',
+            'matchedTerms': [],
+            'reasons': ['排除同名非本公司'],
+            'requiresReview': False,
+        }
     text = _text(article)
     entities = []
     reasons = []
