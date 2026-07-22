@@ -287,7 +287,7 @@ def make_article_id(link, title):
 
 
 def parse_date(entry):
-    """Try multiple date fields, return datetime object."""
+    """Try multiple date fields; missing/invalid dates return None, never fetch time."""
     for field in ['published_parsed', 'updated_parsed', 'created_parsed']:
         val = getattr(entry, field, None)
         if val:
@@ -295,7 +295,7 @@ def parse_date(entry):
                 return datetime.datetime(*val[:6], tzinfo=datetime.timezone.utc)
             except Exception:
                 pass
-    return datetime.datetime.now(datetime.timezone.utc)
+    return None
 
 
 def clean_html(text):
@@ -311,6 +311,103 @@ def normalize_title(title, max_len=30):
     """標題正規化（去除空白與符號、轉小寫、取前 max_len 字元），用於新聞去重"""
     import re
     return re.sub(r'[\s\W]+', '', (title or '')).lower()[:max_len]
+
+
+def merge_duplicate_articles(articles):
+    """
+    合併同標題新聞，避免不同 RSS / Google News cluster 把同一篇文章存成多筆。
+
+    - 日期採同標題各筆資料中「最早的有效發布日」，避免重新收錄日冒充原始發布日。
+    - 連結優先採原始媒體網址，而不是 news.google.com 中轉網址。
+    - 使用較長的標題正規化 key，降低不同長標題前 30 字相同時的誤合併。
+    """
+    merged = {}
+    for article in articles:
+        key = normalize_title(article.get('title'), max_len=120)
+        if not key:
+            continue
+        current = merged.get(key)
+        if current is None:
+            merged[key] = dict(article)
+            continue
+
+        current_link = (current.get('link') or '').lower()
+        new_link = (article.get('link') or '').lower()
+        prefer_new = ('news.google.com' in current_link and
+                      new_link and 'news.google.com' not in new_link)
+        preferred = dict(article if prefer_new else current)
+
+        dates = [d for d in (current.get('pubDate'), article.get('pubDate'))
+                 if isinstance(d, datetime.datetime)]
+        if dates:
+            preferred['pubDate'] = min(dates)
+
+        # id 必須跟最後採用的連結一致，後續重跑才能維持冪等。
+        preferred['id'] = make_article_id(preferred.get('link'), preferred.get('title'))
+        merged[key] = preferred
+    result = []
+    for article in merged.values():
+        correction = VERIFIED_NEWS_DATE_CORRECTIONS.get(article.get('title'))
+        if correction:
+            article = {**article, **correction}
+            article['id'] = make_article_id(article.get('link'), article.get('title'))
+        result.append(article)
+    return result
+
+
+def filter_recent_articles(articles, now=None, max_age_days=60):
+    """合併日期衝突後再過濾舊文；日期無效的文章一律不進入儲存流程。"""
+    now = now or datetime.datetime.now(datetime.timezone.utc)
+    kept = []
+    for article in articles:
+        pub_date = article.get('pubDate')
+        if not isinstance(pub_date, datetime.datetime):
+            continue
+        if pub_date.tzinfo is None:
+            pub_date = pub_date.replace(tzinfo=datetime.timezone.utc)
+        if (now - pub_date).days <= max_age_days:
+            kept.append(article)
+    return kept
+
+
+# 已由原始媒體頁面人工核對的歷史日期錯誤。migration marker 確保只執行一次；
+# 保留在程式中作為稽核紀錄，避免日後資料庫重建時又帶回錯誤值。
+VERIFIED_NEWS_DATE_CORRECTIONS = {
+    '台股擂台／挑戰者「股市擺渡人」陳玠儒 本周押偉詮電、創見': {
+        'pubDate': datetime.datetime(
+            2026, 3, 15, 0, 42, 28,
+            tzinfo=datetime.timezone(datetime.timedelta(hours=8))),
+        'link': 'https://money.udn.com/money/story/123397/9380328',
+        'mediaName': '經濟日報',
+        'dateSource': 'publisher_verified',
+    },
+}
+NEWS_DATE_CORRECTION_MARKER = 'migration_news_date_fix_20260722'
+
+
+def apply_verified_news_date_corrections(db):
+    """一次性修正已核對的錯誤新聞日期；成功後寫 marker，失敗則下次重試。"""
+    marker = db.collection('meta').document(NEWS_DATE_CORRECTION_MARKER)
+    if marker.get().exists:
+        return 0
+
+    corrected = 0
+    for title, correction in VERIFIED_NEWS_DATE_CORRECTIONS.items():
+        docs = list(db.collection('news').where('title', '==', title).stream())
+        for i in range(0, len(docs), 400):
+            batch = db.batch()
+            for doc in docs[i:i + 400]:
+                batch.set(doc.reference, correction, merge=True)
+                corrected += 1
+            batch.commit()
+
+    marker.set({
+        'completed': True,
+        'corrected': corrected,
+        'updatedAt': firestore.SERVER_TIMESTAMP,
+    })
+    print(f"  ✅ 已核對新聞日期修正：{corrected} 筆")
+    return corrected
 
 
 def is_tw_market_open(dt):
@@ -414,9 +511,10 @@ def fetch_source(src, retry=2):
 
                 pub_date = parse_date(entry)
 
-                # ─── 60 天舊文過濾：跳過超過 60 天的文章 ───
-                now_utc = datetime.datetime.now(datetime.timezone.utc)
-                if pub_date and (now_utc - pub_date).days > 60:
+                # 日期缺失時不可用 fetchedAt 冒充發布日，否則舊聞會在重新收錄時
+                # 被誤認為今天的新文章。寧可略過並等下一個可靠來源補回。
+                if pub_date is None:
+                    print(f"  ⚠ 略過無有效發布日期：{title[:60]}")
                     continue
 
                 raw_author = (getattr(entry, 'author', '') or '').strip()
@@ -442,6 +540,7 @@ def fetch_source(src, retry=2):
                     'sourceName': src['label'],
                     'mediaName': media_name,
                     'rawAuthor': raw_author,
+                    'dateSource': 'rss',
                     'fetchedAt': datetime.datetime.now(datetime.timezone.utc),
                     'fetchMode': os.environ.get('FETCH_MODE', 'all'),
                 }
@@ -1057,25 +1156,26 @@ def init_db_from_env():
 
 def fetch_and_save_news(db, mode='all'):
     """抓取 RSS 新聞來源、去重並存入 Firestore；回傳儲存篇數"""
+    # 先處理已由原始媒體核對的歷史錯誤；marker 使它只產生一次查詢成本。
+    apply_verified_news_date_corrections(db)
+
     sources = get_sources(mode)
     print(f"📡 開始抓取 {len(sources)} 個來源...\n")
 
-    all_articles = []
-    seen_links = set()
-    seen_titles = set()
+    fetched_articles = []
     for src in sources:
         articles = fetch_source(src)
-        for a in articles:
-            norm_title = normalize_title(a.get('title'))
-            if norm_title and norm_title in seen_titles:
-                continue
-            if a['link'] and a['link'] in seen_links:
-                continue
-            seen_titles.add(norm_title)
-            seen_links.add(a['link'])
-            all_articles.append(a)
+        fetched_articles.extend(articles)
 
-    print(f"\n📊 共抓取 {len(all_articles)} 則不重複新聞")
+    # 同一篇文章可能從多個查詢來源取得不同 Google News cluster URL，
+    # 必須收齊後再合併，才能比較日期並保留原始發布日。
+    merged_articles = merge_duplicate_articles(fetched_articles)
+    all_articles = filter_recent_articles(merged_articles)
+
+    duplicate_count = len(fetched_articles) - len(merged_articles)
+    old_count = len(merged_articles) - len(all_articles)
+    print(f"\n📊 共抓取 {len(fetched_articles)} 則，合併 {duplicate_count} 則重複新聞，"
+          f"略過 {old_count} 則 60 天以上舊文，保留 {len(all_articles)} 則")
 
     if all_articles:
         print(f"\n💾 儲存到 Firebase Firestore（僅新增/變更）...")

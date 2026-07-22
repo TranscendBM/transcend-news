@@ -332,14 +332,47 @@ function normalizeNewsTitle(title='') {
   return title.toLowerCase().replace(/[\s\-–—_:：，,。.!！?？()（）「」『』]/g, '');
 }
 
+const VERIFIED_ARTICLE_CORRECTIONS = {
+  [normalizeNewsTitle('台股擂台／挑戰者「股市擺渡人」陳玠儒 本周押偉詮電、創見')]: {
+    pubDate:new Date('2026-03-14T16:42:28Z'),
+    link:'https://money.udn.com/money/story/123397/9380328',
+    mediaName:'經濟日報',
+    dateSource:'publisher_verified',
+  },
+};
+
 function dedupeArticlesByTitle(articles) {
-  const seen = new Set();
-  return articles.filter(article => {
+  const merged = new Map();
+  articles.forEach(rawArticle => {
+    const correction = VERIFIED_ARTICLE_CORRECTIONS[normalizeNewsTitle(rawArticle.title)];
+    const article = correction ? { ...rawArticle, ...correction } : rawArticle;
     const key = normalizeNewsTitle(article.title);
-    if (!key || seen.has(key)) return false;
-    seen.add(key);
-    return true;
+    if (!key) return;
+    const current = merged.get(key);
+    if (!current) {
+      merged.set(key, article);
+      return;
+    }
+
+    // 同一篇新聞可能有數個 Google News cluster URL；日期衝突時使用
+    // 最早的有效日期，避免重新收錄日被顯示成原始發布日。
+    const time = article => {
+      const d = article.pubDate?.toDate ? article.pubDate.toDate() : new Date(article.pubDate || 0);
+      const ms = d.getTime();
+      return Number.isFinite(ms) && ms > 0 ? ms : null;
+    };
+    const currentTime = time(current);
+    const newTime = time(article);
+    const currentGoogle = (current.link || '').includes('news.google.com');
+    const newDirect = article.link && !(article.link || '').includes('news.google.com');
+    const preferred = currentGoogle && newDirect ? { ...article } : { ...current };
+    if (currentTime !== null || newTime !== null) {
+      preferred.pubDate = newTime !== null && (currentTime === null || newTime < currentTime)
+        ? article.pubDate : current.pubDate;
+    }
+    merged.set(key, preferred);
   });
+  return sortByDate([...merged.values()]);
 }
 
 const BRIEFING_RULES = [
@@ -473,11 +506,11 @@ function TodayBriefing({ articles }) {
   const items = useMemo(() => {
     const now = new Date();
     const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-    const today = articles.filter(n => {
+    const today = dedupeArticlesByTitle(articles).filter(n => {
       const d = n.pubDate?.toDate ? n.pubDate.toDate() : new Date(n.pubDate || 0);
       return d.getTime() >= todayStart.getTime();
     });
-    return dedupeArticlesByTitle(sortByDate(today))
+    return today
       .map(article => {
         const meta = getBriefingMeta(article);
         return { article, meta, action:getActionSuggestion(article, meta) };
@@ -2105,9 +2138,9 @@ function App() {
     const store = new Map();
     const publish = () => {
       const ms = v => (v?.toDate ? v.toDate().getTime() : new Date(v || 0).getTime());
-      const arr = [...store.values()]
+      const arr = dedupeArticlesByTitle([...store.values()]
         .filter(n => !n.link?.includes('msn.com'))
-        .filter(n => !isExcludedNews(n))
+        .filter(n => !isExcludedNews(n)))
         .sort((a, b) => ms(b.pubDate) - ms(a.pubDate))
         .slice(0, 2000);
       setNews(arr);

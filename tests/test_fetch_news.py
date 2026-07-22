@@ -75,17 +75,13 @@ class TestParseDate(unittest.TestCase):
         dt = fetch_news.parse_date(entry)
         self.assertEqual(dt, datetime.datetime(2025, 1, 2, 3, 4, 5, tzinfo=TZ_UTC))
 
-    def test_missing_dates_returns_now(self):
+    def test_missing_dates_returns_none(self):
         entry = types.SimpleNamespace()
-        before = datetime.datetime.now(TZ_UTC)
-        dt = fetch_news.parse_date(entry)
-        after = datetime.datetime.now(TZ_UTC)
-        self.assertTrue(before <= dt <= after)
+        self.assertIsNone(fetch_news.parse_date(entry))
 
     def test_invalid_tuple_falls_through(self):
         entry = types.SimpleNamespace(published_parsed=('bad',))
-        dt = fetch_news.parse_date(entry)
-        self.assertIsInstance(dt, datetime.datetime)
+        self.assertIsNone(fetch_news.parse_date(entry))
 
 
 class TestCleanHtml(unittest.TestCase):
@@ -162,6 +158,53 @@ class TestTitleDedup(unittest.TestCase):
 
     def test_is_too_similar_empty_title(self):
         self.assertFalse(fetch_news.is_too_similar({'title': ''}, [{'title': 'x y z'}]))
+
+    def test_merge_duplicates_uses_earliest_valid_date(self):
+        newer = {
+            'id': 'newer', 'title': '同一則創見新聞',
+            'link': 'https://news.google.com/a',
+            'pubDate': datetime.datetime(2026, 7, 15, tzinfo=TZ_UTC),
+        }
+        original = {
+            'id': 'original', 'title': '同一則創見新聞！',
+            'link': 'https://news.google.com/b',
+            'pubDate': datetime.datetime(2026, 3, 15, tzinfo=TZ_UTC),
+        }
+        merged = fetch_news.merge_duplicate_articles([newer, original])
+        self.assertEqual(len(merged), 1)
+        self.assertEqual(merged[0]['pubDate'], original['pubDate'])
+
+    def test_merge_duplicates_prefers_direct_media_link(self):
+        google = {
+            'id': 'google', 'title': '創見發布新品',
+            'link': 'https://news.google.com/a',
+            'pubDate': datetime.datetime(2026, 7, 15, tzinfo=TZ_UTC),
+        }
+        direct = {
+            'id': 'direct', 'title': '創見發布新品',
+            'link': 'https://money.udn.com/money/story/1/2',
+            'pubDate': datetime.datetime(2026, 7, 14, tzinfo=TZ_UTC),
+        }
+        merged = fetch_news.merge_duplicate_articles([google, direct])
+        self.assertEqual(merged[0]['link'], direct['link'])
+        self.assertEqual(merged[0]['id'], fetch_news.make_article_id(direct['link'], direct['title']))
+
+    def test_merge_happens_before_sixty_day_filter(self):
+        now = datetime.datetime(2026, 7, 22, tzinfo=TZ_UTC)
+        resurfaced = {
+            'id': 'wrong', 'title': '舊聞重新收錄',
+            'link': 'https://news.google.com/wrong',
+            'pubDate': datetime.datetime(2026, 7, 15, tzinfo=TZ_UTC),
+        }
+        original = {
+            'id': 'right', 'title': '舊聞重新收錄',
+            'link': 'https://news.google.com/right',
+            'pubDate': datetime.datetime(2026, 3, 15, tzinfo=TZ_UTC),
+        }
+        merged = fetch_news.merge_duplicate_articles([resurfaced, original])
+        self.assertEqual(merged[0]['pubDate'], original['pubDate'])
+        self.assertEqual(fetch_news.filter_recent_articles(merged, now=now), [],
+                         '原始日期超過 60 天的舊聞不得因重新收錄日混入')
 
 
 class TestStockStale(unittest.TestCase):
@@ -580,6 +623,19 @@ class TestFetchSourceTimeout(unittest.TestCase):
                 'label': '創見資訊', 'url': 'https://x.test/rss', 'cat': 'transcend'
             })
         self.assertEqual([a['title'] for a in articles], ['創見資訊推出工控 SSD'])
+
+    def test_missing_date_is_skipped_instead_of_using_fetch_time(self):
+        fake_resp = types.SimpleNamespace(content=b'<rss></rss>')
+        entry = types.SimpleNamespace(
+            title='創見舊聞被重新收錄',
+            link='https://news.google.com/old', summary='沒有發布日期')
+        with unittest.mock.patch.object(fetch_news.requests, 'get', return_value=fake_resp), \
+             unittest.mock.patch.object(fetch_news.feedparser, 'parse',
+                                        return_value=types.SimpleNamespace(entries=[entry])):
+            articles = fetch_news.fetch_source({
+                'label': '創見資訊', 'url': 'https://x.test/rss', 'cat': 'transcend'
+            })
+        self.assertEqual(articles, [])
 
 
 class TestMaterialNews(unittest.TestCase):
