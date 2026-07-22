@@ -374,6 +374,44 @@ function Card({ title, icon, children, className='' }) {
   );
 }
 
+function NewsFilterToolbar({ query, setQuery, media, setMedia, sentiment, setSentiment, mediaOptions, resultCount, totalCount, onReset }) {
+  const active = query.trim() || media !== 'all' || sentiment !== 'all';
+  return (
+    <div className="bg-gray-900 rounded-2xl border border-gray-700/60 p-3">
+      <div className="flex flex-col lg:flex-row lg:items-center gap-2.5">
+        <label className="relative flex-1 min-w-0">
+          <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500" aria-hidden="true">⌕</span>
+          <input type="search" value={query} onChange={e => setQuery(e.target.value)}
+            placeholder="搜尋標題、內容、媒體或品牌…" aria-label="搜尋新聞"
+            className="w-full rounded-xl border border-gray-700/60 py-2 pl-9 pr-3 text-sm outline-none transition focus:border-red-700" />
+        </label>
+        <div className="grid grid-cols-2 sm:flex gap-2">
+          <select value={media} onChange={e => setMedia(e.target.value)} aria-label="依媒體篩選"
+            className="rounded-xl border border-gray-700/60 px-3 py-2 text-sm outline-none focus:border-red-700 sm:max-w-[190px]">
+            <option value="all">所有媒體</option>
+            {mediaOptions.map(name => <option key={name} value={name}>{name}</option>)}
+          </select>
+          <select value={sentiment} onChange={e => setSentiment(e.target.value)} aria-label="依情緒篩選"
+            className="rounded-xl border border-gray-700/60 px-3 py-2 text-sm outline-none focus:border-red-700">
+            <option value="all">所有情緒</option>
+            <option value="positive">正面</option>
+            <option value="neutral">中立</option>
+            <option value="negative">負面</option>
+          </select>
+        </div>
+        <div className="flex items-center justify-between lg:justify-end gap-3 shrink-0">
+          <span className="text-xs text-gray-500 tabular-nums">顯示 {resultCount} / {totalCount} 則</span>
+          {active && (
+            <button onClick={onReset} className="text-xs font-medium px-3 py-2 rounded-lg border border-gray-700/60 text-gray-500 hover:text-gray-200 hover:bg-gray-800 transition">
+              清除條件
+            </button>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function NewsCard({ article }) {
   const s = article.sentiment || getSentiment(article.title, article.content);
   const media = article.mediaName || article.sourceName || '媒體';
@@ -1837,6 +1875,9 @@ function App() {
   const [connected,      setConnected]      = useState(false);
   const [updated,        setUpdated]        = useState(null);
   const [stockCountdown, setStockCountdown] = useState(300); // 300s = 5 min（配合 Actions 排程）
+  const [newsQuery,      setNewsQuery]      = useState('');
+  const [newsMedia,      setNewsMedia]      = useState('all');
+  const [newsSentiment,  setNewsSentiment]  = useState('all');
 
   // ─── Firebase init ───────────────────────────────────────
   useEffect(() => {
@@ -2085,6 +2126,36 @@ function App() {
     [news]
   );
 
+  // PR / 上游市場共用的前端篩選：只處理已載入資料，不增加 Firestore 讀取。
+  const filterPool = useMemo(() => {
+    if (tab === 'pr') return news.filter(n => n.cat === 'transcend' || n.cat === 'competitor');
+    if (tab === 'us') return news.filter(n => n.cat === 'usMarket' || n.cat === 'supplier');
+    return [];
+  }, [news, tab]);
+  const mediaOptions = useMemo(() => [...new Set(filterPool.map(n => n.mediaName || n.sourceName || '未知媒體'))]
+    .sort((a,b) => a.localeCompare(b, 'zh-Hant')), [filterPool]);
+  const filteredNews = useMemo(() => {
+    if (tab === 'ir') return news;
+    const q = newsQuery.trim().toLowerCase();
+    const allowedIds = new Set(filterPool.filter(n => {
+      const source = n.mediaName || n.sourceName || '未知媒體';
+      if (newsMedia !== 'all' && source !== newsMedia) return false;
+      const articleSentiment = n.sentiment || getSentiment(n.title, n.content);
+      if (newsSentiment !== 'all' && articleSentiment !== newsSentiment) return false;
+      if (!q) return true;
+      const haystack = [n.title, n.content, source, n.sourceName, n.brand]
+        .map(v => String(v || '').toLowerCase()).join(' ');
+      return haystack.includes(q);
+    }).map(n => n.id));
+    return news.filter(n => allowedIds.has(n.id));
+  }, [news, filterPool, tab, newsQuery, newsMedia, newsSentiment]);
+
+  const resetNewsFilters = () => {
+    setNewsQuery('');
+    setNewsMedia('all');
+    setNewsSentiment('all');
+  };
+
   const self = stocks['2451'];
   const updatedStr = updated ? updated.toLocaleTimeString('zh-TW',{hour:'2-digit',minute:'2-digit'}) : '';
 
@@ -2115,7 +2186,7 @@ function App() {
               {id:'ir', icon:'📈', label:'IR 投資情報'},
               {id:'us', icon:'🌐', label:'上游市場'},
             ].map(t => (
-              <button key={t.id} onClick={() => setTab(t.id)}
+              <button key={t.id} onClick={() => { setTab(t.id); resetNewsFilters(); }}
                 className={`flex items-center gap-1.5 px-4 py-1.5 rounded-lg text-sm font-semibold transition-all ${tab===t.id?'text-white shadow':'text-red-200/60 hover:text-white'}`}
                 style={tab===t.id?{background:'rgba(0,0,0,0.5)'}:{}}>
                 <span>{t.icon}</span>
@@ -2175,8 +2246,20 @@ function App() {
 
       {/* ─────────── MAIN ─────────── */}
       <main className="max-w-7xl mx-auto px-4 py-5">
-        {tab==='pr' ? <PRTab news={news} /> :
-         tab==='us' ? <USMarketTab news={news} /> :
+        {tab!=='ir' && (
+          <div className="mb-4">
+            <NewsFilterToolbar
+              query={newsQuery} setQuery={setNewsQuery}
+              media={newsMedia} setMedia={setNewsMedia}
+              sentiment={newsSentiment} setSentiment={setNewsSentiment}
+              mediaOptions={mediaOptions}
+              resultCount={filteredNews.length} totalCount={filterPool.length}
+              onReset={resetNewsFilters}
+            />
+          </div>
+        )}
+        {tab==='pr' ? <PRTab news={filteredNews} /> :
+         tab==='us' ? <USMarketTab news={filteredNews} /> :
          <IRTab news={news} stocks={stocks} community={community} revenue={revenue} financials={financials} dividends={dividends} material={material} daily={daily} compRev={compRev} />}
       </main>
 
