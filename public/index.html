@@ -17,13 +17,23 @@
 <script crossorigin src="https://cdn.jsdelivr.net/npm/react-dom@18.3.1/umd/react-dom.production.min.js"></script>
 
 <!-- Recharts (jsDelivr) -->
+<script src="https://cdn.jsdelivr.net/npm/prop-types@15.8.1/prop-types.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/recharts@2.12.7/umd/Recharts.js"></script>
 
 <!-- Babel standalone — JSX transpiler (jsDelivr, 固定版本) -->
 <script src="https://cdn.jsdelivr.net/npm/@babel/standalone@7.24.4/babel.min.js"></script>
 
 <style>
-  body { font-family: 'Segoe UI', system-ui, -apple-system, sans-serif; background: #030712; }
+  :root {
+    --page: #f5f6f8;
+    --surface: #ffffff;
+    --surface-soft: #f8fafc;
+    --line: #e5e7eb;
+    --text: #1f2937;
+    --muted: #64748b;
+    --brand: #960014;
+  }
+  body { font-family: 'Segoe UI', system-ui, -apple-system, sans-serif; background: var(--page); color:var(--text); }
   .line-clamp-2 { display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden; }
   .line-clamp-3 { display:-webkit-box; -webkit-line-clamp:3; -webkit-box-orient:vertical; overflow:hidden; }
   @keyframes fadeIn { from { opacity:0; transform:translateY(8px); } to { opacity:1; transform:translateY(0); } }
@@ -31,17 +41,82 @@
   @keyframes spin { to { transform:rotate(360deg); } }
   .spin { animation: spin 1s linear infinite; display:inline-block; }
   ::-webkit-scrollbar { width:4px; height:4px; }
-  ::-webkit-scrollbar-track { background:#111827; }
-  ::-webkit-scrollbar-thumb { background:#374151; border-radius:4px; }
+  ::-webkit-scrollbar-track { background:#f1f5f9; }
+  ::-webkit-scrollbar-thumb { background:#cbd5e1; border-radius:4px; }
+
+  /* 白底介面：保留既有元件結構，只覆寫原本的深色樣式。 */
+  .light-theme { background:var(--page) !important; color:var(--text) !important; }
+  .light-theme .bg-gray-900 { background-color:var(--surface) !important; }
+  .light-theme .bg-gray-900\/30,
+  .light-theme .bg-gray-800\/40,
+  .light-theme .bg-gray-800\/60,
+  .light-theme .bg-gray-800\/80 { background-color:var(--surface-soft) !important; }
+  .light-theme .bg-gray-800,
+  .light-theme .bg-gray-700 { background-color:#eef1f5 !important; }
+  .light-theme .border-gray-800\/40,
+  .light-theme .border-gray-700,
+  .light-theme .border-gray-700\/40,
+  .light-theme .border-gray-700\/60,
+  .light-theme .border-gray-600,
+  .light-theme .border-gray-600\/50,
+  .light-theme .border-gray-600\/60 { border-color:var(--line) !important; }
+  .light-theme .text-gray-200,
+  .light-theme .text-gray-300 { color:#334155 !important; }
+  .light-theme .text-gray-400 { color:#475569 !important; }
+  .light-theme .text-gray-500,
+  .light-theme .text-gray-600,
+  .light-theme .text-gray-700 { color:var(--muted) !important; }
+  .light-theme .hover\:bg-gray-800:hover,
+  .light-theme .hover\:bg-gray-800\/20:hover,
+  .light-theme .hover\:bg-gray-700:hover { background-color:#e8edf3 !important; }
+  .light-theme .hover\:text-gray-200:hover { color:#111827 !important; }
+  .light-theme .hover\:border-gray-600:hover { border-color:#cbd5e1 !important; }
+  .light-theme .from-red-950\/25 { --tw-gradient-from:rgba(150,0,20,.06) var(--tw-gradient-from-position) !important; }
+  .light-theme .to-gray-900 { --tw-gradient-to:#fff var(--tw-gradient-to-position) !important; }
+  .light-theme table { color:#334155; }
+  .light-theme input,
+  .light-theme select { color:#1f2937; background:#fff; border-color:#d1d5db; }
+  .light-theme button:focus-visible,
+  .light-theme a:focus-visible { outline:3px solid rgba(150,0,20,.22); outline-offset:2px; }
+
+  /* 深色版的彩色標籤轉成適合白底閱讀的柔和色票。 */
+  .light-theme .bg-green-900\/40 { background:#ecfdf5 !important; }
+  .light-theme .text-green-300 { color:#047857 !important; }
+  .light-theme .border-green-700\/50 { border-color:#a7f3d0 !important; }
+  .light-theme .bg-red-900\/40,
+  .light-theme .bg-red-900\/60 { background:#fff1f2 !important; }
+  .light-theme .text-red-300 { color:#be123c !important; }
+  .light-theme .border-red-700\/40,
+  .light-theme .border-red-700\/50 { border-color:#fecdd3 !important; }
+  .light-theme .bg-blue-900\/60 { background:#eff6ff !important; }
+  .light-theme .text-blue-300 { color:#1d4ed8 !important; }
+  .light-theme .border-blue-700\/50 { border-color:#bfdbfe !important; }
+  .light-theme .bg-yellow-900\/10,
+  .light-theme .bg-yellow-900\/60 { background:#fffbeb !important; }
+  .light-theme .text-yellow-300 { color:#a16207 !important; }
+  .light-theme .border-yellow-700\/50,
+  .light-theme .border-yellow-800\/30 { border-color:#fde68a !important; }
+  .light-theme .bg-orange-900\/60 { background:#fff7ed !important; }
+  .light-theme .text-orange-300 { color:#c2410c !important; }
+  .light-theme .border-orange-700\/50 { border-color:#fed7aa !important; }
+  .light-theme .bg-purple-900\/60 { background:#faf5ff !important; }
+  .light-theme .text-purple-300 { color:#7e22ce !important; }
+  .light-theme .border-purple-700\/50 { border-color:#e9d5ff !important; }
+  .light-theme .bg-pink-900\/60 { background:#fdf2f8 !important; }
+  .light-theme .text-pink-300 { color:#be185d !important; }
+  .light-theme .border-pink-700\/50 { border-color:#fbcfe8 !important; }
+  .light-theme .bg-cyan-900\/60 { background:#ecfeff !important; }
+  .light-theme .text-cyan-300 { color:#0e7490 !important; }
+  .light-theme .border-cyan-700\/50 { border-color:#a5f3fc !important; }
 </style>
 </head>
 <body>
 <!-- 顯示在 React 載入前：若一直看到此訊息代表 CDN 載入失敗 -->
 <div id="root">
-  <div style="min-height:100vh;display:flex;align-items:center;justify-content:center;background:#030712;color:#9ca3af;font-family:sans-serif;flex-direction:column;gap:12px;">
-    <div style="width:36px;height:36px;border:3px solid #374151;border-top-color:#960014;border-radius:50%;animation:spin 1s linear infinite;"></div>
+  <div style="min-height:100vh;display:flex;align-items:center;justify-content:center;background:#f5f6f8;color:#64748b;font-family:sans-serif;flex-direction:column;gap:12px;">
+    <div style="width:36px;height:36px;border:3px solid #e5e7eb;border-top-color:#960014;border-radius:50%;animation:spin 1s linear infinite;"></div>
     <p style="font-size:14px;">載入中，請稍候…</p>
-    <p style="font-size:11px;color:#4b5563;">若超過 10 秒未載入，請開啟瀏覽器 Console（F12）查看錯誤訊息</p>
+    <p style="font-size:11px;color:#94a3b8;">若超過 10 秒未載入，請開啟瀏覽器 Console（F12）查看錯誤訊息</p>
   </div>
 </div>
 
@@ -71,10 +146,10 @@ class ErrorBoundary extends React.Component {
   static getDerivedStateFromError(e) { return { error: e }; }
   render() {
     if (this.state.error) return (
-      <div style={{ minHeight:'100vh', background:'#030712', color:'#f87171', display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center', gap:12, padding:24, fontFamily:'sans-serif' }}>
+      <div style={{ minHeight:'100vh', background:'#f5f6f8', color:'#b91c1c', display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center', gap:12, padding:24, fontFamily:'sans-serif' }}>
         <p style={{ fontSize:18, fontWeight:'bold' }}>⚠ 程式載入錯誤</p>
-        <p style={{ fontSize:13, color:'#9ca3af', maxWidth:480, textAlign:'center' }}>請按 F12 開啟 Console，將錯誤訊息截圖回報</p>
-        <pre style={{ fontSize:11, color:'#6b7280', background:'#111827', padding:12, borderRadius:8, maxWidth:600, overflow:'auto' }}>
+        <p style={{ fontSize:13, color:'#64748b', maxWidth:480, textAlign:'center' }}>請按 F12 開啟 Console，將錯誤訊息截圖回報</p>
+        <pre style={{ fontSize:11, color:'#475569', background:'#fff', border:'1px solid #e5e7eb', padding:12, borderRadius:8, maxWidth:600, overflow:'auto' }}>
           {String(this.state.error)}
         </pre>
       </div>
@@ -254,7 +329,7 @@ const SENT_CFG = {
   negative:{ label:'負面', cls:'bg-red-900/40  text-red-300   border-red-700/50'   },
 };
 
-const TT = { contentStyle:{ background:'#1f2937', border:'1px solid #374151', borderRadius:8, color:'#e5e7eb', fontSize:12 } };
+const TT = { contentStyle:{ background:'#ffffff', border:'1px solid #e5e7eb', borderRadius:8, color:'#334155', fontSize:12, boxShadow:'0 8px 24px rgba(15,23,42,.10)' } };
 
 // ═══════════════════════════════════════════════════════════
 // ATOMS
@@ -385,7 +460,7 @@ function USNewsCard({ article }) {
           </span>
           {bullets.length > 0 && (
             <span className="text-[10px] px-1.5 py-0.5 rounded-md font-medium"
-              style={{ background:'#1e3a5f', color:'#93c5fd', border:'1px solid #1d4ed840' }}>
+              style={{ background:'#eff6ff', color:'#1d4ed8', border:'1px solid #bfdbfe' }}>
               🤖 AI摘要
             </span>
           )}
@@ -393,10 +468,10 @@ function USNewsCard({ article }) {
         <p className="text-sm text-gray-200 group-hover:text-white line-clamp-2 leading-snug">{article.title}</p>
         {bullets.length > 0 && (
           <div className="mt-2 rounded-lg px-2.5 py-2 space-y-0.5"
-               style={{ background:'rgba(30,58,95,0.35)', border:'1px solid rgba(29,78,216,0.2)' }}>
+               style={{ background:'#f8fbff', border:'1px solid #dbeafe' }}>
             {bullets.map((pt, i) => (
-              <div key={i} className="flex items-start gap-1.5 text-xs leading-relaxed" style={{ color:'#93c5fd' }}>
-                <span className="shrink-0 mt-0.5" style={{ color:'#60a5fa' }}>•</span>
+              <div key={i} className="flex items-start gap-1.5 text-xs leading-relaxed" style={{ color:'#1e40af' }}>
+                <span className="shrink-0 mt-0.5" style={{ color:'#3b82f6' }}>•</span>
                 <span>{pt}</span>
               </div>
             ))}
@@ -723,7 +798,7 @@ function StockCard({ code, data }) {
         </div>
         <div className="flex flex-col items-end gap-1">
           {meta.isSelf && (
-            <span className="text-xs px-2 py-0.5 rounded-full border" style={{ background:'rgba(150,0,20,0.25)', color:'#fca5a5', borderColor:'rgba(220,38,38,0.35)' }}>
+            <span className="text-xs px-2 py-0.5 rounded-full border" style={{ background:'#fff1f2', color:'#be123c', borderColor:'#fecdd3' }}>
               本公司
             </span>
           )}
@@ -843,7 +918,7 @@ function MonthRevSVG({ data }) {
   let lp=''; data.forEach((d,i)=>{const y=toLY(d.yoyPct);if(y!=null)lp+=`${lp?'L':'M'}${PL+i*step+step/2},${y}`;});
   return (
     <svg viewBox={`0 0 ${VW} ${VH}`} width="100%" height={VH} style={{display:'block'}}>
-      {rT.map((t,i)=><line key={i} x1={PL} x2={VW-PR} y1={t.y} y2={t.y} stroke="#1f2937" strokeWidth="1"/>)}
+      {rT.map((t,i)=><line key={i} x1={PL} x2={VW-PR} y1={t.y} y2={t.y} stroke="#e5e7eb" strokeWidth="1"/>)}
       {minY<0&&maxY>0&&<line x1={PL} x2={VW-PR} y1={toLY(0)} y2={toLY(0)} stroke="#374151" strokeWidth="1" strokeDasharray="4,4"/>}
       {data.map((d,i)=>{const cx=PL+i*step+step/2;return(<g key={i}>
         <rect x={cx-bw*1.1} y={PT+CH-toH(d.rev)} width={bw} height={toH(d.rev)} fill="#960014" rx="1" opacity="0.9"/>
@@ -876,7 +951,7 @@ function AnnualRevSVG({ data }) {
   const rT=[.25,.5,.75,1].map(t=>({y:PT+CH*(1-t),v:maxR*t}));
   return (
     <svg viewBox={`0 0 ${VW} ${VH}`} width="100%" height={VH} style={{display:'block'}}>
-      {rT.map((t,i)=><line key={i} x1={PL} x2={VW-PR} y1={t.y} y2={t.y} stroke="#1f2937" strokeWidth="1"/>)}
+      {rT.map((t,i)=><line key={i} x1={PL} x2={VW-PR} y1={t.y} y2={t.y} stroke="#e5e7eb" strokeWidth="1"/>)}
       {data.map((d,i)=>{
         const x=PL+i*step+(step-bw)/2, bh=toH(d.total), y=PT+CH-bh;
         const c=d.yoy==null?'#960014':d.yoy>=0?'#960014':'#4b5563';
@@ -1051,7 +1126,7 @@ function StockTrendChart() {
     <Card title="競品股價走勢對比（近 20 個交易日）" icon="📉">
       <ResponsiveContainer width="100%" height={230}>
         <LineChart data={MOCK_STOCK_HISTORY} margin={{ top:4, right:12, left:0, bottom:0 }}>
-          <CartesianGrid strokeDasharray="3 3" stroke="#1f2937" />
+          <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
           <XAxis dataKey="date" tick={{ fill:'#6b7280', fontSize:10 }} axisLine={false} tickLine={false} />
           <YAxis tick={{ fill:'#6b7280', fontSize:10 }} width={38} axisLine={false} tickLine={false} />
           <Tooltip {...TT} />
@@ -1091,14 +1166,14 @@ function TermTip({ label, tip }) {
         onMouseLeave={hideTip}
         onClick={() => pos ? hideTip() : showTip()}
         className="inline-flex items-center justify-center w-4 h-4 rounded-full text-[9px] font-bold cursor-help select-none shrink-0"
-        style={{ background:'#1e3a5f', color:'#93c5fd', border:'1px solid rgba(37,99,235,0.4)' }}>?</span>
+        style={{ background:'#eff6ff', color:'#1d4ed8', border:'1px solid #bfdbfe' }}>?</span>
       {pos && ReactDOM.createPortal(
         <span style={{
           position:'fixed', left:`${pos.x}px`, top:`${pos.y - 10}px`,
           transform:'translate(-50%, -100%)', zIndex:9999, width:'260px',
-          background:'#1f2937', border:'1px solid #374151', color:'#d1d5db',
+          background:'#ffffff', border:'1px solid #e5e7eb', color:'#334155',
           borderRadius:'12px', padding:'12px', fontSize:'12px', lineHeight:'1.6',
-          boxShadow:'0 8px 32px rgba(0,0,0,0.7)', pointerEvents:'none',
+          boxShadow:'0 8px 32px rgba(15,23,42,0.14)', pointerEvents:'none',
           whiteSpace:'normal', textAlign:'left', fontWeight:'normal',
         }}>
           {tip}
@@ -1998,7 +2073,7 @@ function App() {
   const updatedStr = updated ? updated.toLocaleTimeString('zh-TW',{hour:'2-digit',minute:'2-digit'}) : '';
 
   return (
-    <div className="min-h-screen text-white" style={{ background:'#030712', fontFamily:"'Segoe UI',system-ui,sans-serif" }}>
+    <div className="light-theme min-h-screen" style={{ background:'#f5f6f8', fontFamily:"'Segoe UI',system-ui,sans-serif" }}>
 
       {/* ─────────── HEADER ─────────── */}
       <header className="sticky top-0 z-50 shadow-2xl"
@@ -2046,7 +2121,7 @@ function App() {
       </header>
 
       {/* ─────────── STATUS BAR ─────────── */}
-      <div style={{ background:'#0d1117', borderBottom:'1px solid #1f2937' }}>
+      <div style={{ background:'#ffffff', borderBottom:'1px solid #e5e7eb', boxShadow:'0 1px 2px rgba(15,23,42,.04)' }}>
         <div className="max-w-7xl mx-auto px-4 h-8 flex items-center gap-4 text-xs overflow-x-auto whitespace-nowrap">
           <span className={connected?'text-green-500':'text-yellow-500'}>
             {connected?'● Firebase 已連線':'○ 連線中…'}
