@@ -328,6 +328,44 @@ function sortByDate(arr) {
   });
 }
 
+function normalizeNewsTitle(title='') {
+  return title.toLowerCase().replace(/[\s\-–—_:：，,。.!！?？()（）「」『』]/g, '');
+}
+
+function dedupeArticlesByTitle(articles) {
+  const seen = new Set();
+  return articles.filter(article => {
+    const key = normalizeNewsTitle(article.title);
+    if (!key || seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
+const BRIEFING_RULES = [
+  { kind:'risk', label:'風險', score:40, words:['虧損','下跌','急跌','召回','訴訟','裁員','停產','危機','資安','衰退'] },
+  { kind:'finance', label:'財務', score:32, words:['營收','獲利','財報','財務報告','eps','股利','法說','毛利率','淨利'] },
+  { kind:'opportunity', label:'機會', score:26, words:['成長','新高','合作','推出','新品','擴產','得獎','突破','上漲'] },
+  { kind:'market', label:'市場', score:18, words:['記憶體','dram','nand','ssd','hbm','供應鏈','漲價','需求','庫存'] },
+];
+
+function getBriefingMeta(article) {
+  const text = `${article.title || ''} ${article.content || ''}`.toLowerCase();
+  const matched = BRIEFING_RULES.filter(rule => rule.words.some(word => text.includes(word)));
+  const primary = matched.sort((a,b) => b.score-a.score)[0] || { kind:'news', label:'關注', score:8 };
+  const d = article.pubDate?.toDate ? article.pubDate.toDate() : new Date(article.pubDate || 0);
+  const ageHours = Math.max(0, (Date.now()-d.getTime()) / 3600000);
+  const recency = ageHours <= 24 ? 24 : ageHours <= 72 ? 16 : ageHours <= 168 ? 8 : 0;
+  const isSelf = /創見|transcend information/i.test(text);
+  const media = article.mediaName || article.sourceName || '';
+  const keyMedia = KEY_MEDIA.some(m => media.includes(m.name) || media.toLowerCase().includes(m.en.toLowerCase()));
+  const reasons = [primary.label];
+  if (ageHours <= 24) reasons.push('24 小時內');
+  if (isSelf) reasons.push('直接提及創見');
+  if (keyMedia) reasons.push('重點媒體');
+  return { ...primary, score:primary.score + recency + (isSelf?20:0) + (keyMedia?8:0), reasons };
+}
+
 const EXCLUDED_NEWS_PHRASES = ['創見文化事業'];
 function isExcludedNews(n) {
   const text = `${n?.title || ''} ${n?.content || ''}`.toLowerCase();
@@ -412,6 +450,54 @@ function NewsFilterToolbar({ query, setQuery, media, setMedia, sentiment, setSen
   );
 }
 
+function PRBriefing({ articles }) {
+  const items = useMemo(() => {
+    const weekAgo = Date.now() - 7*24*60*60*1000;
+    const recent = articles.filter(n => {
+      const d = n.pubDate?.toDate ? n.pubDate.toDate() : new Date(n.pubDate || 0);
+      return d.getTime() >= weekAgo;
+    });
+    const base = recent.length ? recent : articles;
+    return dedupeArticlesByTitle(sortByDate(base))
+      .map(article => ({ article, meta:getBriefingMeta(article) }))
+      .filter(item => item.meta.kind !== 'news')
+      .sort((a,b) => b.meta.score-a.meta.score)
+      .slice(0,5);
+  }, [articles]);
+
+  const badgeClass = {
+    risk:'bg-red-900/40 text-red-300 border-red-700/50',
+    finance:'bg-blue-900/60 text-blue-300 border-blue-700/50',
+    opportunity:'bg-green-900/40 text-green-300 border-green-700/50',
+    market:'bg-yellow-900/60 text-yellow-300 border-yellow-700/50',
+    news:'bg-gray-800 text-gray-400 border-gray-600/50',
+  };
+
+  return (
+    <Card title="本週重點情報" icon="✨">
+      <div className="flex items-center justify-between gap-3 -mt-1 mb-3">
+        <p className="text-xs text-gray-500">依事件、時效與媒體重要性自動整理</p>
+        <span className="text-[10px] px-2 py-1 rounded-full bg-gray-800 text-gray-500 whitespace-nowrap">規則分析 · 零 API 費用</span>
+      </div>
+      {items.length > 0 ? (
+        <div className="grid grid-cols-1 lg:grid-cols-5 gap-2">
+          {items.map(({article,meta},i) => (
+            <a key={article.id||i} href={article.link||'#'} target="_blank" rel="noreferrer"
+              className="group rounded-xl border border-gray-700/40 bg-gray-800/40 hover:bg-gray-800 hover:border-gray-600 p-3 transition-all min-w-0">
+              <div className="flex items-center justify-between gap-2 mb-2">
+                <span className={`text-[10px] px-2 py-0.5 rounded-full border ${badgeClass[meta.kind]}`}>{meta.label}</span>
+                <span className="text-[10px] text-gray-600">{fmtDate(article.pubDate)}</span>
+              </div>
+              <p className="content-title text-xs font-semibold leading-relaxed line-clamp-3 transition-colors">{article.title}</p>
+              <p className="text-[10px] text-gray-500 mt-2 line-clamp-2">{meta.reasons.join(' · ')}</p>
+            </a>
+          ))}
+        </div>
+      ) : <div className="py-6 text-center text-sm text-gray-600">目前沒有符合條件的重點情報</div>}
+    </Card>
+  );
+}
+
 function NewsCard({ article }) {
   const s = article.sentiment || getSentiment(article.title, article.content);
   const media = article.mediaName || article.sourceName || '媒體';
@@ -452,6 +538,22 @@ function isValidTranscendPR(n) {
   const BLOCKED = ['明細','歷史明細','庫存','個股異動','集保','買賣明細','交割明細','籌碼'];
   if (BLOCKED.some(k => title.includes(k))) return false;
   return true;
+}
+
+function isBriefingCandidate(n) {
+  if (n.cat === 'transcend') return isValidTranscendPR(n);
+  if (n.cat !== 'competitor' || (n.title || '').includes('盤中速報')) return false;
+  const link = (n.link || '').toLowerCase();
+  const media = (n.mediaName || n.sourceName || '').toLowerCase();
+  if (link.includes('cmoney') || media.includes('cmoney') || media.includes('爆料')) return false;
+  const text = `${n.title || ''} ${n.content || ''}`.toLowerCase();
+  if (['盤後成交金額','前30名','排行榜','買賣明細'].some(term => text.includes(term))) return false;
+  const trackedTerms = [
+    '威剛','adata','3260', '十銓','teamgroup','team group','4967',
+    '宜鼎','innodisk','5289', '宇瞻','apacer','8271',
+    '廣穎','silicon power','4973',
+  ];
+  return trackedTerms.some(term => text.includes(term));
 }
 
 // ═══════════════════════════════════════════════════════════
@@ -574,7 +676,7 @@ function USMarketTab({ news }) {
 
   const shown = useMemo(() => {
     const base = brandFilter === 'all' ? timeFiltered : timeFiltered.filter(n => getUSBrand(n) === brandFilter);
-    return base.slice(0, 80);
+    return dedupeArticlesByTitle(base).slice(0, 80);
   }, [timeFiltered, brandFilter]);
 
   const pos = timeFiltered.filter(n => (n.sentiment||getSentiment(n.title,n.content)) === 'positive').length;
@@ -787,7 +889,7 @@ function CompetitorNews({ news }) {
       all:   null,
     };
     const cutoff = cutoffs[timeFilter];
-    return sortByDate(
+    return dedupeArticlesByTitle(sortByDate(
       news.filter(n => {
         if (n.cat !== 'competitor') return false;
         if (active !== 'all' && n.brand !== active) return false;
@@ -799,7 +901,7 @@ function CompetitorNews({ news }) {
         const d = n.pubDate?.toDate ? n.pubDate.toDate() : new Date(n.pubDate || 0);
         return d >= cutoff;
       })
-    ).slice(0, 80);
+    )).slice(0, 80);
   }, [news, active, timeFilter]);
 
   return (
@@ -1507,15 +1609,17 @@ function PRTab({ news }) {
       all:   null,
     };
     const cutoff = cutoffs[timeFilter];
-    return sortByDate(validTranscend.filter(n => {
+    return dedupeArticlesByTitle(sortByDate(validTranscend.filter(n => {
       if (!cutoff) return true;
       const d = n.pubDate?.toDate ? n.pubDate.toDate() : new Date(n.pubDate || 0);
       return d >= cutoff;
-    })).slice(0, 50);
+    }))).slice(0, 50);
   }, [validTranscend, timeFilter]);
 
   return (
     <div className="space-y-4 fade-in">
+      <PRBriefing articles={news.filter(isBriefingCandidate)} />
+
       {/* 統計卡片 + 各媒體篇數圖 */}
       <PRStatsPanel articles={validTranscend} />
 
