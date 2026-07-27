@@ -23,6 +23,9 @@
 <!-- Babel standalone — JSX transpiler (jsDelivr, 固定版本) -->
 <script src="https://cdn.jsdelivr.net/npm/@babel/standalone@7.24.4/babel.min.js"></script>
 
+<!-- SheetJS — Excel 匯出 (jsDelivr, 固定版本) -->
+<script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+
 <style>
   :root {
     --page: #f5f6f8;
@@ -342,6 +345,27 @@ function dedupeArticlesByTitle(articles) {
   });
 }
 
+function exportNewsExcel(articles, sheetName, filenamePrefix) {
+  if (!window.XLSX || !articles || articles.length === 0) return;
+  const rows = articles.map(n => {
+    const d = n.pubDate?.toDate ? n.pubDate.toDate() : new Date(n.pubDate || 0);
+    return {
+      標題: n.title || '',
+      媒體: n.mediaName || n.sourceName || '',
+      日期: isNaN(d.getTime()) ? '' : d.toLocaleString('zh-TW'),
+      情緒: SENT_CFG[n.sentiment || getSentiment(n.title, n.content)]?.label || '',
+      連結: n.link || '',
+    };
+  });
+  const sheet = window.XLSX.utils.json_to_sheet(rows);
+  sheet['!cols'] = [{ wch:50 }, { wch:16 }, { wch:18 }, { wch:8 }, { wch:60 }];
+  const wb = window.XLSX.utils.book_new();
+  window.XLSX.utils.book_append_sheet(wb, sheet, sheetName);
+  const today = new Date();
+  const stamp = `${today.getFullYear()}${String(today.getMonth()+1).padStart(2,'0')}${String(today.getDate()).padStart(2,'0')}`;
+  window.XLSX.writeFile(wb, `${filenamePrefix}_${stamp}.xlsx`);
+}
+
 const BRIEFING_RULES = [
   { kind:'risk', label:'風險', score:40, words:['虧損','下跌','急跌','召回','訴訟','裁員','停產','危機','資安','衰退'] },
   { kind:'finance', label:'財務', score:32, words:['營收','獲利','財報','財務報告','eps','股利','法說','毛利率','淨利'] },
@@ -422,10 +446,15 @@ function Spinner({ size='sm' }) {
   return <div className={`${s} border-gray-700 border-t-red-500 rounded-full spin`} />;
 }
 
-function Card({ title, icon, children, className='' }) {
+function Card({ title, icon, children, className='', actions }) {
   return (
     <div className={`bg-gray-900 rounded-2xl border border-gray-700/60 p-4 ${className}`}>
-      {title && <h3 className="text-sm font-semibold text-gray-200 mb-3 flex items-center gap-2"><span>{icon}</span>{title}</h3>}
+      {title && (
+        <div className="flex items-center justify-between gap-2 mb-3">
+          <h3 className="text-sm font-semibold text-gray-200 flex items-center gap-2"><span>{icon}</span>{title}</h3>
+          {actions}
+        </div>
+      )}
       {children}
     </div>
   );
@@ -469,7 +498,7 @@ function NewsFilterToolbar({ query, setQuery, media, setMedia, sentiment, setSen
   );
 }
 
-function TodayBriefing({ articles }) {
+function TodayBriefing({ articles, title='今日情報快報' }) {
   const items = useMemo(() => {
     const now = new Date();
     const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
@@ -502,7 +531,7 @@ function TodayBriefing({ articles }) {
   };
 
   return (
-    <Card title="今日情報快報" icon="☀️">
+    <Card title={title} icon="☀️">
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 -mt-1 mb-3">
         <p className="text-xs text-gray-500">今天的重要消息與建議下一步</p>
         <span className="text-[10px] px-2 py-1 rounded-full bg-gray-800 text-gray-500 whitespace-nowrap">規則分析 · 零 API 費用</span>
@@ -636,6 +665,7 @@ const US_BRAND_CFG = [
   { id:'SMI',          label:'SMI 慧榮',    color:'#0891b2' },
   { id:'Phison',       label:'Phison 群聯', color:'#0e7490' },
   { id:'Realtek',      label:'Realtek 瑞昱',color:'#0369a1' },
+  { id:'Kingston',     label:'Kingston 金士頓', color:'#db2777' },
   { id:'HBM',          label:'HBM',         color:'#06b6d4' },
   { id:'DRAM市場',     label:'DRAM市場',    color:'#ca8a04' },
   { id:'NAND Flash',   label:'NAND Flash',  color:'#9333ea' },
@@ -733,6 +763,9 @@ function USMarketTab({ news }) {
 
   return (
     <div className="space-y-4 fade-in">
+      {/* 今天重要情報（沿用「今日情報快報」規則：風險／財務／機會／市場關鍵字 + 24 小時內加權）*/}
+      <TodayBriefing articles={allUSNews} title="上游市場今日重要情報" />
+
       {/* 統計卡片 */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
         {[
@@ -1672,7 +1705,14 @@ function PRTab({ news }) {
       <PRStatsPanel articles={validTranscend} />
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-        <Card title="創見最新報導" icon="📰" className="h-full">
+        <Card title="創見最新報導" icon="📰" className="h-full"
+          actions={
+            <button onClick={() => exportNewsExcel(transcend, '創見最新報導', '創見最新報導')}
+              disabled={transcend.length === 0}
+              className="text-xs px-2.5 py-1 rounded-lg border border-gray-700/60 text-gray-400 hover:text-gray-200 hover:bg-gray-800 transition disabled:opacity-40 disabled:cursor-not-allowed shrink-0">
+              ⬇ 匯出 Excel
+            </button>
+          }>
           {/* 時間篩選 */}
           <div className="flex gap-1.5 mb-3">
             {TIME_FILTERS.map(f => (

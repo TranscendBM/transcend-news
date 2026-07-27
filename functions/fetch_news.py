@@ -12,6 +12,7 @@ import datetime
 import sys
 import time
 import uuid
+import concurrent.futures
 import requests
 import feedparser
 import firebase_admin
@@ -1055,6 +1056,9 @@ def init_db_from_env():
     return firestore.client()
 
 
+RSS_FETCH_MAX_WORKERS = 16   # 來源數遠大於 CPU 數也無妨：I/O bound，等待網路回應為主
+
+
 def fetch_and_save_news(db, mode='all'):
     """抓取 RSS 新聞來源、去重並存入 Firestore；回傳儲存篇數"""
     sources = get_sources(mode)
@@ -1063,17 +1067,22 @@ def fetch_and_save_news(db, mode='all'):
     all_articles = []
     seen_links = set()
     seen_titles = set()
-    for src in sources:
-        articles = fetch_source(src)
-        for a in articles:
-            norm_title = normalize_title(a.get('title'))
-            if norm_title and norm_title in seen_titles:
-                continue
-            if a['link'] and a['link'] in seen_links:
-                continue
-            seen_titles.add(norm_title)
-            seen_links.add(a['link'])
-            all_articles.append(a)
+    # 各來源之間彼此獨立（各自的 requests 呼叫與 feedparser 解析無共用狀態），
+    # 平行抓取把總耗時從「所有來源逐一等待網路」降為「最慢的那個來源」，
+    # 避免來源一多或個別來源緩慢時，序列抓取拖到接近排程 timeout。
+    # executor.map 保留與 sources 相同的順序，去重結果與序列版本一致。
+    with concurrent.futures.ThreadPoolExecutor(
+            max_workers=min(RSS_FETCH_MAX_WORKERS, len(sources) or 1)) as executor:
+        for articles in executor.map(fetch_source, sources):
+            for a in articles:
+                norm_title = normalize_title(a.get('title'))
+                if norm_title and norm_title in seen_titles:
+                    continue
+                if a['link'] and a['link'] in seen_links:
+                    continue
+                seen_titles.add(norm_title)
+                seen_links.add(a['link'])
+                all_articles.append(a)
 
     print(f"\n📊 共抓取 {len(all_articles)} 則不重複新聞")
 
