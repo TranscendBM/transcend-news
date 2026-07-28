@@ -270,12 +270,12 @@ const COMPETITORS = [
 const COMPETITOR_ORDER = ['3260', '5289', '4967', '8271', '4973'];
 
 const STOCK_META = {
-  '2451':{ name:'創見',    isSelf:true  },
-  '3260':{ name:'威剛',    isSelf:false },
-  '5289':{ name:'宜鼎',    isSelf:false },
-  '4967':{ name:'十銓科技', isSelf:false },
-  '8271':{ name:'宇瞻',    isSelf:false },
-  '4973':{ name:'廣穎',    isSelf:false },
+  '2451':{ name:'創見'     },
+  '3260':{ name:'威剛'     },
+  '5289':{ name:'宜鼎'     },
+  '4967':{ name:'十銓科技' },
+  '8271':{ name:'宇瞻'     },
+  '4973':{ name:'廣穎'     },
 };
 
 // ═══════════════════════════════════════════════════════════
@@ -1094,7 +1094,7 @@ function StockCard({ code, data }) {
   const up = data.changePct > 0, dn = data.changePct < 0;
   const stale = isStockStale(data);
   return (
-    <div className={`p-4 rounded-2xl border transition-all ${meta.isSelf?'border-red-700/40 bg-gradient-to-br from-red-950/25 to-gray-900':'border-gray-700/60 bg-gray-900'}`}>
+    <div className="p-4 rounded-2xl bg-gray-900 transition-all">
       <div className="flex justify-between items-start mb-2">
         <div className="flex items-center gap-2 min-w-0">
           <CompanyLogo code={code} height={22} />
@@ -1104,11 +1104,6 @@ function StockCard({ code, data }) {
           </div>
         </div>
         <div className="flex flex-col items-end gap-1">
-          {meta.isSelf && (
-            <span className="text-xs px-2 py-0.5 rounded-full border" style={{ background:'#fff1f2', color:'#be123c', borderColor:'#fecdd3' }}>
-              本公司
-            </span>
-          )}
           {stale && (
             <span className="text-xs px-2 py-0.5 rounded-full border" title="交易時段中超過 30 分鐘未更新"
               style={{ background:'rgba(217,119,6,0.15)', color:'#fbbf24', borderColor:'rgba(217,119,6,0.4)' }}>
