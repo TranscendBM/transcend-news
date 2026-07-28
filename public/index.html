@@ -118,6 +118,15 @@
   .light-theme .text-red-300 { color:#be123c !important; }
   .light-theme .border-red-700\/40,
   .light-theme .border-red-700\/50 { border-color:#fecdd3 !important; }
+  /* 漲跌／警示指標文字（原本只給了「-300」徽章配色，這幾個「-400/-500」
+     指標色沒跟著覆寫，在白底上維持深色系原本的高亮色，太亮不易閱讀）。*/
+  .light-theme .text-green-400,
+  .light-theme .text-green-400\/80 { color:#047857 !important; }
+  .light-theme .text-red-400,
+  .light-theme .text-red-400\/70,
+  .light-theme .text-red-400\/80 { color:#be123c !important; }
+  .light-theme .text-amber-500,
+  .light-theme .text-amber-500\/80 { color:#c2410c !important; }
   .light-theme .bg-blue-900\/60 { background:#eff6ff !important; }
   .light-theme .text-blue-300 { color:#1d4ed8 !important; }
   .light-theme .border-blue-700\/50 { border-color:#bfdbfe !important; }
@@ -606,7 +615,7 @@ function NewsCard({ article }) {
       <div className="flex-1 min-w-0">
         <p className="content-title text-sm line-clamp-2 leading-snug transition-colors">{article.title}</p>
         <div className="flex items-center gap-1.5 mt-1.5 text-xs text-gray-500">
-          <span className="font-medium" style={{ color:'#f87171' }}>{media}</span>
+          <span className="font-medium" style={{ color:'#be123c' }}>{media}</span>
           <span>·</span>
           <span>{fmtDate(article.pubDate)}</span>
         </div>
@@ -733,7 +742,7 @@ function USNewsCard({ article }) {
           </div>
         )}
         <div className="flex items-center gap-1.5 mt-1.5 text-xs text-gray-500">
-          <span style={{ color:'#f87171' }}>{src}</span>
+          <span style={{ color:'#be123c' }}>{src}</span>
           <span>·</span>
           <span>{fmtDate(article.pubDate)}</span>
         </div>
@@ -880,10 +889,10 @@ function PRStatsPanel({ articles }) {
   }, [articles]);
 
   const PERIODS = [
-    { label:'今天', val:counts.today, color:'#f87171' },
-    { label:'本週', val:counts.week,  color:'#fb923c' },
-    { label:'本月', val:counts.month, color:'#facc15' },
-    { label:'本年', val:counts.year,  color:'#4ade80' },
+    { label:'今天', val:counts.today, color:'#be123c' },
+    { label:'本週', val:counts.week,  color:'#c2410c' },
+    { label:'本月', val:counts.month, color:'#a16207' },
+    { label:'本年', val:counts.year,  color:'#047857' },
   ];
 
   return (
