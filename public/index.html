@@ -257,19 +257,25 @@ const MEDIA_MAP = {
 // ═══════════════════════════════════════════════════════════
 const COMPETITORS = [
   { id:'ADATA',         name:'ADATA 威剛',          stock:'3260', color:'#ef4444' },
-  { id:'Teamgroup',     name:'Teamgroup 十銓',       stock:'4967', color:'#f97316' },
   { id:'Innodisk',      name:'Innodisk 宜鼎',       stock:'5289', color:'#eab308' },
+  { id:'Teamgroup',     name:'Teamgroup 十銓',       stock:'4967', color:'#f97316' },
   { id:'Apacer',        name:'Apacer 宇瞻',         stock:'8271', color:'#22c55e' },
   { id:'Silicon Power', name:'Silicon Power 廣穎',  stock:'4973', color:'#3b82f6' },
 ];
 
+// 統一的競品顯示順序（威剛／宜鼎／十銓／宇瞻／廣穎）。
+// 股票代號當 object key 時，JS 會自動依數字大小排序、無視物件字面量的
+// 撰寫順序，所以凡是要照這個順序顯示的地方都要用這個陣列驅動，
+// 不能直接 Object.keys()/Object.entries() 一個以代號為 key 的物件。
+const COMPETITOR_ORDER = ['3260', '5289', '4967', '8271', '4973'];
+
 const STOCK_META = {
   '2451':{ name:'創見',    isSelf:true  },
   '3260':{ name:'威剛',    isSelf:false },
-  '4973':{ name:'廣穎',    isSelf:false },
   '5289':{ name:'宜鼎',    isSelf:false },
   '4967':{ name:'十銓科技', isSelf:false },
   '8271':{ name:'宇瞻',    isSelf:false },
+  '4973':{ name:'廣穎',    isSelf:false },
 };
 
 // ═══════════════════════════════════════════════════════════
@@ -1609,10 +1615,10 @@ function CompetitorMaterial({ material }) {
   const COMP_META = {
     '2451':{ name:'創見資訊',  color: BRAND },
     '3260':{ name:'威剛科技',  color:'#ef4444' },
-    '4967':{ name:'十銓科技',  color:'#f97316' },
-    '4973':{ name:'廣穎電通',  color:'#3b82f6' },
     '5289':{ name:'宜鼎國際',  color:'#eab308' },
+    '4967':{ name:'十銓科技',  color:'#f97316' },
     '8271':{ name:'宇瞻科技',  color:'#22c55e' },
+    '4973':{ name:'廣穎電通',  color:'#3b82f6' },
   };
   const BADGE_COLOR = {
     '董事會':    'bg-red-900/60 text-red-300 border-red-700/50',
@@ -1643,7 +1649,7 @@ function CompetitorMaterial({ material }) {
       {/* 股票篩選 tabs */}
       <div className="flex flex-wrap gap-1.5 mb-3">
         <TabBtn active={filterCode==='all'} onClick={() => setFilterCode('all')}>全部</TabBtn>
-        {Object.entries(COMP_META).map(([code, m]) => (
+        {['2451', ...COMPETITOR_ORDER].map(code => [code, COMP_META[code]]).map(([code, m]) => (
           <TabBtn key={code} active={filterCode===code} onClick={() => setFilterCode(code)}>
             <span className="inline-block w-2 h-2 rounded-full mr-1" style={{ background: m.color }} />
             {code} {m.name}
@@ -1875,9 +1881,9 @@ function DailyTrading({ daily }) {
 const COMP_REV_META = {
   '2451': { name: '創見',        color: '#960014' },
   '3260': { name: 'ADATA 威剛', color: '#ef4444' },
-  '8271': { name: 'Apacer 宇瞻', color: '#f97316' },
-  '4967': { name: '十銓科技',   color: '#a855f7' },
   '5289': { name: '宜鼎國際',   color: '#eab308' },
+  '4967': { name: '十銓科技',   color: '#a855f7' },
+  '8271': { name: 'Apacer 宇瞻', color: '#f97316' },
   '4973': { name: '廣穎科技',   color: '#3b82f6' },
 };
 
@@ -1897,7 +1903,8 @@ function CompetitorRevenueChart({ revenue, compRev }) {
     return Object.values(series).sort((a,b) => a.label < b.label ? -1 : 1).slice(-24);
   }, [revenue, compRev]);
 
-  const hasCodes = ['2451', ...Object.keys(compRev || {})].filter(c => COMP_REV_META[c]);
+  const compKeys = new Set(Object.keys(compRev || {}));
+  const hasCodes = ['2451', ...COMPETITOR_ORDER.filter(c => compKeys.has(c))].filter(c => COMP_REV_META[c]);
   if (!allSeries.length || hasCodes.length < 2) {
     return (
       <div className="text-sm text-gray-600 text-center py-6">
@@ -1983,7 +1990,8 @@ function AnnualRevenueChart({ revenue, compRev }) {
       .slice(-10);
   }, [revenue, compRev]);
 
-  const hasCodes = ['2451', ...Object.keys(compRev || {})].filter(c => COMP_REV_META[c]);
+  const compKeys = new Set(Object.keys(compRev || {}));
+  const hasCodes = ['2451', ...COMPETITOR_ORDER.filter(c => compKeys.has(c))].filter(c => COMP_REV_META[c]);
 
   if (!allYears.length || hasCodes.length < 2) {
     return (
@@ -2059,7 +2067,7 @@ function IRTab({ news, stocks, community, revenue, financials, dividends, materi
     <div className="space-y-4 fade-in">
       {/* Stock cards */}
       <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
-        {Object.keys(STOCK_META).map(code => (
+        {['2451', ...COMPETITOR_ORDER].map(code => (
           stocks[code]
             ? <StockCard key={code} code={code} data={stocks[code]} />
             : <div key={code} className="p-4 rounded-2xl border border-gray-700/60 bg-gray-900 flex flex-col items-center justify-center gap-2 min-h-[100px]">
