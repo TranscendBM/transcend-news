@@ -52,7 +52,7 @@
   :root {
     --page: #f5f6f8;
     --surface: #ffffff;
-    --surface-soft: #f8fafc;
+    --surface-soft: #f2f5f8;
     --line: #e5e7eb;
     --text: #1f2937;
     --muted: #64748b;
@@ -78,13 +78,16 @@
   .light-theme .bg-gray-800\/80 { background-color:var(--surface-soft) !important; }
   .light-theme .bg-gray-800,
   .light-theme .bg-gray-700 { background-color:#eef1f5 !important; }
+  /* 灰色框線改為透明：區塊改用背景色深淺區隔（page < surface-soft < surface），
+     不再靠外框線分隔，減少多層 div 疊框造成的視覺干擾。彩色徽章（如
+     text-green-300 系列）的邊框不在此列，維持原本的色塊配色。 */
   .light-theme .border-gray-800\/40,
   .light-theme .border-gray-700,
   .light-theme .border-gray-700\/40,
   .light-theme .border-gray-700\/60,
   .light-theme .border-gray-600,
   .light-theme .border-gray-600\/50,
-  .light-theme .border-gray-600\/60 { border-color:var(--line) !important; }
+  .light-theme .border-gray-600\/60 { border-color:transparent !important; }
   .light-theme .text-gray-200,
   .light-theme .text-gray-300 { color:#334155 !important; }
   .light-theme .text-gray-400 { color:#475569 !important; }
@@ -2389,7 +2392,7 @@ function App() {
 
       {/* ─────────── HEADER ─────────── */}
       <header className="sticky top-0 z-50 shadow-2xl"
-        style={{ background:'linear-gradient(135deg,#3b0007 0%,#960014 55%,#b5001a 100%)' }}>
+        style={{ background:'rgb(150,0,20)' }}>
         <div className="max-w-7xl mx-auto px-4 h-14 flex items-center justify-between gap-3">
 
           {/* Logo */}
