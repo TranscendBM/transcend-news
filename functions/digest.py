@@ -158,7 +158,7 @@ def build_digest_email(label, items, now=None):
 
     html_body = f'''<!doctype html>
 <html>
-<body style="margin:0;padding:0;background:#f5f6f8;font-family:'Segoe UI',system-ui,sans-serif;">
+<body style="margin:0;padding:0;background:#f5f6f8;font-family:Calibri,'Microsoft JhengHei','微軟正黑體',sans-serif;">
   <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#f5f6f8;padding:24px 0;">
     <tr>
       <td align="center">
