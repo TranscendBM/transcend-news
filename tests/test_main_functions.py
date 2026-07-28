@@ -183,7 +183,8 @@ class TestRunLocked(unittest.TestCase):
 class TestScheduledEntrypoints(unittest.TestCase):
     def test_all_jobs_have_max_instances_1(self):
         jobs = [main.stocks_job, main.news_job,
-                main.trading_job, main.finance_job, main.finance_early_month_job]
+                main.trading_job, main.finance_job, main.finance_early_month_job,
+                main.tw_dram_digest_job, main.us_dram_digest_job]
         for job in jobs:
             self.assertEqual(job._schedule_opts.get('max_instances'), 1,
                              f'{job.__name__} 必須設 max_instances=1')
@@ -192,11 +193,26 @@ class TestScheduledEntrypoints(unittest.TestCase):
         """鎖 TTL 必須大於函式 timeout，否則執行中的鎖可能被誤接管"""
         # (job, 對應 _run_locked ttl_minutes)——與 main.py 內設定同步維護
         ttls = {'stocks_job': 3, 'news_job': 12,
-                'trading_job': 8, 'finance_job': 12, 'finance_early_month_job': 12}
+                'trading_job': 8, 'finance_job': 12, 'finance_early_month_job': 12,
+                'tw_dram_digest_job': 5, 'us_dram_digest_job': 5}
         for job_name, ttl in ttls.items():
             timeout_sec = getattr(main, job_name)._schedule_opts['timeout_sec']
             self.assertGreater(ttl * 60, timeout_sec,
                                f'{job_name}: 鎖 TTL({ttl}分) 必須 > timeout({timeout_sec}秒)')
+
+    def test_digest_jobs_use_independent_locks(self):
+        names = []
+        with patch.object(main, '_run_locked', side_effect=lambda n, *a, **k: names.append(n)):
+            main.tw_dram_digest_job(None)
+            main.us_dram_digest_job(None)
+        self.assertEqual(names, ['digest_tw', 'digest_us'],
+                         '台灣/美國摘要信各自獨立追蹤寄送進度，不得共用同一把鎖')
+
+    def test_digest_jobs_require_email_secret(self):
+        for job_name in ('tw_dram_digest_job', 'us_dram_digest_job'):
+            secrets = getattr(main, job_name)._schedule_opts['secrets']
+            self.assertIn(main.DIGEST_EMAIL_APP_PASSWORD, secrets,
+                         f'{job_name} 必須帶入 DIGEST_EMAIL_APP_PASSWORD 才能寄信')
 
     def test_news_job_routes_through_lock(self):
         with patch.object(main, '_run_locked') as mrun:

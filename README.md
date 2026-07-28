@@ -66,6 +66,33 @@ ollama pull gemma3:4b
 同時處理同一筆。新聞文字一律視為不可信外部資料，不會授予模型工具、
 系統指令或對外發送能力。
 
+## 📧 DRAM/Flash 產業新聞摘要信（`functions/digest.py`，Phase 1）
+
+平日自動寄出重要 DRAM/Flash 產業新聞摘要信（`functions/main.py`
+`tw_dram_digest_job` / `us_dram_digest_job`）：
+
+| 排程 | 時間（台灣時間，平日） | 內容 |
+|---|---|---|
+| `tw_dram_digest_job` | 08:00 | `cat=twMarket`（台灣科技媒體） |
+| `us_dram_digest_job` | 16:30 | `cat=usMarket`（美國市場/供應鏈） |
+
+- **Phase 1（目前）**：完全零 API 費用，沿用 `intelligence.py` 既有的規則式
+  相關性/重要性評分挑出當次要寄的新聞，摘要文字用 `intelligence.rule_summary()`
+  （標題＋來源＋事件類型），不呼叫任何付費 AI
+- 各時段各自以 `meta/digest_tw`、`meta/digest_us` 追蹤「上次成功寄送時間」，
+  只寄這之後新發布的新聞；寄信失敗時**不會**推進時間戳記，下次執行會用
+  同一個區間重試，不會漏新聞（週一 08:00 那次會自動涵蓋整個週末）
+- 寄件使用 Gmail SMTP（`tselvis814@gmail.com` + 應用程式密碼），密碼存於
+  Secret Manager **`DIGEST_EMAIL_APP_PASSWORD`**（不進 repo/程式碼）：
+  ```bash
+  firebase functions:secrets:set DIGEST_EMAIL_APP_PASSWORD --project transcend-news-tbm
+  ```
+- 收件人清單、篩選分類等寫在 `digest.py` 開頭的常數（`DIGEST_RECIPIENTS`、
+  `DIGEST_CATS`），要調整不用改邏輯
+- **之後（Phase 2，未實作）**：若導入公司內本機 Ollama 做真正的 AI 摘要，
+  只需替換 `build_digest_email()` 產生的內文來源，篩選/寄信/進度追蹤都不用動；
+  本機摘要若當次沒準備好，可退回規則版內容當備援，避免開天窗
+
 ## 🚀 前端部署（Firebase Hosting）
 
 改完 `public/index.html` 後：
@@ -127,6 +154,7 @@ firebase deploy --only functions
 │   ├── main.py                   # Cloud Functions 排程進入點（部署於 transcend-news-tbm）
 │   ├── fetch_news.py             # 抓取邏輯（Functions 與 Actions 共用）
 │   ├── intelligence.py           # 零成本相關性、優先順序與事件規則
+│   ├── digest.py                 # DRAM/Flash 產業新聞摘要信（Phase 1，規則版摘要）
 │   └── requirements.txt          # Python 相依套件（固定版本）
 ├── tools/
 │   ├── local_ai_worker.py        # 公司電腦上的 Ollama / 規則處理程式
@@ -135,6 +163,7 @@ firebase deploy --only functions
     ├── test_fetch_news.py        # 抓取、去重、鎖與 AI 待辦整合測試
     ├── test_intelligence.py       # 相關性與風險規則測試
     ├── test_local_ai_worker.py    # 本機端點、輸出與防衝突測試
+    ├── test_digest.py            # 摘要信篩選、進度追蹤與寄信流程測試
 　　└── test_main_functions.py    # Cloud Functions 進入點測試（全離線）
 ```
 
