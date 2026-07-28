@@ -6,16 +6,22 @@ DRAM/Flash 產業新聞摘要信件 — Phase 1（零 API 費用，沿用 intell
 不呼叫任何付費 AI；之後若導入本機 Ollama 摘要，只需替換
 build_digest_email() 產生的內文，其餘（篩選、寄信、進度追蹤）不動。
 
+範圍鎖定「上游供應商 + 產業市場」新聞，不含創見自己或競品的公司新聞
+（那些已有前端 PR/競品動態分頁可看，這封信只做產業情報）。
+
 寄件帳號使用 Gmail SMTP（tselvis814@gmail.com + App Password），
 App Password 存於 Secret Manager 的 DIGEST_EMAIL_APP_PASSWORD，
 不進 repo、不進程式碼。
 """
 
 import datetime
+import html
 import smtplib
+from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 from email.utils import formatdate
 
+import fetch_news
 import intelligence
 
 SMTP_HOST = 'smtp.gmail.com'
@@ -33,13 +39,43 @@ DIGEST_CATS = {
     'us': {'cat': 'usMarket', 'label': '美國 DRAM/Flash 產業新聞'},
 }
 
+# 競品公司代號（intelligence.COMPANIES 扣掉創見自己）：這封信只做上游供應商
+# ／產業市場情報，創見自己與競品的公司新聞已有前端 PR／競品動態分頁可看，
+# 提到這些公司的文章一律排除，避免跟那邊的內容重複。
+_COMPETITOR_CODES = frozenset(intelligence.COMPANIES) - {'2451'}
+
+# PNG，不是 SVG——不少信箱用戶端（尤其 Outlook 桌面版）不支援在信件裡
+# 顯示 SVG 圖片，PNG 相容性才夠好。
+LOGO_URL = 'https://transcend-news.web.app/logos/transcend-white.png'
+BRAND_COLOR = '#960014'
+
+EVENT_LABELS = {
+    'crisis':       ('風險', '#dc2626'),
+    'financial':    ('財務', '#2563eb'),
+    'supply_chain': ('供應鏈', '#c2410c'),
+    'product':      ('產品', '#16a34a'),
+    'partnership':  ('合作', '#7c3aed'),
+    'market':       ('市場', '#ca8a04'),
+    'other':        ('新聞', '#6b7280'),
+}
+
+
+def _mentions_tracked_company(rules):
+    """是否提及創見自己或任一競品（這幾家公司新聞已有前端分頁可看，這封信不重複收錄）。"""
+    return any(e.get('code') in _COMPETITOR_CODES or e.get('code') == '2451'
+               for e in rules.get('entities', []))
+
 
 def select_digest_articles(articles, since_dt, limit=DIGEST_MAX_ITEMS):
     """
-    純函式：從文章清單中挑出「since_dt 之後發布」且經 intelligence 規則
-    判定為相關（relevant）的文章，依重要性分數（importanceScore）由高到低
-    排序，最多回傳 limit 筆。
+    純函式：從文章清單中挑出符合以下條件的文章：
+      1. since_dt 之後發布
+      2. 經 intelligence 規則判定為相關（relevant）
+      3. 不是創見自己或競品的公司新聞（只保留上游供應商/產業市場情報）
+      4. 標題正規化後不重複（同一則新聞被多個來源/搜尋條件重複收錄時，
+         只留下重要性分數最高的那一則）
 
+    依重要性分數（importanceScore）由高到低排序，最多回傳 limit 筆。
     回傳 [(article, rule_analysis), ...]。
     """
     scored = []
@@ -50,38 +86,122 @@ def select_digest_articles(articles, since_dt, limit=DIGEST_MAX_ITEMS):
         rules = intelligence.analyze_article_rules(article)
         if not rules.get('relevant'):
             continue
+        if _mentions_tracked_company(rules):
+            continue
         scored.append((article, rules))
     scored.sort(key=lambda pair: pair[1]['importanceScore'], reverse=True)
-    return scored[:limit]
+
+    deduped = []
+    seen_titles = set()
+    for article, rules in scored:
+        key = fetch_news.normalize_title(article.get('title'))
+        if key and key in seen_titles:
+            continue
+        seen_titles.add(key)
+        deduped.append((article, rules))
+    return deduped[:limit]
+
+
+def _event_badge(event_type):
+    return EVENT_LABELS.get(event_type, EVENT_LABELS['other'])
 
 
 def build_digest_email(label, items, now=None):
-    """純函式：把挑選出的文章組成信件標題與純文字內文。"""
+    """
+    純函式：把挑選出的文章組成信件標題、純文字內文與 HTML 內文
+    （多數信箱優先顯示 HTML 版本，純文字版供不支援 HTML 的用戶端顯示）。
+    回傳 (subject, text_body, html_body)。
+    """
     now = now or datetime.datetime.now(datetime.timezone(datetime.timedelta(hours=8)))
     date_str = now.strftime('%Y-%m-%d')
     subject = f'[創見新聞監控] {date_str} {label}（共 {len(items)} 則）'
 
+    text_lines = [f'{date_str} {label}，共 {len(items)} 則（依重要性排序）：', '']
+    card_html_parts = []
+
     if not items:
-        body = f'{date_str}\n\n目前沒有符合條件的{label}。\n'
-        return subject, body
+        text_lines.append(f'目前沒有符合條件的{label}。')
+    else:
+        for i, (article, rules) in enumerate(items, 1):
+            text_lines.append(f'{i}. {intelligence.rule_summary(article, rules)}')
+            link = article.get('link')
+            if link:
+                text_lines.append(f'   {link}')
+            text_lines.append('')
 
-    lines = [f'{date_str} {label}，共 {len(items)} 則（依重要性排序）：', '']
-    for i, (article, rules) in enumerate(items, 1):
-        lines.append(f'{i}. {intelligence.rule_summary(article, rules)}')
-        link = article.get('link')
-        if link:
-            lines.append(f'   {link}')
-        lines.append('')
-    return subject, '\n'.join(lines)
+            title = html.escape(str(article.get('title') or ''))
+            source = html.escape(str(article.get('mediaName') or article.get('sourceName') or '未知來源'))
+            safe_link = html.escape(link or '#', quote=True)
+            badge_label, badge_color = _event_badge(rules.get('eventType'))
+            title_html = (
+                f'<a href="{safe_link}" style="color:#1f2937;text-decoration:none;">{title}</a>'
+                if link else title
+            )
+            card_html_parts.append(f'''
+        <tr>
+          <td style="padding:14px 0;border-bottom:1px solid #e5e7eb;">
+            <span style="display:inline-block;font-size:11px;font-weight:bold;color:#ffffff;
+                         background:{badge_color};border-radius:10px;padding:2px 8px;margin-bottom:6px;">
+              {html.escape(badge_label)}
+            </span>
+            <div style="font-size:15px;font-weight:600;line-height:1.5;margin-top:4px;">{title_html}</div>
+            <div style="font-size:12px;color:#6b7280;margin-top:4px;">{source}</div>
+          </td>
+        </tr>''')
+
+    text_body = '\n'.join(text_lines)
+
+    items_html = (
+        ''.join(card_html_parts) if items else
+        f'<tr><td style="padding:24px 0;color:#6b7280;font-size:14px;">目前沒有符合條件的{html.escape(label)}。</td></tr>'
+    )
+
+    html_body = f'''<!doctype html>
+<html>
+<body style="margin:0;padding:0;background:#f5f6f8;font-family:'Segoe UI',system-ui,sans-serif;">
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#f5f6f8;padding:24px 0;">
+    <tr>
+      <td align="center">
+        <table role="presentation" width="600" cellpadding="0" cellspacing="0"
+               style="background:#ffffff;border-radius:12px;overflow:hidden;max-width:600px;width:100%;">
+          <tr>
+            <td style="background:{BRAND_COLOR};padding:20px 24px;">
+              <img src="{LOGO_URL}" alt="Transcend" height="22" style="display:block;border:0;">
+              <div style="color:#ffffff;font-size:16px;font-weight:bold;margin-top:10px;">{html.escape(label)}</div>
+              <div style="color:rgba(255,255,255,0.7);font-size:12px;margin-top:2px;">{date_str}・共 {len(items)} 則</div>
+            </td>
+          </tr>
+          <tr>
+            <td style="padding:8px 24px 4px 24px;">
+              <table role="presentation" width="100%" cellpadding="0" cellspacing="0">
+                {items_html}
+              </table>
+            </td>
+          </tr>
+          <tr>
+            <td style="padding:16px 24px;background:#f8fafc;color:#9ca3af;font-size:11px;">
+              創見新聞監控系統自動產生・規則版摘要（零 API 費用）
+            </td>
+          </tr>
+        </table>
+      </td>
+    </tr>
+  </table>
+</body>
+</html>'''
+
+    return subject, text_body, html_body
 
 
-def send_email(subject, body, to_addrs, app_password, from_addr=DIGEST_SENDER):
-    """寄出純文字信件（Gmail SMTP，587 埠 + STARTTLS）。"""
-    msg = MIMEText(body, 'plain', 'utf-8')
+def send_email(subject, text_body, html_body, to_addrs, app_password, from_addr=DIGEST_SENDER):
+    """寄出信件（純文字 + HTML 雙版本，Gmail SMTP，587 埠 + STARTTLS）。"""
+    msg = MIMEMultipart('alternative')
     msg['Subject'] = subject
     msg['From'] = from_addr
     msg['To'] = ', '.join(to_addrs)
     msg['Date'] = formatdate(localtime=True)
+    msg.attach(MIMEText(text_body, 'plain', 'utf-8'))
+    msg.attach(MIMEText(html_body, 'html', 'utf-8'))
 
     with smtplib.SMTP(SMTP_HOST, SMTP_PORT, timeout=30) as server:
         server.starttls()
@@ -129,7 +249,7 @@ def run_digest(db, key, app_password):
     since = get_last_digest_time(db, key)
     articles = fetch_cat_articles(db, cfg['cat'])
     items = select_digest_articles(articles, since)
-    subject, body = build_digest_email(cfg['label'], items)
-    send_email(subject, body, DIGEST_RECIPIENTS, app_password)
+    subject, text_body, html_body = build_digest_email(cfg['label'], items)
+    send_email(subject, text_body, html_body, DIGEST_RECIPIENTS, app_password)
     set_last_digest_time(db, key, datetime.datetime.now(datetime.timezone.utc))
     return {'count': len(items)}
