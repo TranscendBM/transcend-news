@@ -580,7 +580,7 @@ function TodayBriefing({ articles, title='今日情報快報' }) {
                 <span className={`text-xs px-2 py-0.5 rounded-full border ${badgeClass[meta.kind]}`}>{meta.label}</span>
                 <span className="text-xs text-gray-600">{fmtDate(article.pubDate)}</span>
               </div>
-              <p className="content-title text-xs font-semibold leading-relaxed line-clamp-3 transition-colors">{article.title}</p>
+              <p className="content-title text-sm font-semibold leading-relaxed line-clamp-3 transition-colors">{article.title}</p>
               <p className="text-xs text-gray-500 mt-2">入選原因：{meta.reasons.join(' · ')}</p>
               <div className="mt-2 pt-2 border-t border-gray-700/40">
                 <p className="text-xs font-semibold text-secondary mb-0.5">建議下一步</p>
@@ -1071,7 +1071,7 @@ function StockCard({ code, data }) {
         <span>{up?'▲':dn?'▼':'─'}</span>
         <span>{up?'+':''}{data.changePct?.toFixed(2)??'--'}%</span>
       </div>
-      <p className="text-xs text-gray-600 mt-1">
+      <p className="text-sm text-gray-600 mt-1">
         {up?'+':''}{data.change?.toFixed(1)??'--'} ·
         量 {data.volume ? (data.volume/1000).toFixed(0)+'張' : '--'}
       </p>
@@ -1289,7 +1289,7 @@ function RevenueChart({ revenue }) {
 
           {/* 近 12 個月明細表 */}
           <div className="mt-3 overflow-x-auto">
-            <table className="w-full text-xs">
+            <table className="w-full text-sm">
               <thead>
                 <tr className="border-b border-gray-700/60 text-gray-500">
                   <th className="text-left pb-1.5 pr-3 font-medium">年月</th>
@@ -1332,7 +1332,7 @@ function RevenueChart({ revenue }) {
 
       {/* 明細表 */}
       <div className="mt-3 overflow-x-auto">
-        <table className="w-full text-xs">
+        <table className="w-full text-sm">
           <thead>
             <tr className="border-b border-gray-700/60 text-gray-500">
               <th className="text-left pb-1.5 pr-3 font-medium">年度</th>
@@ -1471,7 +1471,7 @@ function QuarterlyPnL({ financials }) {
     <Card title="季度損益摘要（近 8 季）" icon="📋">
       {quarters.length > 0 ? (
         <div className="overflow-x-auto">
-          <table className="w-full text-xs">
+          <table className="w-full text-sm">
             <thead>
               <tr className="border-b border-gray-700/60 text-gray-500">
                 <th className="text-left pb-2 pr-3 font-medium">季度</th>
@@ -1534,7 +1534,7 @@ function DividendHistory({ dividends }) {
     <Card title="歷年股利配息（近 10 年）" icon="💵">
       {records.length > 0 ? (
         <div className="overflow-x-auto">
-          <table className="w-full text-xs">
+          <table className="w-full text-sm">
             <thead>
               <tr className="border-b border-gray-700/60 text-gray-500">
                 <th className="text-left pb-2 pr-3 font-medium">配息年度</th>
@@ -1640,7 +1640,7 @@ function CompetitorMaterial({ material }) {
           {filtered.map((r, i) => {
             const meta = COMP_META[r.code] || {};
             return (
-              <div key={i} className={`rounded-xl px-3 py-2.5 text-xs border ${r.highlight ? 'border-gray-600/60 bg-gray-800/40' : 'border-gray-800/40 bg-gray-900/30'}`}>
+              <div key={i} className={`rounded-xl px-3 py-2.5 text-sm border ${r.highlight ? 'border-gray-600/60 bg-gray-800/40' : 'border-gray-800/40 bg-gray-900/30'}`}>
                 <div className="flex items-start gap-2">
                   <span className="font-bold shrink-0" style={{ color: meta.color || '#9ca3af' }}>
                     {meta.name || r.name || r.code}
@@ -1797,12 +1797,12 @@ function DailyTrading({ daily }) {
           )}
           <div className="space-y-1.5">
             {[['開盤', daily.open], ['收盤', daily.close], ['最高', daily.high], ['最低', daily.low]].map(([k,v]) => (
-              <div key={k} className="flex justify-between text-xs">
+              <div key={k} className="flex justify-between text-sm">
                 <span className="text-gray-500">{k}</span>
                 <span className="text-ink tabular-nums">{v != null ? v : '—'}</span>
               </div>
             ))}
-            <div className="flex justify-between text-xs border-t border-gray-700/40 pt-1 mt-1">
+            <div className="flex justify-between text-sm border-t border-gray-700/40 pt-1 mt-1">
               <span className="text-gray-500">交易量</span>
               <span className="text-ink tabular-nums">{daily.volume ? fmtK(daily.volume) + ' 股' : '—'}</span>
             </div>
@@ -1816,11 +1816,11 @@ function DailyTrading({ daily }) {
             {netStr(daily.foreignNet)}
           </p>
           <div className="space-y-1.5">
-            <div className="flex justify-between text-xs">
+            <div className="flex justify-between text-sm">
               <span className="text-gray-500">買進</span>
               <span className="text-green-400/80 tabular-nums">{daily.foreignBuy != null ? fmtK(daily.foreignBuy) : '—'}</span>
             </div>
-            <div className="flex justify-between text-xs">
+            <div className="flex justify-between text-sm">
               <span className="text-gray-500">賣出</span>
               <span className="text-red-400/80 tabular-nums">{daily.foreignSell != null ? fmtK(daily.foreignSell) : '—'}</span>
             </div>
@@ -1835,11 +1835,11 @@ function DailyTrading({ daily }) {
             {netStr(daily.trustNet)}
           </p>
           <div className="space-y-1.5">
-            <div className="flex justify-between text-xs">
+            <div className="flex justify-between text-sm">
               <span className="text-gray-500">買進</span>
               <span className="text-green-400/80 tabular-nums">{daily.trustBuy != null ? fmtK(daily.trustBuy) : '—'}</span>
             </div>
-            <div className="flex justify-between text-xs">
+            <div className="flex justify-between text-sm">
               <span className="text-gray-500">賣出</span>
               <span className="text-red-400/80 tabular-nums">{daily.trustSell != null ? fmtK(daily.trustSell) : '—'}</span>
             </div>
