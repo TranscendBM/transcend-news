@@ -49,6 +49,12 @@ _COMPETITOR_CODES = frozenset(intelligence.COMPANIES) - {'2451'}
 LOGO_URL = 'https://transcend-news.web.app/logos/transcend-white.png'
 BRAND_COLOR = '#960014'
 
+# Outlook 桌面版用 Word 引擎渲染 HTML 信件，不會把 <body> 上設定的
+# font-family 往下繼承到表格/div 裡，只寫在 body 會被忽略、退回 Outlook
+# 自己的中文預設字型（新細明體）。因此下面 HTML 樣板裡每一個會顯示文字
+# 的元素都要重複寫一次這個字型堆疊，不能只靠 CSS 繼承。
+FONT_STACK = "Calibri,'Microsoft JhengHei','微軟正黑體',sans-serif"
+
 EVENT_LABELS = {
     'crisis':       ('風險', '#dc2626'),
     'financial':    ('財務', '#2563eb'),
@@ -139,13 +145,13 @@ def build_digest_email(label, items, now=None):
             )
             card_html_parts.append(f'''
         <tr>
-          <td style="padding:14px 0;border-bottom:1px solid #e5e7eb;">
-            <span style="display:inline-block;font-size:11px;font-weight:bold;color:#ffffff;
+          <td style="padding:14px 0;border-bottom:1px solid #e5e7eb;font-family:{FONT_STACK};">
+            <span style="display:inline-block;font-family:{FONT_STACK};font-size:11px;font-weight:bold;color:#ffffff;
                          background:{badge_color};border-radius:10px;padding:2px 8px;margin-bottom:6px;">
               {html.escape(badge_label)}
             </span>
-            <div style="font-size:15px;font-weight:600;line-height:1.5;margin-top:4px;">{title_html}</div>
-            <div style="font-size:12px;color:#6b7280;margin-top:4px;">{source}</div>
+            <div style="font-family:{FONT_STACK};font-size:15px;font-weight:600;line-height:1.5;margin-top:4px;">{title_html}</div>
+            <div style="font-family:{FONT_STACK};font-size:12px;color:#6b7280;margin-top:4px;">{source}</div>
           </td>
         </tr>''')
 
@@ -153,33 +159,41 @@ def build_digest_email(label, items, now=None):
 
     items_html = (
         ''.join(card_html_parts) if items else
-        f'<tr><td style="padding:24px 0;color:#6b7280;font-size:14px;">目前沒有符合條件的{html.escape(label)}。</td></tr>'
+        f'<tr><td style="padding:24px 0;color:#6b7280;font-size:14px;font-family:{FONT_STACK};">目前沒有符合條件的{html.escape(label)}。</td></tr>'
     )
 
     html_body = f'''<!doctype html>
 <html>
-<body style="margin:0;padding:0;background:#f5f6f8;font-family:Calibri,'Microsoft JhengHei','微軟正黑體',sans-serif;">
-  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#f5f6f8;padding:24px 0;">
+<head>
+<meta charset="utf-8">
+<!--[if mso]>
+<style type="text/css">
+  body, table, td, div, span, a {{ font-family: Calibri, "Microsoft JhengHei", sans-serif !important; }}
+</style>
+<![endif]-->
+</head>
+<body style="margin:0;padding:0;background:#f5f6f8;font-family:{FONT_STACK};">
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#f5f6f8;padding:24px 0;font-family:{FONT_STACK};">
     <tr>
-      <td align="center">
+      <td align="center" style="font-family:{FONT_STACK};">
         <table role="presentation" width="600" cellpadding="0" cellspacing="0"
-               style="background:#ffffff;border-radius:12px;overflow:hidden;max-width:600px;width:100%;">
+               style="background:#ffffff;border-radius:12px;overflow:hidden;max-width:600px;width:100%;font-family:{FONT_STACK};">
           <tr>
-            <td style="background:{BRAND_COLOR};padding:20px 24px;">
+            <td style="background:{BRAND_COLOR};padding:20px 24px;font-family:{FONT_STACK};">
               <img src="{LOGO_URL}" alt="Transcend" height="22" style="display:block;border:0;">
-              <div style="color:#ffffff;font-size:16px;font-weight:bold;margin-top:10px;">{html.escape(label)}</div>
-              <div style="color:rgba(255,255,255,0.7);font-size:12px;margin-top:2px;">{date_str}・共 {len(items)} 則</div>
+              <div style="font-family:{FONT_STACK};color:#ffffff;font-size:16px;font-weight:bold;margin-top:10px;">{html.escape(label)}</div>
+              <div style="font-family:{FONT_STACK};color:rgba(255,255,255,0.7);font-size:12px;margin-top:2px;">{date_str}・共 {len(items)} 則</div>
             </td>
           </tr>
           <tr>
-            <td style="padding:8px 24px 4px 24px;">
-              <table role="presentation" width="100%" cellpadding="0" cellspacing="0">
+            <td style="padding:8px 24px 4px 24px;font-family:{FONT_STACK};">
+              <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="font-family:{FONT_STACK};">
                 {items_html}
               </table>
             </td>
           </tr>
           <tr>
-            <td style="padding:16px 24px;background:#f8fafc;color:#9ca3af;font-size:11px;">
+            <td style="padding:16px 24px;background:#f8fafc;color:#9ca3af;font-size:11px;font-family:{FONT_STACK};">
               創見新聞監控系統自動產生・規則版摘要（零 API 費用）
             </td>
           </tr>

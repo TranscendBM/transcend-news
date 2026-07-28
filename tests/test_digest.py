@@ -148,6 +148,23 @@ class TestBuildDigestEmail(unittest.TestCase):
         subject, text_body, html_body = digest.build_digest_email('台灣 DRAM/Flash 產業新聞', [])
         self.assertIn(digest.LOGO_URL, html_body)
 
+    def test_font_family_repeated_on_every_element_for_outlook(self):
+        """
+        Outlook 桌面版（Word 引擎）不會把 body 上的 font-family 繼承到
+        表格/div 裡，只寫在 body 一次會被忽略、退回內建中文預設字型。
+        每個文字元素都要重複帶入同一組字型堆疊，這裡至少驗證：
+        (1) 有新聞項目時，卡片本身也帶了字型設定，不是只有外層容器；
+        (2) 出現次數夠多，代表不是只寫在 body 這一處。
+        """
+        now = datetime.datetime(2026, 7, 20, 8, 0)
+        article = _mk_article(HIGH_TITLE, HIGH_CONTENT)
+        rules = intelligence.analyze_article_rules(article)
+        _, _, html_body = digest.build_digest_email(
+            '台灣 DRAM/Flash 產業新聞', [(article, rules)], now=now)
+        occurrences = html_body.count(digest.FONT_STACK)
+        self.assertGreaterEqual(occurrences, 8,
+                                '字型堆疊應重複出現在多個元素上（含新聞卡片本身），而非只寫在 body 上一次')
+
     def test_html_escapes_untrusted_title(self):
         """新聞標題來自外部 RSS，視為不可信資料，組 HTML 時必須跳脫。"""
         now = datetime.datetime(2026, 7, 20, 8, 0)
