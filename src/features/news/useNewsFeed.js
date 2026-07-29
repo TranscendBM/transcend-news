@@ -41,6 +41,11 @@ export function useNewsFeed(options = {}) {
   const retryRestRef = useRef(null);
   const cancelRetryRef = useRef(null);
   const hasPublishedRef = useRef(false);
+  // 建立監聽器前有一段非同步空窗（等待本機快取讀取），unsubRef.current
+  // 在那之前都還是 null；這個 flag 蓋住那段空窗，避免同一時間內第二次
+  // 呼叫 startOrRetry（例如掛載時的自動啟動與外部手動刷新幾乎同時發生）
+  // 又跑一次完整初始化、建立第二個 onSnapshot 監聽器。
+  const startingRef = useRef(false);
 
   const baseQuery = useCallback(() => {
     const db = getDb();
@@ -58,6 +63,8 @@ export function useNewsFeed(options = {}) {
       if (retryRestRef.current) retryRestRef.current();
       return;
     }
+    if (startingRef.current) return; // 已有一次啟動流程在跑，監聽器還沒建立，避免重複啟動
+    startingRef.current = true;
 
     const toObj = d => ({ id: d.id, ...d.data() });
 
@@ -159,7 +166,11 @@ export function useNewsFeed(options = {}) {
           cancelRetryRef.current = null;
         },
       );
-    } catch (e) { console.error('News:', e); }
+      startingRef.current = false; // 監聽器已建立，之後改走上面「已建立」的分支
+    } catch (e) {
+      console.error('News:', e);
+      startingRef.current = false; // 建立失敗，允許之後重新嘗試
+    }
   }, [baseQuery, onFirstPublish]);
 
   useEffect(() => {

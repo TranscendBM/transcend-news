@@ -1,7 +1,8 @@
-import { initializeApp, getApps } from 'firebase/app';
+import { initializeApp, getApps, getApp } from 'firebase/app';
 import {
-  getFirestore,
-  enableMultiTabIndexedDbPersistence,
+  initializeFirestore,
+  persistentLocalCache,
+  persistentMultipleTabManager,
   collection,
   doc,
   onSnapshot,
@@ -29,32 +30,33 @@ export const FIREBASE_CONFIG = {
 };
 
 let dbInstance = null;
-let persistenceEnabled = false;
-
-/** 取得（並視需要初始化）Firestore 實例；重複呼叫不會重複 initializeApp。 */
-export function getDb() {
-  if (!dbInstance) {
-    const app = getApps().length ? getApps()[0] : initializeApp(FIREBASE_CONFIG);
-    dbInstance = getFirestore(app);
-  }
-  return dbInstance;
-}
 
 /**
- * 啟用離線快取（IndexedDB，多分頁同步）：資料存在瀏覽器，第二次開啟起
- * 可立即顯示上次資料再於背景同步。必須在任何查詢之前呼叫；多分頁同開時
- * 可能失敗（failed-precondition），屬正常情況，不視為錯誤中止流程。
- * （對應舊版 compat API 的 db.enablePersistence({synchronizeTabs:true})）
+ * 取得 Firestore 實例（singleton）。全專案唯一的初始化入口——不得在
+ * 其他地方呼叫 getFirestore(app) 或再次呼叫 initializeFirestore(app, ...)，
+ * 同一個 app 對 initializeFirestore 呼叫第二次會直接拋出例外
+ * （"Firestore has already been started"）。
+ *
+ * 改用新版離線快取設定 API（initializeFirestore + persistentLocalCache +
+ * persistentMultipleTabManager）取代舊版 getFirestore() 之後另外呼叫
+ * enableMultiTabIndexedDbPersistence() 的兩段式做法：
+ *   - 快取設定在建立實例當下就決定，不是之後才非同步「啟用」——不會
+ *     有「第一個新聞查詢在快取設定完成前就先跑」的競態，也不需要呼叫端
+ *     額外 await 一個「持久化已啟用」的 promise 才能安全查詢
+ *   - persistentMultipleTabManager 原生支援多分頁同開，不會再出現舊版
+ *     enableIndexedDbPersistence 那種多分頁互搶導致的 failed-precondition
+ *   - 不會再印出 enableMultiTabIndexedDbPersistence() will be deprecated 警告
  */
-export async function enablePersistenceOnce(db) {
-  if (persistenceEnabled) return;
-  try {
-    await enableMultiTabIndexedDbPersistence(db);
-  } catch (e) {
-    console.warn('離線快取未啟用（不影響功能）:', e.code || e);
-  } finally {
-    persistenceEnabled = true;
+export function getDb() {
+  if (!dbInstance) {
+    const app = getApps().length ? getApp() : initializeApp(FIREBASE_CONFIG);
+    dbInstance = initializeFirestore(app, {
+      localCache: persistentLocalCache({
+        tabManager: persistentMultipleTabManager(),
+      }),
+    });
   }
+  return dbInstance;
 }
 
 export {

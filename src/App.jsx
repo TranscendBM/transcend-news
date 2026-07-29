@@ -5,7 +5,7 @@ import {
   XAxis, YAxis, Tooltip, Legend, ResponsiveContainer, CartesianGrid,
 } from 'recharts';
 
-import { getDb, enablePersistenceOnce, doc, onSnapshot, getDoc } from './services/firebase.js';
+import { getDb, doc, onSnapshot, getDoc } from './services/firebase.js';
 import Card from './components/Card.jsx';
 import Spinner from './components/Spinner.jsx';
 import TabBtn from './components/TabBtn.jsx';
@@ -16,6 +16,7 @@ import NewsCard from './features/news/NewsCard.jsx';
 import USNewsCard from './features/news/USNewsCard.jsx';
 import { useNewsFeed } from './features/news/useNewsFeed.js';
 import TodayBriefing from './features/intelligence/TodayBriefing.jsx';
+import { useNow } from './hooks/useNow.js';
 import { exportNewsExcel } from './utils/formatting.js';
 import { sortByDate, isStockStale, fmtStockUpdated } from './utils/dates.js';
 import {
@@ -182,25 +183,34 @@ function USMarketTab({ news }) {
 // ═══════════════════════════════════════════════════════════
 // PR TAB — 統計卡片 + 各媒體曝光篇數圖
 // ═══════════════════════════════════════════════════════════
-function PRStatsPanel({ articles }) {
-  const now = new Date();
+export function PRStatsPanel({ articles }) {
+  // 用 useNow() 而非 new Date() 直接呼叫：today/month/year 的邊界必須
+  // 隨「目前時間」定期更新，不能只在 articles 改變時才重新計算——否則
+  // 頁面開著跨過午夜/跨月/跨年，統計會停在舊邊界（見下方不再用 useMemo
+  // 包住 counts/mediaData 的說明）。
+  const now = useNow();
   const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
   const weekStart = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
   const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
   const yearStart = new Date(now.getFullYear(), 0, 1);
   const getD = n => n.pubDate?.toDate ? n.pubDate.toDate() : new Date(n.pubDate || 0);
 
-  const counts = useMemo(() => ({
+  // 註：不用 useMemo。todayStart/monthStart/yearStart 每次 render 都可能
+  // 因為時間經過而改變，但只依賴 [articles] 的 useMemo 在 articles 沒變
+  // 時就不會重新執行，會讓這幾個統計卡在建立當下的舊日期邊界，跨午夜/
+  // 跨月/跨年都不會自動更新。資料量上限 2000 則，直接 filter 的成本可
+  // 忽略，改成每次 render 直接算，反而比「看似有快取、實際會算錯」安全。
+  const counts = {
     today: articles.filter(n => getD(n) >= todayStart).length,
     week: articles.filter(n => getD(n) >= weekStart).length,
     month: articles.filter(n => getD(n) >= monthStart).length,
     year: articles.filter(n => getD(n) >= yearStart).length,
-  }), [articles]);
+  };
 
   // 註：mediaData 在原始檔案中就是算出來後未被畫面使用（無對應圖表渲染），
-  // 隨模組搬移原樣保留，非本次遺漏。
+  // 隨模組搬移原樣保留，非本次遺漏。同上，改成直接計算，不用 useMemo。
   // eslint-disable-next-line no-unused-vars
-  const mediaData = useMemo(() => {
+  const mediaData = (() => {
     const map = {};
     articles.filter(n => getD(n) >= yearStart).forEach(n => {
       const m = n.mediaName || n.sourceName || '其他';
@@ -211,7 +221,7 @@ function PRStatsPanel({ articles }) {
       .map(([media, count]) => ({ media, count }))
       .sort((a, b) => b.count - a.count)
       .slice(0, 12);
-  }, [articles]);
+  })();
 
   const PERIODS = [
     { label: '今天', val: counts.today, color: '#dc2626' },
@@ -242,13 +252,16 @@ function PRStatsPanel({ articles }) {
 // ═══════════════════════════════════════════════════════════
 // PR TAB — 重點媒體曝光分析
 // ═══════════════════════════════════════════════════════════
-function KeyMediaPanel({ articles }) {
-  const now = new Date();
+export function KeyMediaPanel({ articles }) {
+  // useNow()：見 PRStatsPanel 同樣的說明——月/年邊界必須隨目前時間更新。
+  const now = useNow();
   const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
   const yearStart = new Date(now.getFullYear(), 0, 1);
   const getD = n => n.pubDate?.toDate ? n.pubDate.toDate() : new Date(n.pubDate || 0);
 
-  const stats = useMemo(() => {
+  // 註：不用 useMemo，理由同 PRStatsPanel——避免 monthStart/yearStart
+  // 隨時間變動時，只依賴 [articles] 的 memo 卡在舊邊界。
+  const stats = (() => {
     const yearArticles = articles.filter(n => getD(n) >= yearStart);
     const monthArticles = articles.filter(n => getD(n) >= monthStart);
     const total = yearArticles.length || 1;
@@ -267,7 +280,7 @@ function KeyMediaPanel({ articles }) {
         monthPct: Math.round(monthCount / mTotal * 100),
       };
     }).sort((a, b) => b.yearCount - a.yearCount);
-  }, [articles]);
+  })();
 
   const maxYear = Math.max(...stats.map(s => s.yearCount), 1);
 
@@ -1410,26 +1423,30 @@ export default function App() {
   });
 
   // ─── Firebase init ───────────────────────────────────────
+  // getDb() 同步完成離線快取設定（initializeFirestore + persistentLocalCache），
+  // 不再需要另外 await 一個「啟用持久化」的非同步步驟——呼叫這行的當下
+  // 快取設定就已經生效，之後任何查詢（包含 useNewsFeed 自己掛載時就會
+  // 開始的新聞查詢）都安全。
+  //
+  // useNewsFeed 掛載時會自己啟動新聞管線（見該 hook 內的 useEffect），
+  // 這裡的初始 fetchAll 因此改用 fetchAll(false)，不再重複呼叫
+  // refreshNews()／建立第二個新聞監聽器；手動按「重新整理」時才會
+  // 一併觸發 refreshNews()（見下方 fetchAll 定義與按鈕 onClick）。
   useEffect(() => {
     let unsubStocks = null;
-    (async () => {
-      try {
-        const db = getDb();
-        // 離線快取：資料存在瀏覽器 IndexedDB，第二次開啟起可立即顯示上次資料
-        // 再於背景同步（必須在任何查詢之前啟用；多分頁同開時可能失敗，屬正常）
-        await enablePersistenceOnce(db);
-        setConnected(true);
-        fetchAll();
-        // 股價即時監聽：排程一寫入 stocks/latest，頁面立即更新（免重整）
-        unsubStocks = onSnapshot(doc(db, 'stocks', 'latest'),
-          snap => { if (snap.exists()) { setStocks(snap.data()); setStockCountdown(300); } },
-          err => console.error('Stocks listen:', err)
-        );
-      } catch (e) {
-        console.error('Firebase:', e);
-        setLoading(false);
-      }
-    })();
+    try {
+      const db = getDb();
+      setConnected(true);
+      fetchAll(false);
+      // 股價即時監聽：排程一寫入 stocks/latest，頁面立即更新（免重整）
+      unsubStocks = onSnapshot(doc(db, 'stocks', 'latest'),
+        snap => { if (snap.exists()) { setStocks(snap.data()); setStockCountdown(300); } },
+        err => console.error('Stocks listen:', err)
+      );
+    } catch (e) {
+      console.error('Firebase:', e);
+      setLoading(false);
+    }
     return () => {
       if (unsubStocks) unsubStocks();
     };
@@ -1453,9 +1470,16 @@ export default function App() {
     return () => clearInterval(tick);
   }, []);
 
-  async function fetchAll() {
+  // includeNewsRefresh=false 用在掛載時的初始呼叫：useNewsFeed 自己的
+  // useEffect 已經會在掛載時啟動新聞管線，這裡不需要（也不應該）再呼叫
+  // refreshNews() 一次，否則會在監聽器建立前的非同步空窗期造成重複啟動。
+  // 手動按「重新整理」則維持 includeNewsRefresh=true（預設值），
+  // refreshNews() 在監聽器已存在時只會重試 cursor 補抓，不會重建監聽。
+  async function fetchAll(includeNewsRefresh = true) {
     setLoading(true);
-    await Promise.all([refreshNews(), fetchStocks(), fetchRevenue(), fetchFinancials(), fetchDividends(), fetchMaterial(), fetchDaily(), fetchCompRevenue()]);
+    const tasks = [fetchStocks(), fetchRevenue(), fetchFinancials(), fetchDividends(), fetchMaterial(), fetchDaily(), fetchCompRevenue()];
+    if (includeNewsRefresh) tasks.push(refreshNews());
+    await Promise.all(tasks);
     setLoading(false);
     setUpdated(new Date());
   }
@@ -1585,7 +1609,7 @@ export default function App() {
 
           {/* Action buttons */}
           <div className="flex items-center gap-2 shrink-0">
-            <button onClick={fetchAll} disabled={loading}
+            <button onClick={() => fetchAll()} disabled={loading}
               className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium transition-all"
               style={{ background: 'rgba(255,255,255,0.15)', border: '1px solid rgba(255,255,255,0.2)', color: 'white' }}>
               {loading ? <Spinner /> : '↻'}

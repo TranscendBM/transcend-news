@@ -194,6 +194,47 @@ describe('useNewsFeed — 多次 callback 不發出重複查詢', () => {
     // 已經有監聽器時，refresh() 不應該重新建立第二個 onSnapshot 監聽
     expect(onSnapshot).toHaveBeenCalledTimes(1);
   });
+
+  it('does not create a second listener when refresh() is called concurrently before the first startup finishes', async () => {
+    // 模擬掛載時的自動啟動，跟外部另一次呼叫（例如手動刷新）幾乎同時
+    // 發生：這時 unsubRef.current 還是 null（本機快取讀取尚未 resolve），
+    // 若沒有 startingRef 這層保護，第二次呼叫會誤判成「尚未啟動」而
+    // 再跑一次完整初始化、建立第二個 onSnapshot。
+    let resolveCache;
+    getDocsFromCache.mockReturnValue(new Promise(resolve => { resolveCache = resolve; }));
+
+    const { result } = renderHook(() => useNewsFeed());
+    // 掛載時的 startOrRetry() 已經在跑、卡在 await getDocsFromCache(...)。
+    // 在它 resolve 之前就手動呼叫一次 refresh()。
+    act(() => { result.current.refresh(); });
+
+    resolveCache({ empty: true, size: 0, docs: [] });
+    await waitFor(() => expect(onSnapshot).toHaveBeenCalledTimes(1));
+
+    // 讓兩次呼叫都有機會跑完剩餘的非同步流程
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+    expect(onSnapshot).toHaveBeenCalledTimes(1);
+  });
+
+  it('manual refresh() while a rest-fetch is already in flight does not start a second one', async () => {
+    let resolveRest;
+    getDocsFromServer.mockReturnValue(new Promise(resolve => { resolveRest = resolve; }));
+
+    const { result } = renderHook(() => useNewsFeed());
+    await waitFor(() => expect(onSnapshot).toHaveBeenCalledTimes(1));
+
+    await act(async () => {
+      onSnapshotNext(fakeSnapshot({ fromCache: false, docs: [fakeDoc('live-1', { title: 'A', pubDate: new Date() })] }));
+      await Promise.resolve();
+    });
+    expect(getDocsFromServer).toHaveBeenCalledTimes(1);
+
+    // 使用者在 rest-fetch 還沒回來時按「重新整理」
+    await act(async () => { await result.current.refresh(); });
+    expect(getDocsFromServer).toHaveBeenCalledTimes(1);
+
+    await act(async () => { resolveRest({ docs: [] }); await Promise.resolve(); });
+  });
 });
 
 describe('useNewsFeed — 清理與錯誤處理', () => {
@@ -229,5 +270,27 @@ describe('useNewsFeed — 清理與錯誤處理', () => {
     await act(async () => { await result.current.refresh(); });
     // 監聽器已被清空狀態，refresh() 應該重新走一次完整初始化流程 → 建立第二個監聽
     expect(onSnapshot).toHaveBeenCalledTimes(2);
+  });
+
+  it('cancels a pending retry timer on unmount, so it does not fire after the component is gone', async () => {
+    vi.useFakeTimers();
+    getDocsFromServer.mockRejectedValue(new Error('down'));
+
+    const { unmount } = renderHook(() => useNewsFeed());
+    await vi.waitFor(() => expect(onSnapshot).toHaveBeenCalledTimes(1));
+
+    await act(async () => {
+      onSnapshotNext(fakeSnapshot({ fromCache: false, docs: [fakeDoc('live-1', { title: 'A', pubDate: new Date() })] }));
+      await Promise.resolve();
+    });
+    expect(getDocsFromServer).toHaveBeenCalledTimes(1);
+
+    // 還沒等到 5 秒的自動重試就先 unmount
+    unmount();
+    expect(unsubSpy).toHaveBeenCalledTimes(1);
+
+    await act(async () => { await vi.advanceTimersByTimeAsync(20000); });
+    // 重試 timer 應該已在 unmount 時被取消，不會在元件消失後還繼續呼叫
+    expect(getDocsFromServer).toHaveBeenCalledTimes(1);
   });
 });
