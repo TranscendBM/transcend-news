@@ -8,7 +8,7 @@
     "preview": "vite preview",
     "test": "vitest run",
     "lint": "eslint .",
-    "deploy": "npm run build && firebase deploy --only hosting"
+    "deploy": "npm run build && firebase deploy --only hosting:main"
   },
   "dependencies": {
     "firebase": "^10.14.1",
