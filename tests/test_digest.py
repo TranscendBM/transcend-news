@@ -87,6 +87,13 @@ class TestSelectDigestArticles(unittest.TestCase):
         result = digest.select_digest_articles([supplier], self.since)
         self.assertEqual(len(result), 1)
 
+    def test_excludes_negative_sentiment(self):
+        after = self.since + datetime.timedelta(hours=1)
+        negative = _mk_article(LOW_TITLE, LOW_CONTENT, pub_dt=after)
+        negative['sentiment'] = 'negative'
+        result = digest.select_digest_articles([negative], self.since)
+        self.assertEqual(result, [], '判定為負面情緒的新聞不應出現在每日摘要信')
+
     def test_sorted_by_importance_desc(self):
         after = self.since + datetime.timedelta(hours=1)
         low = _mk_article(LOW_TITLE, LOW_CONTENT, pub_dt=after)

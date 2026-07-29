@@ -223,13 +223,15 @@ def select_digest_articles(articles, since_dt, sent_ids=None, limit=DIGEST_MAX_I
          寄送時間」的游標——詳見模組開頭 at-least-once 設計說明）
       2. 經 intelligence 規則判定為相關（relevant）
       3. 不是創見自己或競品的公司新聞（只保留上游供應商/產業市場情報）
-      4. 同一則新聞（同一個 _story_identity，即正規化標題）可能被多個
+      4. 情緒判定不是負面（sentiment != 'negative'，見 fetch_news.analyze_sentiment）——
+         負面新聞不放進每日摘要信
+      5. 同一則新聞（同一個 _story_identity，即正規化標題）可能被多個
          來源/搜尋條件重複收錄、存成多筆不同 _article_identity 的
          Firestore 文件（例如 Google News 轉址連結 vs. 後來抓到的原始
          媒體直連）；每個故事只留下重要性分數最高的版本，且會在該故事
          其餘版本中找出更安全的原始媒體連結取代較差的 Google News 轉址
          連結（見 _prefers_link）
-      5. 尚未寄送過（_story_identity 不在 sent_ids 內）——刻意放在「先選
+      6. 尚未寄送過（_story_identity 不在 sent_ids 內）——刻意放在「先選
          出每個故事的最佳版本」之後才判斷，否則同一故事的不同文件 id
          會被誤判成不同新聞，隔天可能重複寄送同一篇報導
 
@@ -241,6 +243,8 @@ def select_digest_articles(articles, since_dt, sent_ids=None, limit=DIGEST_MAX_I
     for article in articles:
         pub_dt = article.get('pubDate')
         if not isinstance(pub_dt, datetime.datetime) or pub_dt <= since_dt:
+            continue
+        if article.get('sentiment') == 'negative':
             continue
         rules = intelligence.analyze_article_rules(article)
         if not rules.get('relevant'):
