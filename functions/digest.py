@@ -29,12 +29,22 @@ build_digest_email() 產生的內文，其餘（篩選、寄信、進度追蹤�
   這篇文章的發布日會落在下次查詢起點之前，永遠不會再被選中。
   因此改為：查詢窗口固定回溯 DIGEST_LOOKBACK_HOURS 小時（見下方常數，
   非「上次寄送時間」的移動游標），「是否已寄過」改用 sentIds 集合判斷；
-  只要文章還在回溯窗口內、id 不在 sentIds 裡，不論它是何時才寫進
+  只要文章還在回溯窗口內、識別碼不在 sentIds 裡，不論它是何時才寫進
   Firestore，下一輪一定會被選到、寄出。sentIds 只在寄信成功後才寫入，
   並依保留天數與筆數上限裁切，避免 checkpoint 文件無限增長。
+
+  sentIds 記錄的是「故事」識別碼（_story_identity，正規化標題的 SHA-256
+  雜湊），不是單一 Firestore 文件的識別碼（_article_identity）：同一則
+  新聞常在不同批次以不同連結（Google News 轉址 vs. 後來抓到的原始媒體
+  直連）被存成不同文件、有不同的文件 id。若 sentIds 改記文件 id，這種
+  「同故事、不同文件 id」的情況會被誤判成兩篇不同新聞，導致同一篇報導
+  隔天又被寄一次。select_digest_articles() 會先把同一故事的多個文件
+  版本合併成一則（取重要性最高的版本，並在其餘版本中找出更安全的原始
+  媒體連結），才用故事識別碼判斷是否已寄過。
 """
 
 import datetime
+import hashlib
 import html
 import os
 import smtplib
@@ -42,6 +52,7 @@ import ssl
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 from email.utils import formatdate
+from urllib.parse import urlsplit
 
 import fetch_news
 import intelligence
@@ -67,10 +78,10 @@ DIGEST_LOOKBACK_HOURS = 96
 DIGEST_SENT_ID_RETENTION_DAYS = 14
 DIGEST_SENT_ID_MAX_ENTRIES = 1000
 
-# 新聞連結來自不可信的外部 RSS。只允許 http/https，避免 javascript:／
-# data:／file: 等 scheme 被當成信件裡的可點擊連結（等同信件內 XSS／
-# 本機檔案存取）。純文字內文與 HTML 版本都要套用同一個檢查。
-_SAFE_URL_SCHEMES = ('http://', 'https://')
+# 新聞連結來自不可信的外部 RSS。只允許 http/https、拒絕帶帳密／協定相對
+# 網址等可疑寫法（見 _safe_article_url），避免信件裡出現危險連結
+# （等同信件內 XSS／本機檔案存取／憑證外洩）。純文字內文與 HTML 版本
+# 都要套用同一個檢查。
 
 DIGEST_CATS = {
     'tw': {'cat': 'twMarket', 'label': '台灣 DRAM/Flash 產業新聞', 'lang': 'zh'},
@@ -122,29 +133,85 @@ def _mentions_tracked_company(rules):
 
 def _article_identity(article):
     """
-    文章的穩定識別 id，用於 sentIds 比對「是否已寄過」。
+    文章（單一 Firestore 文件）的穩定識別 id。
     優先使用 Firestore 文件本身的 id（fetch_news.make_article_id 產生，
-    寫入資料庫時就有）；缺少時（例如測試資料）退回同一套規則現算，
-    確保同一篇文章不論何時計算都得到相同的值。
+    寫入資料庫時就有）；缺少時（例如測試資料）退回同一套規則現算。
+    注意：這是「文件」層級的識別碼，同一則新聞若曾以不同連結（例如先抓到
+    Google News 轉址連結、後來才抓到原始媒體直連）被存成兩筆文件，兩者
+    的 _article_identity 並不相同——sentIds 判斷「是否已寄過」必須用
+    _story_identity（見下）而不是這個函式，否則同一篇報導會因為文件 id
+    不同被誤判成新文章，隔天重複寄送。這裡只在 _story_identity 標題為空
+    的例外狀況下當退路使用。
     """
     return article.get('id') or fetch_news.make_article_id(article.get('link'), article.get('title'))
 
 
+def _story_identity(article):
+    """
+    「故事」層級的穩定識別碼，用於 sentIds 判斷是否已寄過。
+    同一則新聞常在不同批次以不同連結（Google News 轉址 vs. 原始媒體
+    直連）被存成不同的 Firestore 文件、有不同的 _article_identity；
+    但對讀者來說是同一篇報導，只能算寄過一次。改用正規化標題
+    （fetch_news.normalize_title，max_len=120，跟 fetch_news 的
+    merge_duplicate_articles 一致，降低不同故事被誤合併的風險）算
+    SHA-256 雜湊：不直接把完整標題當 Firestore map key（避免特殊字元、
+    也避免原始標題整段外洩在欄位名裡），且同一故事不論哪個文件版本
+    都會得到同一把 key。
+    標題正規化後為空字串是理論上不會發生在真實 RSS 資料的例外情況，
+    這裡退回文件識別碼，確保一定有值、且不會讓同一批次的多篇空標題
+    文章互相誤判成同一故事。
+    """
+    normalized = fetch_news.normalize_title(article.get('title'), max_len=120)
+    if not normalized:
+        return _article_identity(article)
+    return hashlib.sha256(normalized.encode('utf-8')).hexdigest()
+
+
+def _prefers_link(current_link, candidate_link):
+    """
+    同一故事的既有連結是 Google News 轉址、候選連結是非 Google 的直接
+    媒體連結時，候選連結更值得保留——跟 fetch_news.merge_duplicate_articles
+    的優先順序一致。沒有更好的候選時維持原連結不變。
+    """
+    if not candidate_link:
+        return False
+    current_is_google = 'news.google.com' in (current_link or '').lower()
+    candidate_is_google = 'news.google.com' in candidate_link.lower()
+    return current_is_google and not candidate_is_google
+
+
 def _safe_article_url(link):
     """
-    只允許 http/https 開頭的網址進入信件（HTML 連結或純文字內文皆同）。
-    javascript:／data:／file: 等 scheme、控制字元、空白或無法辨識 scheme
-    的字串一律視為無效網址，回傳 None——呼叫端遇到 None 只顯示標題文字，
-    不建立可點擊連結。
+    只允許 http/https 網址進入信件（HTML 連結或純文字內文皆同），且必須是
+    「乾淨」的公開網址：用 urllib.parse.urlsplit 解析而不只是比對開頭字串，
+    要求 scheme 只能是 http/https、要有合法 hostname、不得帶 username/
+    password（例如 https://user:pass@evil/ 這種夾帶帳密的網址）。
+    javascript:／data:／file:／ftp: 等 scheme、協定相對網址（//host/path）、
+    含空白或控制字元的字串、缺少 hostname 的網址一律視為無效，回傳
+    None——呼叫端遇到 None 只顯示標題文字，不建立可點擊連結。
     """
     if not isinstance(link, str):
         return None
     candidate = link.strip()
     if not candidate:
         return None
-    if any(ord(ch) < 0x20 or ord(ch) == 0x7f for ch in candidate):
+    if any(ch.isspace() or ord(ch) < 0x20 or ord(ch) == 0x7f for ch in candidate):
         return None
-    if not candidate.lower().startswith(_SAFE_URL_SCHEMES):
+    try:
+        parts = urlsplit(candidate)
+    except ValueError:
+        return None
+    if parts.scheme not in ('http', 'https'):
+        return None
+    try:
+        hostname = parts.hostname
+        username = parts.username
+        password = parts.password
+    except ValueError:
+        return None
+    if not hostname:
+        return None
+    if username or password:
         return None
     return candidate
 
@@ -154,11 +221,17 @@ def select_digest_articles(articles, since_dt, sent_ids=None, limit=DIGEST_MAX_I
     純函式：從文章清單中挑出符合以下條件的文章：
       1. since_dt 之後發布（since_dt 是查詢回溯窗口的起點，不是「上次
          寄送時間」的游標——詳見模組開頭 at-least-once 設計說明）
-      2. 尚未寄送過（_article_identity 不在 sent_ids 內）
-      3. 經 intelligence 規則判定為相關（relevant）
-      4. 不是創見自己或競品的公司新聞（只保留上游供應商/產業市場情報）
-      5. 標題正規化後不重複（同一則新聞被多個來源/搜尋條件重複收錄時，
-         只留下重要性分數最高的那一則）
+      2. 經 intelligence 規則判定為相關（relevant）
+      3. 不是創見自己或競品的公司新聞（只保留上游供應商/產業市場情報）
+      4. 同一則新聞（同一個 _story_identity，即正規化標題）可能被多個
+         來源/搜尋條件重複收錄、存成多筆不同 _article_identity 的
+         Firestore 文件（例如 Google News 轉址連結 vs. 後來抓到的原始
+         媒體直連）；每個故事只留下重要性分數最高的版本，且會在該故事
+         其餘版本中找出更安全的原始媒體連結取代較差的 Google News 轉址
+         連結（見 _prefers_link）
+      5. 尚未寄送過（_story_identity 不在 sent_ids 內）——刻意放在「先選
+         出每個故事的最佳版本」之後才判斷，否則同一故事的不同文件 id
+         會被誤判成不同新聞，隔天可能重複寄送同一篇報導
 
     依重要性分數（importanceScore）由高到低排序，最多回傳 limit 筆。
     回傳 [(article, rule_analysis), ...]。
@@ -169,8 +242,6 @@ def select_digest_articles(articles, since_dt, sent_ids=None, limit=DIGEST_MAX_I
         pub_dt = article.get('pubDate')
         if not isinstance(pub_dt, datetime.datetime) or pub_dt <= since_dt:
             continue
-        if _article_identity(article) in sent_ids:
-            continue
         rules = intelligence.analyze_article_rules(article)
         if not rules.get('relevant'):
             continue
@@ -179,14 +250,28 @@ def select_digest_articles(articles, since_dt, sent_ids=None, limit=DIGEST_MAX_I
         scored.append((article, rules))
     scored.sort(key=lambda pair: pair[1]['importanceScore'], reverse=True)
 
-    deduped = []
-    seen_titles = set()
+    # 先選出每個故事重要性最高的版本（scored 已依重要性排序，同一故事
+    # 第一次出現的就是最高分版本），同時把其餘版本裡更安全的原始媒體
+    # 連結併入；story_order 記錄每個故事第一次出現的順序，等同維持
+    # 依重要性排序的輸出順序。
+    best_by_story = {}
+    story_order = []
     for article, rules in scored:
-        key = fetch_news.normalize_title(article.get('title'))
-        if key and key in seen_titles:
+        story_id = _story_identity(article)
+        if story_id not in best_by_story:
+            best_by_story[story_id] = (article, rules)
+            story_order.append(story_id)
             continue
-        seen_titles.add(key)
-        deduped.append((article, rules))
+        existing_article, existing_rules = best_by_story[story_id]
+        candidate_link = article.get('link')
+        if _prefers_link(existing_article.get('link'), candidate_link):
+            existing_article = {**existing_article, 'link': candidate_link}
+            best_by_story[story_id] = (existing_article, existing_rules)
+
+    deduped = [
+        best_by_story[story_id] for story_id in story_order
+        if story_id not in sent_ids
+    ]
     return deduped[:limit]
 
 
@@ -410,5 +495,5 @@ def run_digest(db, key, smtp_password, now=None):
     # 預設值讓它自己取台灣時間，避免 UTC 日期在台灣午夜前後顯示錯誤。
     subject, text_body, html_body = build_digest_email(cfg['label'], items, lang=cfg.get('lang', 'zh'))
     send_email(subject, text_body, html_body, DIGEST_RECIPIENTS, smtp_password)
-    record_sent_articles(db, key, [_article_identity(a) for a, _ in items], now=now)
+    record_sent_articles(db, key, [_story_identity(a) for a, _ in items], now=now)
     return {'count': len(items)}

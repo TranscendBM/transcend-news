@@ -127,6 +127,108 @@ class TestSelectDigestArticles(unittest.TestCase):
         self.assertEqual(digest.select_digest_articles([], self.since), [])
 
 
+class TestStoryIdentity(unittest.TestCase):
+    """
+    _story_identity 是「故事」層級的識別碼（正規化標題的 SHA-256），
+    跟單一 Firestore 文件的 _article_identity 不同——同一則新聞常以
+    不同連結存成不同文件（Google News 轉址 vs. 原始媒體直連），
+    sentIds 必須用故事識別碼判斷「是否已寄過」，否則會重複寄送。
+    """
+
+    def test_stable_across_repeated_calls(self):
+        article = _mk_article(HIGH_TITLE, HIGH_CONTENT)
+        self.assertEqual(digest._story_identity(article), digest._story_identity(dict(article)))
+
+    def test_different_titles_not_merged(self):
+        a = _mk_article(HIGH_TITLE, HIGH_CONTENT)
+        b = _mk_article(LOW_TITLE, LOW_CONTENT)
+        self.assertNotEqual(digest._story_identity(a), digest._story_identity(b))
+
+    def test_same_normalized_title_same_identity_regardless_of_link_or_doc_id(self):
+        a = _mk_article(HIGH_TITLE, HIGH_CONTENT, link='https://news.google.com/rss/articles/xyz')
+        a['id'] = 'doc-a'
+        b = _mk_article(HIGH_TITLE.replace(' ', '，') + '！', HIGH_CONTENT,
+                         link='https://real-media.example.com/story')
+        b['id'] = 'doc-b'
+        self.assertEqual(digest._story_identity(a), digest._story_identity(b),
+                         '同一故事的不同文件 id／連結，正規化標題相同時必須得到同一把 key')
+
+    def test_not_the_raw_title_itself(self):
+        """不得直接把完整標題當 Firestore map key——回傳值必須是穩定雜湊，不是原始標題。"""
+        article = _mk_article(HIGH_TITLE, HIGH_CONTENT)
+        story_id = digest._story_identity(article)
+        self.assertNotEqual(story_id, HIGH_TITLE)
+        self.assertNotIn(HIGH_TITLE, story_id)
+
+
+class TestSelectDigestArticlesStoryDedup(unittest.TestCase):
+    """
+    修正跨批次重複寄送：同一故事的不同文件 id 必須共用同一個 sentIds
+    key，且單次選取時要先選出同一故事的最佳版本，再判斷是否已寄送。
+    """
+
+    def setUp(self):
+        self.since = datetime.datetime(2026, 7, 20, 0, 0, tzinfo=TZ_UTC)
+
+    def test_same_story_different_doc_ids_send_once_across_two_rounds(self):
+        after = self.since + datetime.timedelta(hours=1)
+        doc_a = _mk_article(HIGH_TITLE, HIGH_CONTENT, pub_dt=after,
+                             link='https://news.google.com/rss/articles/aaa')
+        doc_a['id'] = 'doc-a'
+        doc_b = _mk_article(HIGH_TITLE, HIGH_CONTENT, pub_dt=after,
+                             link='https://real-media.example.com/story')
+        doc_b['id'] = 'doc-b'
+
+        round1 = digest.select_digest_articles([doc_a, doc_b], self.since)
+        self.assertEqual(len(round1), 1, '同一故事的兩個文件版本，單次選取只應留下一則')
+        sent_ids = {digest._story_identity(a): '20260720' for a, _ in round1}
+
+        # 第二輪：doc_a、doc_b 仍都在 Firestore 裡（文章不會被刪除），
+        # 用第一輪產生的 sentIds（故事識別碼）判斷，doc_b 不該因為
+        # 文件 id 跟已寄送的 doc_a 不同就被誤判成新文章、重複寄送。
+        round2 = digest.select_digest_articles([doc_a, doc_b], self.since, sent_ids=sent_ids)
+        self.assertEqual(round2, [], '同一故事的不同文件 id 不該在下一輪被重複選中、重複寄送')
+
+    def test_google_news_link_vs_direct_link_different_ids_send_once_and_prefer_direct_link(self):
+        after = self.since + datetime.timedelta(hours=1)
+        google_doc = _mk_article(HIGH_TITLE, HIGH_CONTENT, pub_dt=after,
+                                  link='https://news.google.com/rss/articles/aaa')
+        google_doc['id'] = 'doc-google'
+        direct_doc = _mk_article(HIGH_TITLE, HIGH_CONTENT, pub_dt=after,
+                                  link='https://real-media.example.com/story')
+        direct_doc['id'] = 'doc-direct'
+
+        result = digest.select_digest_articles([google_doc, direct_doc], self.since)
+        self.assertEqual(len(result), 1)
+        chosen_article, _ = result[0]
+        self.assertEqual(chosen_article['link'], 'https://real-media.example.com/story',
+                         '同一故事應保留重要性較高版本的內容，但連結要換成更安全的原始媒體直連')
+
+    def test_distinct_titles_still_both_selected(self):
+        after = self.since + datetime.timedelta(hours=1)
+        low = _mk_article(LOW_TITLE, LOW_CONTENT, pub_dt=after)
+        high = _mk_article(HIGH_TITLE, HIGH_CONTENT, pub_dt=after)
+        result = digest.select_digest_articles([low, high], self.since)
+        self.assertEqual(len(result), 2, '不同標題的新聞不應被誤判成同一故事而合併')
+
+    def test_sent_ids_still_capped_when_keyed_by_story_identity(self):
+        """sentIds 仍受 14 天與 1,000 筆上限保護，即使 key 換成故事識別碼。"""
+        db = FakeDB()
+        now = datetime.datetime(2026, 7, 20, 8, 0, tzinfo=TZ_UTC)
+        articles = [_mk_article(f'{HIGH_TITLE}{i}', HIGH_CONTENT) for i in range(digest.DIGEST_SENT_ID_MAX_ENTRIES + 20)]
+        story_ids = [digest._story_identity(a) for a in articles]
+        digest.record_sent_articles(db, 'tw', story_ids, now=now)
+        sent = digest.get_sent_article_ids(db, 'tw')
+        self.assertLessEqual(len(sent), digest.DIGEST_SENT_ID_MAX_ENTRIES)
+
+        old_story_id = digest._story_identity(_mk_article('舊故事不應保留', HIGH_CONTENT))
+        digest.record_sent_articles(db, 'tw', [old_story_id],
+                                     now=now - datetime.timedelta(days=digest.DIGEST_SENT_ID_RETENTION_DAYS + 1))
+        digest.record_sent_articles(db, 'tw', [story_ids[0]], now=now)
+        self.assertNotIn(old_story_id, digest.get_sent_article_ids(db, 'tw'),
+                         '超過保留天數的故事識別碼仍應被裁切')
+
+
 class TestBuildDigestEmail(unittest.TestCase):
     def test_empty_items_message(self):
         now = datetime.datetime(2026, 7, 20, 8, 0)
@@ -244,6 +346,25 @@ class TestSafeArticleUrl(unittest.TestCase):
     def test_rejects_scheme_relative_and_unknown_scheme(self):
         self.assertIsNone(digest._safe_article_url('//evil.example.com/x'))
         self.assertIsNone(digest._safe_article_url('ftp://example.com/x'))
+
+    def test_rejects_bare_scheme_with_no_hostname(self):
+        self.assertIsNone(digest._safe_article_url('https://'))
+        self.assertIsNone(digest._safe_article_url('https:///path'))
+
+    def test_rejects_embedded_whitespace(self):
+        """startswith 檢查會誤放行的情境：scheme 正確但網址中間夾了空白。"""
+        self.assertIsNone(digest._safe_article_url('https://exa mple.com/x'))
+
+    def test_rejects_userinfo_with_username_and_password(self):
+        """startswith 檢查會誤放行的情境：網址帶有帳密（可能是釣魚或憑證外洩手法）。"""
+        self.assertIsNone(digest._safe_article_url('https://user:pass@example.com/x'))
+
+    def test_rejects_username_only(self):
+        self.assertIsNone(digest._safe_article_url('https://user@example.com/x'))
+
+    def test_allows_normal_https_with_path_query_and_port(self):
+        url = 'https://example.com:8443/path/to/article?id=123&ref=rss'
+        self.assertEqual(digest._safe_article_url(url), url)
 
 
 class TestBuildDigestEmailUnsafeLinks(unittest.TestCase):
@@ -441,8 +562,8 @@ class TestRunDigest(unittest.TestCase):
         msend.assert_called_once()
         self.assertEqual(result['count'], 1)
         sent = digest.get_sent_article_ids(db, 'tw')
-        self.assertIn(digest._article_identity(article), sent,
-                      '寄信成功後必須把文章 id 記入已寄送集合')
+        self.assertIn(digest._story_identity(article), sent,
+                      '寄信成功後必須把故事識別碼（而非文件 id）記入已寄送集合')
 
     def test_send_failure_does_not_mark_as_sent(self):
         """寄送失敗不標記為已寄出：下次執行必須能重新嘗試同一批候選文章。"""
