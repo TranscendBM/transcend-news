@@ -34,7 +34,7 @@ import digest
 TZ = 'Asia/Taipei'
 REGION = 'asia-east1'
 MONITOR_SERVICE_ACCOUNT = SecretParam('MONITOR_SERVICE_ACCOUNT')
-DIGEST_EMAIL_APP_PASSWORD = SecretParam('DIGEST_EMAIL_APP_PASSWORD')
+MAIL2000_SMTP_PASSWORD = SecretParam('MAIL2000_SMTP_PASSWORD')
 
 # 跨專案寫入專用的 named app 名稱。不用 default app：若執行環境已存在
 # 指向本專案（tbm）的 default app，firestore.client() 會連錯專案。
@@ -162,10 +162,10 @@ def finance_early_month_job(event: scheduler_fn.ScheduledEvent) -> None:
 @scheduler_fn.on_schedule(
     schedule='0 8 * * 1-5', timezone=TZ, region=REGION,
     memory=MemoryOption.MB_256, timeout_sec=120, max_instances=1,
-    secrets=[MONITOR_SERVICE_ACCOUNT, DIGEST_EMAIL_APP_PASSWORD])
+    secrets=[MONITOR_SERVICE_ACCOUNT, MAIL2000_SMTP_PASSWORD])
 def tw_dram_digest_job(event: scheduler_fn.ScheduledEvent) -> None:
     def work(db):
-        result = digest.run_digest(db, 'tw', DIGEST_EMAIL_APP_PASSWORD.value)
+        result = digest.run_digest(db, 'tw', MAIL2000_SMTP_PASSWORD.value)
         print(f"  ✉ 台灣 DRAM/Flash 新聞摘要已寄出（{result['count']} 則）")
     _run_locked('digest_tw', work, ttl_minutes=5)
 
@@ -173,9 +173,9 @@ def tw_dram_digest_job(event: scheduler_fn.ScheduledEvent) -> None:
 @scheduler_fn.on_schedule(
     schedule='30 16 * * 1-5', timezone=TZ, region=REGION,
     memory=MemoryOption.MB_256, timeout_sec=120, max_instances=1,
-    secrets=[MONITOR_SERVICE_ACCOUNT, DIGEST_EMAIL_APP_PASSWORD])
+    secrets=[MONITOR_SERVICE_ACCOUNT, MAIL2000_SMTP_PASSWORD])
 def us_dram_digest_job(event: scheduler_fn.ScheduledEvent) -> None:
     def work(db):
-        result = digest.run_digest(db, 'us', DIGEST_EMAIL_APP_PASSWORD.value)
+        result = digest.run_digest(db, 'us', MAIL2000_SMTP_PASSWORD.value)
         print(f"  ✉ 美國 DRAM/Flash 新聞摘要已寄出（{result['count']} 則）")
     _run_locked('digest_us', work, ttl_minutes=5)

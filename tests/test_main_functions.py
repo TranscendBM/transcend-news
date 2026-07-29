@@ -211,8 +211,8 @@ class TestScheduledEntrypoints(unittest.TestCase):
     def test_digest_jobs_require_email_secret(self):
         for job_name in ('tw_dram_digest_job', 'us_dram_digest_job'):
             secrets = getattr(main, job_name)._schedule_opts['secrets']
-            self.assertIn(main.DIGEST_EMAIL_APP_PASSWORD, secrets,
-                         f'{job_name} 必須帶入 DIGEST_EMAIL_APP_PASSWORD 才能寄信')
+            self.assertIn(main.MAIL2000_SMTP_PASSWORD, secrets,
+                         f'{job_name} 必須帶入 MAIL2000_SMTP_PASSWORD 才能寄信')
 
     def test_news_job_routes_through_lock(self):
         with patch.object(main, '_run_locked') as mrun:

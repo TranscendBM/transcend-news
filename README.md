@@ -82,11 +82,19 @@ ollama pull gemma3:4b
 - 各時段各自以 `meta/digest_tw`、`meta/digest_us` 追蹤「上次成功寄送時間」，
   只寄這之後新發布的新聞；寄信失敗時**不會**推進時間戳記，下次執行會用
   同一個區間重試，不會漏新聞（週一 08:00 那次會自動涵蓋整個週末）
-- 寄件使用 Gmail SMTP（`tselvis814@gmail.com` + 應用程式密碼），密碼存於
-  Secret Manager **`DIGEST_EMAIL_APP_PASSWORD`**（不進 repo/程式碼）：
-  ```bash
-  firebase functions:secrets:set DIGEST_EMAIL_APP_PASSWORD --project transcend-news-tbm
-  ```
+- 寄件透過創見 Mail2000 郵件伺服器（`email.transcend-info.com:587`，STARTTLS）：
+  - SMTP 認證帳號 `elvis_cheng@transcend-info.com`（已由 IT 授權 Send As）
+  - 實際寄件地址／顯示名稱為「每日產業新聞」`<bm@transcend-info.com>`（收件人也是
+    `bm@transcend-info.com`），兩者用 Send As，不是同一組帳密——伺服器規定
+    From 必須跟認證帳號一致或有代理寄件授權，否則會被退信（550）
+  - 密碼存於 Secret Manager **`MAIL2000_SMTP_PASSWORD`**（不進 repo/程式碼）：
+    ```bash
+    firebase functions:secrets:set MAIL2000_SMTP_PASSWORD --project transcend-news-tbm
+    ```
+  - 伺服器 TLS 交握不會附上中介憑證，`functions/sectigo-intermediate.pem`
+    補完信任鏈用；一律維持完整憑證驗證，不關閉憑證檢查。伺服器憑證效期至
+    2026-08-22，到期換發 CA 時若又出現「unable to verify the first
+    certificate」，需要換新的中介憑證檔案
 - 收件人清單、篩選分類等寫在 `digest.py` 開頭的常數（`DIGEST_RECIPIENTS`、
   `DIGEST_CATS`），要調整不用改邏輯
 - **之後（Phase 2，未實作）**：若導入公司內本機 Ollama 做真正的 AI 摘要，
@@ -155,6 +163,7 @@ firebase deploy --only functions
 │   ├── fetch_news.py             # 抓取邏輯（Functions 與 Actions 共用）
 │   ├── intelligence.py           # 零成本相關性、優先順序與事件規則
 │   ├── digest.py                 # DRAM/Flash 產業新聞摘要信（Phase 1，規則版摘要）
+│   ├── sectigo-intermediate.pem  # Mail2000 寄信用 TLS 中介憑證（見上方摘要信章節）
 │   └── requirements.txt          # Python 相依套件（固定版本）
 ├── tools/
 │   ├── local_ai_worker.py        # 公司電腦上的 Ollama / 規則處理程式

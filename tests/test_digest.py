@@ -2,10 +2,13 @@
 functions/digest.py（DRAM/Flash 新聞摘要信件，Phase 1）單元測試 — 完全離線
 
 外部套件（requests / feedparser / firebase_admin）在 import 前以 stub 取代；
-send_email 一律 mock 掉，測試中不會真的連線 smtp.gmail.com。
+send_email 一律 mock 掉，測試中不會真的連線 email.transcend-info.com。
 """
 
 import datetime
+import email
+import email.header
+import email.utils
 import sys
 import unittest
 from pathlib import Path
@@ -299,6 +302,34 @@ class TestFetchCatArticles(unittest.TestCase):
         ])
         arts = digest.fetch_cat_articles(db, 'twMarket')
         self.assertEqual([a['title'] for a in arts], ['台灣新聞'])
+
+
+class TestSendEmail(unittest.TestCase):
+    """
+    Mail2000 用 Send As：SMTP 認證帳號（elvis_cheng@）跟實際寄件地址
+    （bm@，已由 IT 授權代理寄件）不同，這兩者容易在之後改動時被誤改成
+    同一個值，這裡驗證 login/sendmail 各自用對帳號。
+    """
+
+    def test_login_uses_auth_account_and_from_uses_send_as_address(self):
+        fake_server = MagicMock()
+        fake_server.__enter__.return_value = fake_server
+        with patch.object(digest.smtplib, 'SMTP', return_value=fake_server) as m_smtp:
+            digest.send_email('主旨', '內文', '<p>內文</p>', ['bm@transcend-info.com'], 'fake-password')
+
+        m_smtp.assert_called_once_with(digest.SMTP_HOST, digest.SMTP_PORT, timeout=30)
+        fake_server.starttls.assert_called_once()
+        fake_server.login.assert_called_once_with(digest.DIGEST_SMTP_AUTH_USER, 'fake-password')
+        args, _ = fake_server.sendmail.call_args
+        from_addr, to_addrs, raw_message = args
+        self.assertEqual(from_addr, digest.DIGEST_SENDER_ADDR,
+                         'sendmail envelope From 必須是已授權 Send As 的地址，不是認證帳號')
+        self.assertEqual(to_addrs, ['bm@transcend-info.com'])
+        parsed = email.message_from_string(raw_message)
+        display_name, addr = email.utils.parseaddr(str(email.header.make_header(
+            email.header.decode_header(parsed['From']))))
+        self.assertEqual(display_name, digest.DIGEST_SENDER_NAME)
+        self.assertEqual(addr, digest.DIGEST_SENDER_ADDR)
 
 
 class TestRunDigest(unittest.TestCase):

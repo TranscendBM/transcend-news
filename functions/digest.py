@@ -9,14 +9,22 @@ build_digest_email() 產生的內文，其餘（篩選、寄信、進度追蹤�
 範圍鎖定「上游供應商 + 產業市場」新聞，不含創見自己或競品的公司新聞
 （那些已有前端 PR/競品動態分頁可看，這封信只做產業情報）。
 
-寄件帳號使用 Gmail SMTP（tselvis814@gmail.com + App Password），
-App Password 存於 Secret Manager 的 DIGEST_EMAIL_APP_PASSWORD，
-不進 repo、不進程式碼。
+寄件透過創見 Mail2000 郵件伺服器（email.transcend-info.com:587，STARTTLS）：
+  - SMTP 認證帳號：elvis_cheng@transcend-info.com（已由 IT 授權 Send As）
+  - 寄件地址／顯示名稱：「每日產業新聞」<bm@transcend-info.com>
+  - 密碼存於 Secret Manager 的 MAIL2000_SMTP_PASSWORD，不進 repo、不進程式碼
+  - 伺服器 TLS 交握不會附上中介憑證，需額外載入同資料夾的
+    sectigo-intermediate.pem 才能拼出完整信任鏈；一律維持完整憑證驗證，
+    不關閉憑證檢查（AUTH LOGIN 會送出帳密，關掉驗證等於讓中間人能冒充
+    伺服器竊取帳密）
+  - 伺服器憑證效期至 2026-08-22，到期若換發 CA 需更新中介憑證檔案
 """
 
 import datetime
 import html
+import os
 import smtplib
+import ssl
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 from email.utils import formatdate
@@ -24,11 +32,15 @@ from email.utils import formatdate
 import fetch_news
 import intelligence
 
-SMTP_HOST = 'smtp.gmail.com'
+SMTP_HOST = 'email.transcend-info.com'
 SMTP_PORT = 587
-DIGEST_SENDER = 'tselvis814@gmail.com'
-DIGEST_RECIPIENTS = ['ai_mkd@transcend-info.com']
+DIGEST_SMTP_AUTH_USER = 'elvis_cheng@transcend-info.com'
+DIGEST_SENDER_ADDR = 'bm@transcend-info.com'
+DIGEST_SENDER_NAME = '每日產業新聞'
+DIGEST_RECIPIENTS = ['bm@transcend-info.com']
 DIGEST_MAX_ITEMS = 20
+
+_INTERMEDIATE_CERT_PATH = os.path.join(os.path.dirname(__file__), 'sectigo-intermediate.pem')
 
 # 首次執行、尚無「上次寄送時間」紀錄時的保守預設回溯區間，
 # 避免第一次執行把過往全部歷史新聞塞進一封信。
@@ -244,20 +256,27 @@ def build_digest_email(label, items, now=None, lang='zh'):
     return subject, text_body, html_body
 
 
-def send_email(subject, text_body, html_body, to_addrs, app_password, from_addr=DIGEST_SENDER):
-    """寄出信件（純文字 + HTML 雙版本，Gmail SMTP，587 埠 + STARTTLS）。"""
+def send_email(subject, text_body, html_body, to_addrs, smtp_password):
+    """
+    寄出信件（純文字 + HTML 雙版本）。透過創見 Mail2000 郵件伺服器，
+    587 埠 + STARTTLS，並額外載入中介憑證補完 TLS 信任鏈（見模組說明）。
+    認證帳號與寄件地址不同（Send As），寄件地址使用已授權的 bm@ 群組信箱。
+    """
     msg = MIMEMultipart('alternative')
     msg['Subject'] = subject
-    msg['From'] = from_addr
+    msg['From'] = f'"{DIGEST_SENDER_NAME}" <{DIGEST_SENDER_ADDR}>'
     msg['To'] = ', '.join(to_addrs)
     msg['Date'] = formatdate(localtime=True)
     msg.attach(MIMEText(text_body, 'plain', 'utf-8'))
     msg.attach(MIMEText(html_body, 'html', 'utf-8'))
 
+    context = ssl.create_default_context()
+    context.load_verify_locations(cafile=_INTERMEDIATE_CERT_PATH)
+
     with smtplib.SMTP(SMTP_HOST, SMTP_PORT, timeout=30) as server:
-        server.starttls()
-        server.login(from_addr, app_password)
-        server.sendmail(from_addr, to_addrs, msg.as_string())
+        server.starttls(context=context)
+        server.login(DIGEST_SMTP_AUTH_USER, smtp_password)
+        server.sendmail(DIGEST_SENDER_ADDR, to_addrs, msg.as_string())
 
 
 def _checkpoint_ref(db, name):
@@ -288,7 +307,7 @@ def fetch_cat_articles(db, cat):
     return [d.to_dict() for d in docs]
 
 
-def run_digest(db, key, app_password):
+def run_digest(db, key, smtp_password):
     """
     執行一次摘要寄信（key='tw' 或 'us'）。
     先讀取上次寄送時間、篩選新文章、組信、寄出，最後才更新寄送時間戳記——
@@ -301,6 +320,6 @@ def run_digest(db, key, app_password):
     articles = fetch_cat_articles(db, cfg['cat'])
     items = select_digest_articles(articles, since)
     subject, text_body, html_body = build_digest_email(cfg['label'], items, lang=cfg.get('lang', 'zh'))
-    send_email(subject, text_body, html_body, DIGEST_RECIPIENTS, app_password)
+    send_email(subject, text_body, html_body, DIGEST_RECIPIENTS, smtp_password)
     set_last_digest_time(db, key, datetime.datetime.now(datetime.timezone.utc))
     return {'count': len(items)}
