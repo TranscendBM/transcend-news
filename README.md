@@ -66,6 +66,55 @@ ollama pull gemma3:4b
 同時處理同一筆。新聞文字一律視為不可信外部資料，不會授予模型工具、
 系統指令或對外發送能力。
 
+## 📧 DRAM/Flash 產業新聞摘要信（`functions/digest.py`，Phase 1）
+
+平日自動寄出重要 DRAM/Flash 產業新聞摘要信（`functions/main.py`
+`tw_dram_digest_job` / `us_dram_digest_job`）：
+
+| 排程 | 時間（台灣時間，平日） | 內容 |
+|---|---|---|
+| `tw_dram_digest_job` | 08:00 | `cat=twMarket`（台灣科技媒體） |
+| `us_dram_digest_job` | 16:30 | `cat=usMarket`（美國市場/供應鏈） |
+
+- **Phase 1（目前）**：完全零 API 費用，沿用 `intelligence.py` 既有的規則式
+  相關性/重要性評分挑出當次要寄的新聞，摘要文字用 `intelligence.rule_summary()`
+  （標題＋來源＋事件類型），不呼叫任何付費 AI
+- **進度追蹤採 at-least-once 設計**（`meta/digest_tw`、`meta/digest_us`，兩者
+  互相獨立）：查詢窗口固定回溯 `DIGEST_LOOKBACK_HOURS`（96 小時，足夠涵蓋
+  週五→週一的排程空檔＋容錯餘裕），是否已寄過改用 `sentIds`（已寄送文章
+  id 集合）判斷，而非「上次寄送時間」的移動時間游標。原因：`news_job`
+  每 15 分鐘執行一次，跟 08:00/16:30 的摘要排程可能同時觸發；若用「寄信
+  成功當下的時間」當游標，`news_job` 在摘要查詢 Firestore **之後**才寫入
+  一篇發布日較早的文章時，這篇文章會被永久跳過、再也不會被寄出。改成
+  固定回溯窗口＋id 判斷後，只要文章還在窗口內就一定會在下一輪被選到；
+  `sentIds` 只在寄信成功後才寫入，寄信失敗**完全不更新** checkpoint，
+  並依保留天數／筆數上限裁切，避免文件無限增長
+- 新聞連結只允許 `http://`／`https://` 才會出現在信件裡（純文字與 HTML
+  版本皆同）；`javascript:`、`data:`、`file:` 等 scheme 一律視為無效網址，
+  只顯示新聞標題、不建立可點擊連結——新聞連結來自不可信的外部 RSS
+- 寄件透過創見 Mail2000 郵件伺服器（`email.transcend-info.com:587`，STARTTLS）：
+  - SMTP 認證帳號 `elvis_cheng@transcend-info.com`（已由 IT 授權 Send As）
+  - 實際寄件地址／顯示名稱為「每日產業新聞」`<bm@transcend-info.com>`（收件人也是
+    `bm@transcend-info.com`），兩者用 Send As，不是同一組帳密——伺服器規定
+    From 必須跟認證帳號一致或有代理寄件授權，否則會被退信（550）
+  - 密碼存於 Secret Manager **`MAIL2000_SMTP_PASSWORD`**（不進 repo/程式碼）：
+    ```bash
+    firebase functions:secrets:set MAIL2000_SMTP_PASSWORD --project transcend-news-tbm
+    ```
+  - 伺服器 TLS 交握不會附上中介憑證，`functions/sectigo-intermediate.pem`
+    補完信任鏈用（僅為公開中介 CA 憑證，非伺服器私鑰）；一律維持完整憑證
+    驗證，不設定 `CERT_NONE` 或關閉 `check_hostname`。**殘餘風險**：伺服器
+    憑證效期至 2026-08-22，到期換發後不保證沿用同一張中介憑證——屆時若
+    出現「unable to verify the first certificate」，需重新用瀏覽器或
+    openssl 檢查伺服器送出的鏈並更新這個檔案；在確認前這是已知的營運
+    風險（憑證未跟著更新會讓寄信失敗，摘要信可能悄悄停止寄送，不是安全
+    漏洞本身）
+- 收件人清單、篩選分類等寫在 `digest.py` 開頭的常數（`DIGEST_RECIPIENTS`、
+  `DIGEST_CATS`），要調整不用改邏輯
+- **之後（Phase 2，未實作）**：若導入公司內本機 Ollama 做真正的 AI 摘要，
+  只需替換 `build_digest_email()` 產生的內文來源，篩選/寄信/進度追蹤都不用動；
+  本機摘要若當次沒準備好，可退回規則版內容當備援，避免開天窗
+
 ## 🚀 前端部署（Firebase Hosting）
 
 改完 `public/index.html` 後：
@@ -127,6 +176,8 @@ firebase deploy --only functions
 │   ├── main.py                   # Cloud Functions 排程進入點（部署於 transcend-news-tbm）
 │   ├── fetch_news.py             # 抓取邏輯（Functions 與 Actions 共用）
 │   ├── intelligence.py           # 零成本相關性、優先順序與事件規則
+│   ├── digest.py                 # DRAM/Flash 產業新聞摘要信（Phase 1，規則版摘要）
+│   ├── sectigo-intermediate.pem  # Mail2000 寄信用 TLS 中介憑證（見上方摘要信章節）
 │   └── requirements.txt          # Python 相依套件（固定版本）
 ├── tools/
 │   ├── local_ai_worker.py        # 公司電腦上的 Ollama / 規則處理程式
@@ -135,6 +186,7 @@ firebase deploy --only functions
     ├── test_fetch_news.py        # 抓取、去重、鎖與 AI 待辦整合測試
     ├── test_intelligence.py       # 相關性與風險規則測試
     ├── test_local_ai_worker.py    # 本機端點、輸出與防衝突測試
+    ├── test_digest.py            # 摘要信篩選、進度追蹤與寄信流程測試
 　　└── test_main_functions.py    # Cloud Functions 進入點測試（全離線）
 ```
 

@@ -10,6 +10,8 @@
   trading_job    交易日 13:40 / 17:10           每日開收盤 + 三大法人
   finance_job    每天 17:30                     月營收/季損益/股利/重大訊息
   finance_early_month_job  每月 1–10 日 09–18 時每小時（申報期加密）
+  tw_dram_digest_job  平日 08:00                台灣 DRAM/Flash 產業新聞摘要信
+  us_dram_digest_job  平日 16:30                美國 DRAM/Flash 產業新聞摘要信
 
 防重疊機制：每個 job 皆設 max_instances=1，並以 Firestore lease lock
 （meta/lock_*）防止「上一次還在跑、下一次又觸發」的重疊執行；
@@ -27,10 +29,12 @@ from firebase_functions.options import MemoryOption
 from firebase_functions.params import SecretParam
 
 import fetch_news
+import digest
 
 TZ = 'Asia/Taipei'
 REGION = 'asia-east1'
 MONITOR_SERVICE_ACCOUNT = SecretParam('MONITOR_SERVICE_ACCOUNT')
+MAIL2000_SMTP_PASSWORD = SecretParam('MAIL2000_SMTP_PASSWORD')
 
 # 跨專案寫入專用的 named app 名稱。不用 default app：若執行環境已存在
 # 指向本專案（tbm）的 default app，firestore.client() 會連錯專案。
@@ -149,3 +153,29 @@ def finance_job(event: scheduler_fn.ScheduledEvent) -> None:
 def finance_early_month_job(event: scheduler_fn.ScheduledEvent) -> None:
     _run_locked('finance', lambda db: fetch_news.fetch_all_financials(db),
                 ttl_minutes=12)
+
+
+# ─── DRAM/Flash 產業新聞摘要信（Phase 1，規則版摘要，零 API 費用）───
+# 平日 08:00 寄台灣新聞、16:30 寄美國新聞；兩者各自獨立追蹤「上次寄送
+# 時間」（meta/digest_tw、meta/digest_us），互不影響，遇到週末也不會
+# 漏掉——週一 08:00 那次會自動涵蓋整個週末（上次寄送時間是上週五 08:00）。
+@scheduler_fn.on_schedule(
+    schedule='0 8 * * 1-5', timezone=TZ, region=REGION,
+    memory=MemoryOption.MB_256, timeout_sec=120, max_instances=1,
+    secrets=[MONITOR_SERVICE_ACCOUNT, MAIL2000_SMTP_PASSWORD])
+def tw_dram_digest_job(event: scheduler_fn.ScheduledEvent) -> None:
+    def work(db):
+        result = digest.run_digest(db, 'tw', MAIL2000_SMTP_PASSWORD.value)
+        print(f"  ✉ 台灣 DRAM/Flash 新聞摘要已寄出（{result['count']} 則）")
+    _run_locked('digest_tw', work, ttl_minutes=5)
+
+
+@scheduler_fn.on_schedule(
+    schedule='30 16 * * 1-5', timezone=TZ, region=REGION,
+    memory=MemoryOption.MB_256, timeout_sec=120, max_instances=1,
+    secrets=[MONITOR_SERVICE_ACCOUNT, MAIL2000_SMTP_PASSWORD])
+def us_dram_digest_job(event: scheduler_fn.ScheduledEvent) -> None:
+    def work(db):
+        result = digest.run_digest(db, 'us', MAIL2000_SMTP_PASSWORD.value)
+        print(f"  ✉ 美國 DRAM/Flash 新聞摘要已寄出（{result['count']} 則）")
+    _run_locked('digest_us', work, ttl_minutes=5)

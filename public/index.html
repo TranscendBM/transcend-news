@@ -7,6 +7,28 @@
 
 <!-- Tailwind CSS (免費 CDN) -->
 <script src="https://cdn.tailwindcss.com"></script>
+<script>
+  // 統一字級（單位 pt，換算 px = pt × 4/3）：
+  //   text-xs    9pt(12px)   — 附註／標籤類文字下限
+  //   text-sm   12pt(16px)   — 內文字級下限
+  //   text-base 15pt(20px)   — 小標題／<h3>（h2 層級）
+  //   text-lg   14pt(18.67px) — 大標題（h1 層級，頁首標題用）
+  // 註：base(15pt) > lg(14pt) 只是沿用 Tailwind 既有 class 名稱掛自訂數值，
+  // 兩者用在完全不同的地方（base 給 <h3>，lg 給頁首主標題），不影響顯示。
+  // xl 以上（數字型大字）維持 Tailwind 預設，不受此限。
+  tailwind.config = {
+    theme: {
+      extend: {
+        fontSize: {
+          xs:   ['9pt',  { lineHeight: '1.4' }],
+          sm:   ['12pt', { lineHeight: '1.5' }],
+          base: ['15pt', { lineHeight: '1.5' }],
+          lg:   ['14pt', { lineHeight: '1.4' }],
+        },
+      },
+    },
+  };
+</script>
 
 <!-- Firebase (免費 CDN) -->
 <script src="https://www.gstatic.com/firebasejs/10.7.0/firebase-app-compat.js"></script>
@@ -23,11 +45,14 @@
 <!-- Babel standalone — JSX transpiler (jsDelivr, 固定版本) -->
 <script src="https://cdn.jsdelivr.net/npm/@babel/standalone@7.24.4/babel.min.js"></script>
 
+<!-- SheetJS — Excel 匯出 (jsDelivr, 固定版本) -->
+<script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+
 <style>
   :root {
     --page: #f5f6f8;
     --surface: #ffffff;
-    --surface-soft: #f8fafc;
+    --surface-soft: #f2f5f8;
     --line: #e5e7eb;
     --text: #1f2937;
     --muted: #64748b;
@@ -53,13 +78,16 @@
   .light-theme .bg-gray-800\/80 { background-color:var(--surface-soft) !important; }
   .light-theme .bg-gray-800,
   .light-theme .bg-gray-700 { background-color:#eef1f5 !important; }
+  /* 灰色框線改為透明：區塊改用背景色深淺區隔（page < surface-soft < surface），
+     不再靠外框線分隔，減少多層 div 疊框造成的視覺干擾。彩色徽章（如
+     text-green-300 系列）的邊框不在此列，維持原本的色塊配色。 */
   .light-theme .border-gray-800\/40,
   .light-theme .border-gray-700,
   .light-theme .border-gray-700\/40,
   .light-theme .border-gray-700\/60,
   .light-theme .border-gray-600,
   .light-theme .border-gray-600\/50,
-  .light-theme .border-gray-600\/60 { border-color:var(--line) !important; }
+  .light-theme .border-gray-600\/60 { border-color:transparent !important; }
   .light-theme .text-gray-200,
   .light-theme .text-gray-300 { color:#334155 !important; }
   .light-theme .text-gray-400 { color:#475569 !important; }
@@ -93,6 +121,17 @@
   .light-theme .text-red-300 { color:#be123c !important; }
   .light-theme .border-red-700\/40,
   .light-theme .border-red-700\/50 { border-color:#fecdd3 !important; }
+  /* 漲跌／警示指標文字（原本只給了「-300」徽章配色，這幾個「-400/-500」
+     指標色沒跟著覆寫，在白底上維持深色系原本的高亮色，太亮不易閱讀）。
+     用中間色階（600），比徽章的 -300 深色版更淺、紅綠更好分辨，
+     同時比原本的 -400/-500 亮色在白底上清楚。*/
+  .light-theme .text-green-400,
+  .light-theme .text-green-400\/80 { color:#16a34a !important; }
+  .light-theme .text-red-400,
+  .light-theme .text-red-400\/70,
+  .light-theme .text-red-400\/80 { color:#dc2626 !important; }
+  .light-theme .text-amber-500,
+  .light-theme .text-amber-500\/80 { color:#d97706 !important; }
   .light-theme .bg-blue-900\/60 { background:#eff6ff !important; }
   .light-theme .text-blue-300 { color:#1d4ed8 !important; }
   .light-theme .border-blue-700\/50 { border-color:#bfdbfe !important; }
@@ -121,7 +160,7 @@
   <div style="min-height:100vh;display:flex;align-items:center;justify-content:center;background:#f5f6f8;color:#64748b;font-family:sans-serif;flex-direction:column;gap:12px;">
     <div style="width:36px;height:36px;border:3px solid #e5e7eb;border-top-color:#960014;border-radius:50%;animation:spin 1s linear infinite;"></div>
     <p style="font-size:14px;">載入中，請稍候…</p>
-    <p style="font-size:11px;color:#94a3b8;">若超過 10 秒未載入，請開啟瀏覽器 Console（F12）查看錯誤訊息</p>
+    <p style="font-size:12px;color:#94a3b8;">若超過 10 秒未載入，請開啟瀏覽器 Console（F12）查看錯誤訊息</p>
   </div>
 </div>
 
@@ -218,19 +257,25 @@ const MEDIA_MAP = {
 // ═══════════════════════════════════════════════════════════
 const COMPETITORS = [
   { id:'ADATA',         name:'ADATA 威剛',          stock:'3260', color:'#ef4444' },
-  { id:'Teamgroup',     name:'Teamgroup 十銓',       stock:'4967', color:'#f97316' },
   { id:'Innodisk',      name:'Innodisk 宜鼎',       stock:'5289', color:'#eab308' },
+  { id:'Teamgroup',     name:'Teamgroup 十銓',       stock:'4967', color:'#f97316' },
   { id:'Apacer',        name:'Apacer 宇瞻',         stock:'8271', color:'#22c55e' },
   { id:'Silicon Power', name:'Silicon Power 廣穎',  stock:'4973', color:'#3b82f6' },
 ];
 
+// 統一的競品顯示順序（威剛／宜鼎／十銓／宇瞻／廣穎）。
+// 股票代號當 object key 時，JS 會自動依數字大小排序、無視物件字面量的
+// 撰寫順序，所以凡是要照這個順序顯示的地方都要用這個陣列驅動，
+// 不能直接 Object.keys()/Object.entries() 一個以代號為 key 的物件。
+const COMPETITOR_ORDER = ['3260', '5289', '4967', '8271', '4973'];
+
 const STOCK_META = {
-  '2451':{ name:'創見',    isSelf:true  },
-  '3260':{ name:'威剛',    isSelf:false },
-  '4973':{ name:'廣穎',    isSelf:false },
-  '5289':{ name:'宜鼎',    isSelf:false },
-  '4967':{ name:'十銓科技', isSelf:false },
-  '8271':{ name:'宇瞻',    isSelf:false },
+  '2451':{ name:'創見'     },
+  '3260':{ name:'威剛'     },
+  '5289':{ name:'宜鼎'     },
+  '4967':{ name:'十銓科技' },
+  '8271':{ name:'宇瞻'     },
+  '4973':{ name:'廣穎'     },
 };
 
 // ═══════════════════════════════════════════════════════════
@@ -375,6 +420,27 @@ function dedupeArticlesByTitle(articles) {
   return sortByDate([...merged.values()]);
 }
 
+function exportNewsExcel(articles, sheetName, filenamePrefix) {
+  if (!window.XLSX || !articles || articles.length === 0) return;
+  const rows = articles.map(n => {
+    const d = n.pubDate?.toDate ? n.pubDate.toDate() : new Date(n.pubDate || 0);
+    return {
+      標題: n.title || '',
+      媒體: n.mediaName || n.sourceName || '',
+      日期: isNaN(d.getTime()) ? '' : d.toLocaleString('zh-TW'),
+      情緒: SENT_CFG[n.sentiment || getSentiment(n.title, n.content)]?.label || '',
+      連結: n.link || '',
+    };
+  });
+  const sheet = window.XLSX.utils.json_to_sheet(rows);
+  sheet['!cols'] = [{ wch:50 }, { wch:16 }, { wch:18 }, { wch:8 }, { wch:60 }];
+  const wb = window.XLSX.utils.book_new();
+  window.XLSX.utils.book_append_sheet(wb, sheet, sheetName);
+  const today = new Date();
+  const stamp = `${today.getFullYear()}${String(today.getMonth()+1).padStart(2,'0')}${String(today.getDate()).padStart(2,'0')}`;
+  window.XLSX.writeFile(wb, `${filenamePrefix}_${stamp}.xlsx`);
+}
+
 const BRIEFING_RULES = [
   { kind:'risk', label:'風險', score:40, words:['虧損','下跌','急跌','召回','訴訟','裁員','停產','危機','資安','衰退'] },
   { kind:'finance', label:'財務', score:32, words:['營收','獲利','財報','財務報告','eps','股利','法說','毛利率','淨利'] },
@@ -435,6 +501,32 @@ const TT = { contentStyle:{ background:'#ffffff', border:'1px solid #e5e7eb', bo
 // ═══════════════════════════════════════════════════════════
 // ATOMS
 // ═══════════════════════════════════════════════════════════
+// 創見官方 logo（單一路徑，供頁首與 IR 股價卡共用；fill 依底色深淺帶入）
+function TranscendMark({ height=26, fill='white' }) {
+  return (
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 202 38" height={height}
+      style={{ fill, display:'block', flexShrink:0 }}>
+      <path fillRule="evenodd" d="M64,8.3h-15.3c0,.1-.7,4.2-.7,4.2h5.5s-3.6,17.1-3.6,17.1h4.3s3.6-17.2,3.6-17.2h5.3s.9-4.2.9-4.2ZM76.3,12s-5.2-3.3-8.3,4.8l.9-4.9h-3.7s-3.5,17.7-3.5,17.7h3.8s2.2-9.5,2.2-9.5c0,0,2-6.1,7.3-3.7,0,0,1.3-4.5,1.3-4.5ZM80.7,27c-1,0-1.8-.6-1.8-1.7,0-1,1.1-2,2.2-2.6,1.1-.6,4.7-1.8,4.7-1.8,0,4.3-4.1,6-5.1,6.1M85.5,10.9s-4.8.4-7.7,3.1l-.5,4.2s3-3.3,6.1-3.3c3,0,5,2.7.1,4.3-4.9,1.6-8.9,2.5-8.8,7.4,0,4.9,7.5,4.5,10-.2l-.4,3h3.7s2.6-12.7,2.6-12.7c0,0,1.5-5.8-5-5.8M104.8,10.8c-5.2,0-7.4,5.8-7.4,5.8l1-5h-4s-3.3,17.9-3.3,17.9h4s2.2-10.6,2.2-10.6c0,0,1.1-3.8,4.5-3.8,3.4,0,2.4,3.4,2.3,4.5-.2,1.1-2.1,9.7-2.1,9.7h4.2s2.6-13.4,2.6-13.4c0,0,1.2-5.2-3.9-5.1M118.1,10.8c-3.8,0-7.4,3.3-7.3,7,0,3.7,4.2,4.2,4.8,4.4.7.2,2,.6,2.1,2,0,1.4-3.5,4.8-8-.3l-.6,4.1s1.6,1.9,4.7,1.9c3.2,0,7.7-2.5,7.6-6.6,0-4.2-5.1-4.3-6.4-5.4-1.3-1.1.5-3.3,2.8-3.3,2.2,0,4.2,2.4,4.2,2.4l.9-4s-.9-2.1-4.7-2.1M132.6,10.6c-3.9,0-9.9,4.2-9.9,11.7,0,7.6,7.4,10.4,12.5,4.2l.3-3.1s-2.3,3.2-5.6,3.2c-3.3,0-3.6-3.9-3.5-5.3.2-1.3,1.3-6.6,5.7-6.6,4.3,0,4.8,2.9,4.8,2.9l.9-4.4s-1.4-2.7-5.3-2.6M150.7,18.5h-8.7c0,0,1.3-3.9,5.3-4,4.1,0,3.4,4,3.4,4M147.5,10.6c-4.8,0-10,5.7-10,12.2,0,6.5,7.5,9.9,13.6,3.7l.3-3s-1.6,3.1-6.2,3.1c-4.5,0-4-4.8-4-4.8h11.2c0,0,1.3-3.9.9-6.2-.4-2.3-1.1-5.1-5.9-5M167.6,10.9c-5.2,0-7.4,5.8-7.4,5.8l1-5h-4s-3.3,17.9-3.3,17.9h4s2.2-10.6,2.2-10.6c0,0,1.1-3.8,4.5-3.8,3.4,0,2.4,3.4,2.2,4.5-.2,1.1-2,9.7-2,9.7h4.2s2.6-13.4,2.6-13.4c0,0,1.2-5.2-3.9-5.2M185.4,18.5c0,5.1-3.7,7.9-5.5,7.9-1.8,0-3.2-1.5-3.2-3.9,0-2.4,1.7-7.3,5.4-7.3,3.7,0,3.3,3.4,3.3,3.4ZM187.8,7.3l-1.7,8.1s-.2-4.5-4.6-4.5c-4.4,0-8.9,5.8-8.8,12.1,0,6.2,6.3,10.8,11.6,2.5l-.9,3.9h3.9s4.5-22.1,4.5-22.1c0,0-4,0-4,0ZM39.4,9.8c0-.2-.2-.5-.3-.7C35.1.3,23.3-2.6,12.9,2.6,6.9,5.7,2.7,10.7.9,16.1h15.3l-3,15.1h7.8l3-15.1h5.1l1.6-7.4H9.4C14.5,3,22,.1,28.3,2.2c3.8,1.2,6.4,4.1,7.6,7.6,0,0,3.5,0,3.5,0ZM32.6,12.4l-1.6,7.4h5c-.3,1.2-.8,2.4-1.4,3.6-4.4,9.1-14.4,14.3-22.4,11.7-6.5-2.2-9.6-9-8-16.4H.3c-.6,3.2-.2,6.5,1.1,9.5,4.1,8.9,15.8,11.8,26.2,6.5,9.2-4.6,14.3-14.1,12.6-22.3,0,0-7.6,0-7.6,0Z"/>
+    </svg>
+  );
+}
+
+// IR 股價卡：各家競品 logo 圖檔（創見自己用上面的 TranscendMark，不在此列）
+const COMPANY_LOGO_SRC = {
+  '3260': '/logos/adata.png',
+  '5289': '/logos/innodisk.png',
+  '4967': '/logos/teamgroup.webp',
+  '8271': '/logos/apacer.png',
+  '4973': '/logos/silicon-power.webp',
+};
+
+function CompanyLogo({ code, height=20 }) {
+  if (code === '2451') return <TranscendMark height={height} fill={BRAND} />;
+  const src = COMPANY_LOGO_SRC[code];
+  if (!src) return null;
+  return <img src={src} alt="" style={{ height, width:'auto', display:'block', objectFit:'contain' }} />;
+}
+
 function SentBadge({ s }) {
   const c = SENT_CFG[s] || SENT_CFG.neutral;
   return <span className={`text-xs px-2 py-0.5 rounded-full border shrink-0 ${c.cls}`}>{c.label}</span>;
@@ -455,10 +547,15 @@ function Spinner({ size='sm' }) {
   return <div className={`${s} border-gray-700 border-t-red-500 rounded-full spin`} />;
 }
 
-function Card({ title, icon, children, className='' }) {
+function Card({ title, icon, children, className='', actions }) {
   return (
     <div className={`bg-gray-900 rounded-2xl border border-gray-700/60 p-4 ${className}`}>
-      {title && <h3 className="text-sm font-semibold text-gray-200 mb-3 flex items-center gap-2"><span>{icon}</span>{title}</h3>}
+      {title && (
+        <div className="flex items-center justify-between gap-2 mb-3">
+          <h3 className="text-base font-semibold text-gray-200 flex items-center gap-2"><span>{icon}</span>{title}</h3>
+          {actions}
+        </div>
+      )}
       {children}
     </div>
   );
@@ -502,7 +599,7 @@ function NewsFilterToolbar({ query, setQuery, media, setMedia, sentiment, setSen
   );
 }
 
-function TodayBriefing({ articles }) {
+function TodayBriefing({ articles, title='今日情報快報' }) {
   const items = useMemo(() => {
     const now = new Date();
     const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
@@ -535,24 +632,24 @@ function TodayBriefing({ articles }) {
   };
 
   return (
-    <Card title="今日情報快報" icon="☀️">
+    <Card title={title} icon="☀️">
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 -mt-1 mb-3">
         <p className="text-xs text-gray-500">今天的重要消息與建議下一步</p>
-        <span className="text-[10px] px-2 py-1 rounded-full bg-gray-800 text-gray-500 whitespace-nowrap">規則分析 · 零 API 費用</span>
+        <span className="text-xs px-2 py-1 rounded-full bg-gray-800 text-gray-500 whitespace-nowrap">規則分析 · 零 API 費用</span>
       </div>
       {items.length > 0 ? (
         <>
           <div className="grid grid-cols-3 gap-2 mb-3">
             <div className="rounded-xl bg-gray-800/40 border border-gray-700/40 px-3 py-2">
-              <p className="text-[10px] text-gray-500">重要消息</p>
+              <p className="text-xs text-gray-500">重要消息</p>
               <p className="text-lg font-bold text-ink">{summary.important}<span className="text-xs font-normal text-gray-500 ml-1">則</span></p>
             </div>
             <div className="rounded-xl bg-red-900/40 border border-red-700/50 px-3 py-2">
-              <p className="text-[10px] text-red-300">風險提醒</p>
+              <p className="text-xs text-red-300">風險提醒</p>
               <p className="text-lg font-bold text-red-300">{summary.risks}<span className="text-xs font-normal ml-1">則</span></p>
             </div>
             <div className="rounded-xl bg-blue-900/60 border border-blue-700/50 px-3 py-2">
-              <p className="text-[10px] text-blue-300">競品動態</p>
+              <p className="text-xs text-blue-300">競品動態</p>
               <p className="text-lg font-bold text-blue-300">{summary.competitors}<span className="text-xs font-normal ml-1">則</span></p>
             </div>
           </div>
@@ -561,14 +658,14 @@ function TodayBriefing({ articles }) {
             <a key={article.id||i} href={article.link||'#'} target="_blank" rel="noreferrer"
               className="group rounded-xl border border-gray-700/40 bg-gray-800/40 hover:bg-gray-800 hover:border-gray-600 p-3 transition-all min-w-0">
               <div className="flex items-center justify-between gap-2 mb-2">
-                <span className={`text-[10px] px-2 py-0.5 rounded-full border ${badgeClass[meta.kind]}`}>{meta.label}</span>
-                <span className="text-[10px] text-gray-600">{fmtDate(article.pubDate)}</span>
+                <span className={`text-xs px-2 py-0.5 rounded-full border ${badgeClass[meta.kind]}`}>{meta.label}</span>
+                <span className="text-xs text-gray-600">{fmtDate(article.pubDate)}</span>
               </div>
-              <p className="content-title text-xs font-semibold leading-relaxed line-clamp-3 transition-colors">{article.title}</p>
-              <p className="text-[10px] text-gray-500 mt-2">入選原因：{meta.reasons.join(' · ')}</p>
+              <p className="content-title text-sm font-semibold leading-relaxed line-clamp-3 transition-colors">{article.title}</p>
+              <p className="text-xs text-gray-500 mt-2">入選原因：{meta.reasons.join(' · ')}</p>
               <div className="mt-2 pt-2 border-t border-gray-700/40">
-                <p className="text-[10px] font-semibold text-secondary mb-0.5">建議下一步</p>
-                <p className="text-[11px] text-gray-500 leading-relaxed">{action}</p>
+                <p className="text-xs font-semibold text-secondary mb-0.5">建議下一步</p>
+                <p className="text-sm text-gray-500 leading-relaxed">{action}</p>
               </div>
             </a>
           ))}
@@ -588,7 +685,7 @@ function NewsCard({ article }) {
       <div className="flex-1 min-w-0">
         <p className="content-title text-sm line-clamp-2 leading-snug transition-colors">{article.title}</p>
         <div className="flex items-center gap-1.5 mt-1.5 text-xs text-gray-500">
-          <span className="font-medium" style={{ color:'#f87171' }}>{media}</span>
+          <span className="font-medium" style={{ color:'#dc2626' }}>{media}</span>
           <span>·</span>
           <span>{fmtDate(article.pubDate)}</span>
         </div>
@@ -669,6 +766,7 @@ const US_BRAND_CFG = [
   { id:'SMI',          label:'SMI 慧榮',    color:'#0891b2' },
   { id:'Phison',       label:'Phison 群聯', color:'#0e7490' },
   { id:'Realtek',      label:'Realtek 瑞昱',color:'#0369a1' },
+  { id:'Kingston',     label:'Kingston 金士頓', color:'#db2777' },
   { id:'HBM',          label:'HBM',         color:'#06b6d4' },
   { id:'DRAM市場',     label:'DRAM市場',    color:'#ca8a04' },
   { id:'NAND Flash',   label:'NAND Flash',  color:'#9333ea' },
@@ -695,7 +793,7 @@ function USNewsCard({ article }) {
             {brand}
           </span>
           {bullets.length > 0 && (
-            <span className="text-[10px] px-1.5 py-0.5 rounded-md font-medium"
+            <span className="text-xs px-1.5 py-0.5 rounded-md font-medium"
               style={{ background:'#eff6ff', color:'#1d4ed8', border:'1px solid #bfdbfe' }}>
               🤖 AI摘要
             </span>
@@ -714,7 +812,7 @@ function USNewsCard({ article }) {
           </div>
         )}
         <div className="flex items-center gap-1.5 mt-1.5 text-xs text-gray-500">
-          <span style={{ color:'#f87171' }}>{src}</span>
+          <span style={{ color:'#dc2626' }}>{src}</span>
           <span>·</span>
           <span>{fmtDate(article.pubDate)}</span>
         </div>
@@ -766,6 +864,9 @@ function USMarketTab({ news }) {
 
   return (
     <div className="space-y-4 fade-in">
+      {/* 今天重要情報（沿用「今日情報快報」規則：風險／財務／機會／市場關鍵字 + 24 小時內加權）*/}
+      <TodayBriefing articles={allUSNews} title="上游市場今日重要情報" />
+
       {/* 統計卡片 */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
         {[
@@ -784,7 +885,7 @@ function USMarketTab({ news }) {
 
       {/* 主要新聞卡 */}
       <div className="bg-gray-900 rounded-2xl border border-gray-700/60 p-4">
-        <h3 className="text-sm font-semibold text-gray-200 mb-3 flex items-center gap-2">
+        <h3 className="text-base font-semibold text-gray-200 mb-3 flex items-center gap-2">
           <span>🌐</span>上游供應鏈 ＆ DRAM / Flash 市場新聞
         </h3>
 
@@ -858,10 +959,10 @@ function PRStatsPanel({ articles }) {
   }, [articles]);
 
   const PERIODS = [
-    { label:'今天', val:counts.today, color:'#f87171' },
-    { label:'本週', val:counts.week,  color:'#fb923c' },
-    { label:'本月', val:counts.month, color:'#facc15' },
-    { label:'本年', val:counts.year,  color:'#4ade80' },
+    { label:'今天', val:counts.today, color:'#dc2626' },
+    { label:'本週', val:counts.week,  color:'#ea580c' },
+    { label:'本月', val:counts.month, color:'#ca8a04' },
+    { label:'本年', val:counts.year,  color:'#16a34a' },
   ];
 
   return (
@@ -1026,18 +1127,16 @@ function StockCard({ code, data }) {
   const up = data.changePct > 0, dn = data.changePct < 0;
   const stale = isStockStale(data);
   return (
-    <div className={`p-4 rounded-2xl border transition-all ${meta.isSelf?'border-red-700/40 bg-gradient-to-br from-red-950/25 to-gray-900':'border-gray-700/60 bg-gray-900'}`}>
+    <div className="p-4 rounded-2xl bg-gray-900 transition-all">
+      <div className="mb-2">
+        <CompanyLogo code={code} height={24} />
+      </div>
       <div className="flex justify-between items-start mb-2">
         <div>
           <p className="text-xs text-gray-500">{code}</p>
           <p className="font-bold text-ink">{data.name || meta.name}</p>
         </div>
         <div className="flex flex-col items-end gap-1">
-          {meta.isSelf && (
-            <span className="text-xs px-2 py-0.5 rounded-full border" style={{ background:'#fff1f2', color:'#be123c', borderColor:'#fecdd3' }}>
-              本公司
-            </span>
-          )}
           {stale && (
             <span className="text-xs px-2 py-0.5 rounded-full border" title="交易時段中超過 30 分鐘未更新"
               style={{ background:'rgba(217,119,6,0.15)', color:'#fbbf24', borderColor:'rgba(217,119,6,0.4)' }}>
@@ -1051,7 +1150,7 @@ function StockCard({ code, data }) {
         <span>{up?'▲':dn?'▼':'─'}</span>
         <span>{up?'+':''}{data.changePct?.toFixed(2)??'--'}%</span>
       </div>
-      <p className="text-xs text-gray-600 mt-1">
+      <p className="text-sm text-gray-600 mt-1">
         {up?'+':''}{data.change?.toFixed(1)??'--'} ·
         量 {data.volume ? (data.volume/1000).toFixed(0)+'張' : '--'}
       </p>
@@ -1269,7 +1368,7 @@ function RevenueChart({ revenue }) {
 
           {/* 近 12 個月明細表 */}
           <div className="mt-3 overflow-x-auto">
-            <table className="w-full text-xs">
+            <table className="w-full text-sm">
               <thead>
                 <tr className="border-b border-gray-700/60 text-gray-500">
                   <th className="text-left pb-1.5 pr-3 font-medium">年月</th>
@@ -1312,7 +1411,7 @@ function RevenueChart({ revenue }) {
 
       {/* 明細表 */}
       <div className="mt-3 overflow-x-auto">
-        <table className="w-full text-xs">
+        <table className="w-full text-sm">
           <thead>
             <tr className="border-b border-gray-700/60 text-gray-500">
               <th className="text-left pb-1.5 pr-3 font-medium">年度</th>
@@ -1401,7 +1500,7 @@ function TermTip({ label, tip }) {
         onMouseEnter={showTip}
         onMouseLeave={hideTip}
         onClick={() => pos ? hideTip() : showTip()}
-        className="inline-flex items-center justify-center w-4 h-4 rounded-full text-[9px] font-bold cursor-help select-none shrink-0"
+        className="inline-flex items-center justify-center w-4 h-4 rounded-full text-xs font-bold cursor-help select-none shrink-0"
         style={{ background:'#eff6ff', color:'#1d4ed8', border:'1px solid #bfdbfe' }}>?</span>
       {pos && ReactDOM.createPortal(
         <span style={{
@@ -1451,7 +1550,7 @@ function QuarterlyPnL({ financials }) {
     <Card title="季度損益摘要（近 8 季）" icon="📋">
       {quarters.length > 0 ? (
         <div className="overflow-x-auto">
-          <table className="w-full text-xs">
+          <table className="w-full text-sm">
             <thead>
               <tr className="border-b border-gray-700/60 text-gray-500">
                 <th className="text-left pb-2 pr-3 font-medium">季度</th>
@@ -1514,7 +1613,7 @@ function DividendHistory({ dividends }) {
     <Card title="歷年股利配息（近 10 年）" icon="💵">
       {records.length > 0 ? (
         <div className="overflow-x-auto">
-          <table className="w-full text-xs">
+          <table className="w-full text-sm">
             <thead>
               <tr className="border-b border-gray-700/60 text-gray-500">
                 <th className="text-left pb-2 pr-3 font-medium">配息年度</th>
@@ -1573,10 +1672,10 @@ function CompetitorMaterial({ material }) {
   const COMP_META = {
     '2451':{ name:'創見資訊',  color: BRAND },
     '3260':{ name:'威剛科技',  color:'#ef4444' },
-    '4967':{ name:'十銓科技',  color:'#f97316' },
-    '4973':{ name:'廣穎電通',  color:'#3b82f6' },
     '5289':{ name:'宜鼎國際',  color:'#eab308' },
+    '4967':{ name:'十銓科技',  color:'#f97316' },
     '8271':{ name:'宇瞻科技',  color:'#22c55e' },
+    '4973':{ name:'廣穎電通',  color:'#3b82f6' },
   };
   const BADGE_COLOR = {
     '董事會':    'bg-red-900/60 text-red-300 border-red-700/50',
@@ -1607,7 +1706,7 @@ function CompetitorMaterial({ material }) {
       {/* 股票篩選 tabs */}
       <div className="flex flex-wrap gap-1.5 mb-3">
         <TabBtn active={filterCode==='all'} onClick={() => setFilterCode('all')}>全部</TabBtn>
-        {Object.entries(COMP_META).map(([code, m]) => (
+        {['2451', ...COMPETITOR_ORDER].map(code => [code, COMP_META[code]]).map(([code, m]) => (
           <TabBtn key={code} active={filterCode===code} onClick={() => setFilterCode(code)}>
             <span className="inline-block w-2 h-2 rounded-full mr-1" style={{ background: m.color }} />
             {code} {m.name}
@@ -1620,7 +1719,7 @@ function CompetitorMaterial({ material }) {
           {filtered.map((r, i) => {
             const meta = COMP_META[r.code] || {};
             return (
-              <div key={i} className={`rounded-xl px-3 py-2.5 text-xs border ${r.highlight ? 'border-gray-600/60 bg-gray-800/40' : 'border-gray-800/40 bg-gray-900/30'}`}>
+              <div key={i} className={`rounded-xl px-3 py-2.5 text-sm border ${r.highlight ? 'border-gray-600/60 bg-gray-800/40' : 'border-gray-800/40 bg-gray-900/30'}`}>
                 <div className="flex items-start gap-2">
                   <span className="font-bold shrink-0" style={{ color: meta.color || '#9ca3af' }}>
                     {meta.name || r.name || r.code}
@@ -1637,7 +1736,7 @@ function CompetitorMaterial({ material }) {
                 {r.highlight && r.highlightKw && r.highlightKw.length > 0 && (
                   <div className="flex flex-wrap gap-1 mt-1.5 pl-14">
                     {r.highlightKw.map(kw => (
-                      <span key={kw} className={`px-1.5 py-0.5 rounded text-[10px] border font-medium ${BADGE_COLOR[kw] || 'bg-gray-700 text-gray-300 border-gray-600'}`}>
+                      <span key={kw} className={`px-1.5 py-0.5 rounded text-xs border font-medium ${BADGE_COLOR[kw] || 'bg-gray-700 text-gray-300 border-gray-600'}`}>
                         {kw}
                       </span>
                     ))}
@@ -1705,7 +1804,14 @@ function PRTab({ news }) {
       <PRStatsPanel articles={validTranscend} />
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-        <Card title="創見最新報導" icon="📰" className="h-full">
+        <Card title="創見最新報導" icon="📰" className="h-full"
+          actions={
+            <button onClick={() => exportNewsExcel(transcend, '創見最新報導', '創見最新報導')}
+              disabled={transcend.length === 0}
+              className="text-xs px-2.5 py-1 rounded-lg border border-gray-700/60 text-gray-400 hover:text-gray-200 hover:bg-gray-800 transition disabled:opacity-40 disabled:cursor-not-allowed shrink-0">
+              ⬇ 匯出 Excel
+            </button>
+          }>
           {/* 時間篩選 */}
           <div className="flex gap-1.5 mb-3">
             {TIME_FILTERS.map(f => (
@@ -1770,12 +1876,12 @@ function DailyTrading({ daily }) {
           )}
           <div className="space-y-1.5">
             {[['開盤', daily.open], ['收盤', daily.close], ['最高', daily.high], ['最低', daily.low]].map(([k,v]) => (
-              <div key={k} className="flex justify-between text-xs">
+              <div key={k} className="flex justify-between text-sm">
                 <span className="text-gray-500">{k}</span>
                 <span className="text-ink tabular-nums">{v != null ? v : '—'}</span>
               </div>
             ))}
-            <div className="flex justify-between text-xs border-t border-gray-700/40 pt-1 mt-1">
+            <div className="flex justify-between text-sm border-t border-gray-700/40 pt-1 mt-1">
               <span className="text-gray-500">交易量</span>
               <span className="text-ink tabular-nums">{daily.volume ? fmtK(daily.volume) + ' 股' : '—'}</span>
             </div>
@@ -1789,11 +1895,11 @@ function DailyTrading({ daily }) {
             {netStr(daily.foreignNet)}
           </p>
           <div className="space-y-1.5">
-            <div className="flex justify-between text-xs">
+            <div className="flex justify-between text-sm">
               <span className="text-gray-500">買進</span>
               <span className="text-green-400/80 tabular-nums">{daily.foreignBuy != null ? fmtK(daily.foreignBuy) : '—'}</span>
             </div>
-            <div className="flex justify-between text-xs">
+            <div className="flex justify-between text-sm">
               <span className="text-gray-500">賣出</span>
               <span className="text-red-400/80 tabular-nums">{daily.foreignSell != null ? fmtK(daily.foreignSell) : '—'}</span>
             </div>
@@ -1808,11 +1914,11 @@ function DailyTrading({ daily }) {
             {netStr(daily.trustNet)}
           </p>
           <div className="space-y-1.5">
-            <div className="flex justify-between text-xs">
+            <div className="flex justify-between text-sm">
               <span className="text-gray-500">買進</span>
               <span className="text-green-400/80 tabular-nums">{daily.trustBuy != null ? fmtK(daily.trustBuy) : '—'}</span>
             </div>
-            <div className="flex justify-between text-xs">
+            <div className="flex justify-between text-sm">
               <span className="text-gray-500">賣出</span>
               <span className="text-red-400/80 tabular-nums">{daily.trustSell != null ? fmtK(daily.trustSell) : '—'}</span>
             </div>
@@ -1832,9 +1938,9 @@ function DailyTrading({ daily }) {
 const COMP_REV_META = {
   '2451': { name: '創見',        color: '#960014' },
   '3260': { name: 'ADATA 威剛', color: '#ef4444' },
-  '8271': { name: 'Apacer 宇瞻', color: '#f97316' },
-  '4967': { name: '十銓科技',   color: '#a855f7' },
   '5289': { name: '宜鼎國際',   color: '#eab308' },
+  '4967': { name: '十銓科技',   color: '#a855f7' },
+  '8271': { name: 'Apacer 宇瞻', color: '#f97316' },
   '4973': { name: '廣穎科技',   color: '#3b82f6' },
 };
 
@@ -1854,7 +1960,8 @@ function CompetitorRevenueChart({ revenue, compRev }) {
     return Object.values(series).sort((a,b) => a.label < b.label ? -1 : 1).slice(-24);
   }, [revenue, compRev]);
 
-  const hasCodes = ['2451', ...Object.keys(compRev || {})].filter(c => COMP_REV_META[c]);
+  const compKeys = new Set(Object.keys(compRev || {}));
+  const hasCodes = ['2451', ...COMPETITOR_ORDER.filter(c => compKeys.has(c))].filter(c => COMP_REV_META[c]);
   if (!allSeries.length || hasCodes.length < 2) {
     return (
       <div className="text-sm text-gray-600 text-center py-6">
@@ -1940,7 +2047,8 @@ function AnnualRevenueChart({ revenue, compRev }) {
       .slice(-10);
   }, [revenue, compRev]);
 
-  const hasCodes = ['2451', ...Object.keys(compRev || {})].filter(c => COMP_REV_META[c]);
+  const compKeys = new Set(Object.keys(compRev || {}));
+  const hasCodes = ['2451', ...COMPETITOR_ORDER.filter(c => compKeys.has(c))].filter(c => COMP_REV_META[c]);
 
   if (!allYears.length || hasCodes.length < 2) {
     return (
@@ -2016,7 +2124,7 @@ function IRTab({ news, stocks, community, revenue, financials, dividends, materi
     <div className="space-y-4 fade-in">
       {/* Stock cards */}
       <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
-        {Object.keys(STOCK_META).map(code => (
+        {['2451', ...COMPETITOR_ORDER].map(code => (
           stocks[code]
             ? <StockCard key={code} code={code} data={stocks[code]} />
             : <div key={code} className="p-4 rounded-2xl border border-gray-700/60 bg-gray-900 flex flex-col items-center justify-center gap-2 min-h-[100px]">
@@ -2349,17 +2457,14 @@ function App() {
 
       {/* ─────────── HEADER ─────────── */}
       <header className="sticky top-0 z-50 shadow-2xl"
-        style={{ background:'linear-gradient(135deg,#3b0007 0%,#960014 55%,#b5001a 100%)' }}>
+        style={{ background:'rgb(150,0,20)' }}>
         <div className="max-w-7xl mx-auto px-4 h-14 flex items-center justify-between gap-3">
 
           {/* Logo */}
           <div className="flex items-center gap-3 shrink-0">
-            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 202 38" height="26"
-              style={{ fill:'white', display:'block', flexShrink:0 }}>
-              <path fillRule="evenodd" d="M64,8.3h-15.3c0,.1-.7,4.2-.7,4.2h5.5s-3.6,17.1-3.6,17.1h4.3s3.6-17.2,3.6-17.2h5.3s.9-4.2.9-4.2ZM76.3,12s-5.2-3.3-8.3,4.8l.9-4.9h-3.7s-3.5,17.7-3.5,17.7h3.8s2.2-9.5,2.2-9.5c0,0,2-6.1,7.3-3.7,0,0,1.3-4.5,1.3-4.5ZM80.7,27c-1,0-1.8-.6-1.8-1.7,0-1,1.1-2,2.2-2.6,1.1-.6,4.7-1.8,4.7-1.8,0,4.3-4.1,6-5.1,6.1M85.5,10.9s-4.8.4-7.7,3.1l-.5,4.2s3-3.3,6.1-3.3c3,0,5,2.7.1,4.3-4.9,1.6-8.9,2.5-8.8,7.4,0,4.9,7.5,4.5,10-.2l-.4,3h3.7s2.6-12.7,2.6-12.7c0,0,1.5-5.8-5-5.8M104.8,10.8c-5.2,0-7.4,5.8-7.4,5.8l1-5h-4s-3.3,17.9-3.3,17.9h4s2.2-10.6,2.2-10.6c0,0,1.1-3.8,4.5-3.8,3.4,0,2.4,3.4,2.3,4.5-.2,1.1-2.1,9.7-2.1,9.7h4.2s2.6-13.4,2.6-13.4c0,0,1.2-5.2-3.9-5.1M118.1,10.8c-3.8,0-7.4,3.3-7.3,7,0,3.7,4.2,4.2,4.8,4.4.7.2,2,.6,2.1,2,0,1.4-3.5,4.8-8-.3l-.6,4.1s1.6,1.9,4.7,1.9c3.2,0,7.7-2.5,7.6-6.6,0-4.2-5.1-4.3-6.4-5.4-1.3-1.1.5-3.3,2.8-3.3,2.2,0,4.2,2.4,4.2,2.4l.9-4s-.9-2.1-4.7-2.1M132.6,10.6c-3.9,0-9.9,4.2-9.9,11.7,0,7.6,7.4,10.4,12.5,4.2l.3-3.1s-2.3,3.2-5.6,3.2c-3.3,0-3.6-3.9-3.5-5.3.2-1.3,1.3-6.6,5.7-6.6,4.3,0,4.8,2.9,4.8,2.9l.9-4.4s-1.4-2.7-5.3-2.6M150.7,18.5h-8.7c0,0,1.3-3.9,5.3-4,4.1,0,3.4,4,3.4,4M147.5,10.6c-4.8,0-10,5.7-10,12.2,0,6.5,7.5,9.9,13.6,3.7l.3-3s-1.6,3.1-6.2,3.1c-4.5,0-4-4.8-4-4.8h11.2c0,0,1.3-3.9.9-6.2-.4-2.3-1.1-5.1-5.9-5M167.6,10.9c-5.2,0-7.4,5.8-7.4,5.8l1-5h-4s-3.3,17.9-3.3,17.9h4s2.2-10.6,2.2-10.6c0,0,1.1-3.8,4.5-3.8,3.4,0,2.4,3.4,2.2,4.5-.2,1.1-2,9.7-2,9.7h4.2s2.6-13.4,2.6-13.4c0,0,1.2-5.2-3.9-5.2M185.4,18.5c0,5.1-3.7,7.9-5.5,7.9-1.8,0-3.2-1.5-3.2-3.9,0-2.4,1.7-7.3,5.4-7.3,3.7,0,3.3,3.4,3.3,3.4ZM187.8,7.3l-1.7,8.1s-.2-4.5-4.6-4.5c-4.4,0-8.9,5.8-8.8,12.1,0,6.2,6.3,10.8,11.6,2.5l-.9,3.9h3.9s4.5-22.1,4.5-22.1c0,0-4,0-4,0ZM39.4,9.8c0-.2-.2-.5-.3-.7C35.1.3,23.3-2.6,12.9,2.6,6.9,5.7,2.7,10.7.9,16.1h15.3l-3,15.1h7.8l3-15.1h5.1l1.6-7.4H9.4C14.5,3,22,.1,28.3,2.2c3.8,1.2,6.4,4.1,7.6,7.6,0,0,3.5,0,3.5,0ZM32.6,12.4l-1.6,7.4h5c-.3,1.2-.8,2.4-1.4,3.6-4.4,9.1-14.4,14.3-22.4,11.7-6.5-2.2-9.6-9-8-16.4H.3c-.6,3.2-.2,6.5,1.1,9.5,4.1,8.9,15.8,11.8,26.2,6.5,9.2-4.6,14.3-14.1,12.6-22.3,0,0-7.6,0-7.6,0Z"/>
-            </svg>
+            <TranscendMark height={26} fill="white" />
             <div className="border-l border-white/20 pl-3 hidden sm:block">
-              <p className="text-xs font-bold text-white/90 leading-tight tracking-wide">新聞監控</p>
+              <p className="text-lg font-bold text-white/90 leading-tight tracking-wide">新聞監控</p>
               <p className="text-xs text-red-200/60 leading-tight">News Intelligence</p>
             </div>
           </div>

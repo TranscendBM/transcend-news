@@ -12,6 +12,7 @@ import datetime
 import sys
 import time
 import uuid
+import concurrent.futures
 import requests
 import feedparser
 import firebase_admin
@@ -1154,6 +1155,9 @@ def init_db_from_env():
     return firestore.client()
 
 
+RSS_FETCH_MAX_WORKERS = 16   # 來源數遠大於 CPU 數也無妨：I/O bound，等待網路回應為主
+
+
 def fetch_and_save_news(db, mode='all'):
     """抓取 RSS 新聞來源、去重並存入 Firestore；回傳儲存篇數"""
     # 先處理已由原始媒體核對的歷史錯誤；marker 使它只產生一次查詢成本。
@@ -1163,9 +1167,17 @@ def fetch_and_save_news(db, mode='all'):
     print(f"📡 開始抓取 {len(sources)} 個來源...\n")
 
     fetched_articles = []
-    for src in sources:
-        articles = fetch_source(src)
-        fetched_articles.extend(articles)
+    # 各來源之間彼此獨立（各自的 requests 呼叫與 feedparser 解析無共用狀態），
+    # 平行抓取把總耗時從「所有來源逐一等待網路」降為「最慢的那個來源」，
+    # 避免來源一多或個別來源緩慢時，序列抓取拖到接近排程 timeout。
+    # executor.map 保留與 sources 相同的順序，供下面的合併/去重沿用序列版本邏輯。
+    # 去重不在這裡做「先到先贏」的簡單過濾——必須收齊全部來源後交給
+    # merge_duplicate_articles，才能比較日期、保留最早且可信的發布日、
+    # 優先採用原始媒體連結（見下方合併步驟）。
+    with concurrent.futures.ThreadPoolExecutor(
+            max_workers=min(RSS_FETCH_MAX_WORKERS, len(sources) or 1)) as executor:
+        for articles in executor.map(fetch_source, sources):
+            fetched_articles.extend(articles)
 
     # 同一篇文章可能從多個查詢來源取得不同 Google News cluster URL，
     # 必須收齊後再合併，才能比較日期並保留原始發布日。
