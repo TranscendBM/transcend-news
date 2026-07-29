@@ -27,6 +27,17 @@ const MAX_AUTO_RETRIES = 2;      // 有上限的短時間自動重試
  *   restLoading = cursor 補抓進行中 —— 防止 onSnapshot 連續觸發時
  *                 同時發出多個後續查詢
  *
+ * Unmount 期間的生命週期保護（mountedRef）：
+ *   啟動流程一開始就要 await 本機快取讀取，這中間有一段非同步空窗；
+ *   若使用者在這個 Promise resolve 前就切走頁面（元件 unmount），
+ *   cleanup 當下 unsubRef.current 還是 null，沒有東西可以取消——
+ *   Promise resolve 後如果沒有額外檢查，程式仍會繼續建立 onSnapshot，
+ *   產生一個「元件已經卸載後才出現、永遠不會被清理」的監聽器。
+ *   cursor 補抓（fetchRest）用的是 getDocsFromServer，同樣有這個問題。
+ *   因此每一個 await 之後、每一次要 setState／呼叫 onFirstPublish／
+ *   建立 onSnapshot／安排 retry timer 之前，都要重新檢查 mountedRef，
+ *   已卸載就直接放棄，不做任何有副作用的事。
+ *
  * @param {object} [options]
  * @param {(loaded: boolean) => void} [options.onFirstPublish] 第一次成功
  *   發布新聞陣列時呼叫一次（用於同步外層彙總的 loading 旗標，行為與搬移前
@@ -46,6 +57,10 @@ export function useNewsFeed(options = {}) {
   // 呼叫 startOrRetry（例如掛載時的自動啟動與外部手動刷新幾乎同時發生）
   // 又跑一次完整初始化、建立第二個 onSnapshot 監聽器。
   const startingRef = useRef(false);
+  // 元件目前是否仍掛載。effect 啟動時設為 true；cleanup 一開始（在做
+  // 其他清理動作之前）就設為 false，讓所有還在等待中的 await 之後的
+  // 檢查點都能立刻看到最新狀態。
+  const mountedRef = useRef(false);
 
   const baseQuery = useCallback(() => {
     const db = getDb();
@@ -64,6 +79,7 @@ export function useNewsFeed(options = {}) {
       return;
     }
     if (startingRef.current) return; // 已有一次啟動流程在跑，監聽器還沒建立，避免重複啟動
+    if (!mountedRef.current) return; // 保險：呼叫當下元件已經不在了
     startingRef.current = true;
 
     const toObj = d => ({ id: d.id, ...d.data() });
@@ -72,6 +88,7 @@ export function useNewsFeed(options = {}) {
     // 保證無重複項；發佈前重新依 pubDate 排序，保證順序正確。
     const store = new Map();
     const publish = () => {
+      if (!mountedRef.current) return; // unmounted 後不得 setState／呼叫 onFirstPublish
       const ms = v => (v?.toDate ? v.toDate().getTime() : new Date(v || 0).getTime());
       const arr = dedupeArticlesByTitle([...store.values()]
         .filter(n => !n.link?.includes('msn.com'))
@@ -98,16 +115,19 @@ export function useNewsFeed(options = {}) {
 
     const fetchRest = async (cursorDoc) => {
       if (fullLoaded || restLoading || !cursorDoc) return;
+      if (!mountedRef.current) return; // 保險：呼叫當下元件已經不在了
       restLoading = true; // 查詢開始：只設 restLoading
       try {
         const rest = await getDocsFromServer(
           query(baseQuery(), startAfter(cursorDoc), limit(REST_FETCH_LIMIT)),
         );
+        if (!mountedRef.current) return; // unmount 發生在等待期間：不 publish、不標記 fullLoaded
         rest.docs.forEach(d => store.set(d.id, toObj(d)));
         publish();
         fullLoaded = true; // 只有 server 查詢成功才標記完成
         cancelRetryTimer(); // 成功：取消任何待執行的自動重試
       } catch (e) {
+        if (!mountedRef.current) return; // unmount 發生在等待期間：不印 log、不安排重試
         // 失敗：fullLoaded 維持 false。重試管道有三：
         // ①短時間自動重試（有上限）②下一次 server snapshot ③使用者手動刷新
         console.error('News rest 補抓失敗（將自動重試，或按「重新整理」）:', e);
@@ -116,6 +136,7 @@ export function useNewsFeed(options = {}) {
           cancelRetryTimer(); // 建新排程前先取消舊 timer，確保同時最多一個
           retryTimer = setTimeout(() => {
             retryTimer = null;
+            if (!mountedRef.current) return; // timer 觸發時元件可能已經卸載
             fetchRest(lastCursorDoc);
           }, 5000 * autoRetries);
         }
@@ -132,6 +153,7 @@ export function useNewsFeed(options = {}) {
       // ① 本機快取整批出圖（0 次伺服器讀取；第二次開啟起幾乎秒開）
       try {
         const cached = await getDocsFromCache(query(baseQuery(), limit(CACHE_LIMIT)));
+        if (!mountedRef.current) { startingRef.current = false; return; } // 等待快取期間 unmount
         if (!cached.empty) {
           cached.docs.forEach(d => store.set(d.id, toObj(d)));
           publish();
@@ -139,10 +161,13 @@ export function useNewsFeed(options = {}) {
         }
       } catch { /* 首次造訪無快取，屬正常 */ }
 
+      if (!mountedRef.current) { startingRef.current = false; return; } // 再次確認：建立監聽器前最後一道防線
+
       // ② 只監聽「最新 300 則」範圍：新新聞即時推送、既有文章更新同步
       unsubRef.current = onSnapshot(
         query(baseQuery(), limit(LIVE_LISTEN_LIMIT)),
         snap => {
+          if (!mountedRef.current) return; // 保險：unsubscribe 前的極短暫空窗
           if (snap.metadata.fromCache && snap.empty) return; // 首次無快取的空快取事件
           snap.docChanges().forEach(c => {
             if (c.type !== 'removed') store.set(c.doc.id, toObj(c.doc));
@@ -174,13 +199,18 @@ export function useNewsFeed(options = {}) {
   }, [baseQuery, onFirstPublish]);
 
   useEffect(() => {
+    mountedRef.current = true;
     startOrRetry();
     return () => {
+      // 一定要最先標記 unmounted：讓所有還卡在 await 之後的檢查點
+      // 立刻看到最新狀態，不會在這個 cleanup 執行完之後才失效。
+      mountedRef.current = false;
       if (unsubRef.current) unsubRef.current();
       if (cancelRetryRef.current) cancelRetryRef.current();
       unsubRef.current = null;
       retryRestRef.current = null;
       cancelRetryRef.current = null;
+      startingRef.current = false; // 回復到安全狀態
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);

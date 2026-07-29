@@ -272,6 +272,109 @@ describe('useNewsFeed — 清理與錯誤處理', () => {
     expect(onSnapshot).toHaveBeenCalledTimes(2);
   });
 
+  it('does not create a listener if the component unmounts while the initial cache read is still pending', async () => {
+    let resolveCache;
+    getDocsFromCache.mockReturnValue(new Promise(resolve => { resolveCache = resolve; }));
+
+    const { unmount } = renderHook(() => useNewsFeed());
+    // 卡在 await getDocsFromCache(...)，onSnapshot 還沒被呼叫過。
+    expect(onSnapshot).not.toHaveBeenCalled();
+
+    unmount();
+
+    // 快取讀取在 unmount 之後才 resolve：不該繼續建立監聽器。
+    await act(async () => {
+      resolveCache({ empty: true, size: 0, docs: [] });
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(onSnapshot).not.toHaveBeenCalled();
+  });
+
+  it('does not call onFirstPublish when the component unmounts before the cache read resolves, even if the cache has data', async () => {
+    let resolveCache;
+    getDocsFromCache.mockReturnValue(new Promise(resolve => { resolveCache = resolve; }));
+    const onFirstPublish = vi.fn();
+
+    const { unmount } = renderHook(() => useNewsFeed({ onFirstPublish }));
+    unmount();
+
+    await act(async () => {
+      resolveCache({
+        empty: false, size: 1,
+        docs: [fakeDoc('c1', { title: '快取新聞', pubDate: new Date() })],
+      });
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(onFirstPublish).not.toHaveBeenCalled();
+    expect(onSnapshot).not.toHaveBeenCalled();
+  });
+
+  it('does not publish or schedule a retry when the component unmounts while a rest-fetch is pending (success case)', async () => {
+    let resolveRest;
+    getDocsFromServer.mockReturnValue(new Promise(resolve => { resolveRest = resolve; }));
+
+    const { unmount } = renderHook(() => useNewsFeed());
+    await waitFor(() => expect(onSnapshot).toHaveBeenCalledTimes(1));
+
+    await act(async () => {
+      onSnapshotNext(fakeSnapshot({ fromCache: false, docs: [fakeDoc('live-1', { title: 'A', pubDate: new Date() })] }));
+      await Promise.resolve();
+    });
+    expect(getDocsFromServer).toHaveBeenCalledTimes(1);
+
+    unmount();
+    expect(unsubSpy).toHaveBeenCalledTimes(1); // 既有監聽器仍須正常 unsubscribe
+
+    await act(async () => {
+      resolveRest({ docs: [fakeDoc('rest-1', { title: 'B', pubDate: new Date() })] });
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    // rest-fetch 在 unmount 之後才成功：不該再嘗試 setState，也不該再建立監聽
+    expect(onSnapshot).toHaveBeenCalledTimes(1);
+    expect(getDocsFromServer).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not schedule a retry when the component unmounts while a rest-fetch is pending and it later fails', async () => {
+    vi.useFakeTimers();
+    let rejectRest;
+    getDocsFromServer.mockReturnValue(new Promise((_resolve, reject) => { rejectRest = reject; }));
+
+    const { unmount } = renderHook(() => useNewsFeed());
+    await vi.waitFor(() => expect(onSnapshot).toHaveBeenCalledTimes(1));
+
+    await act(async () => {
+      onSnapshotNext(fakeSnapshot({ fromCache: false, docs: [fakeDoc('live-1', { title: 'A', pubDate: new Date() })] }));
+      await Promise.resolve();
+    });
+    expect(getDocsFromServer).toHaveBeenCalledTimes(1);
+
+    unmount();
+
+    await act(async () => {
+      rejectRest(new Error('down after unmount'));
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    // 失敗發生在 unmount 之後：不該安排自動重試（時間到了也不會再呼叫一次）
+    await act(async () => { await vi.advanceTimersByTimeAsync(20000); });
+    expect(getDocsFromServer).toHaveBeenCalledTimes(1);
+  });
+
+  it('a normal mount (no unmount race) still creates exactly one listener', async () => {
+    getDocsFromCache.mockResolvedValue({ empty: true, size: 0, docs: [] });
+    renderHook(() => useNewsFeed());
+    await waitFor(() => expect(onSnapshot).toHaveBeenCalledTimes(1));
+    await act(async () => { await Promise.resolve(); });
+    expect(onSnapshot).toHaveBeenCalledTimes(1);
+  });
+
   it('cancels a pending retry timer on unmount, so it does not fire after the component is gone', async () => {
     vi.useFakeTimers();
     getDocsFromServer.mockRejectedValue(new Error('down'));
