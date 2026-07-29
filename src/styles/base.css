@@ -1,0 +1,103 @@
+:root {
+  --page: #f5f6f8;
+  --surface: #ffffff;
+  --surface-soft: #f2f5f8;
+  --line: #e5e7eb;
+  --text: #1f2937;
+  --muted: #64748b;
+  --brand: #960014;
+}
+body { font-family: 'Segoe UI', system-ui, -apple-system, sans-serif; background: var(--page); color:var(--text); }
+.line-clamp-2 { display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden; }
+.line-clamp-3 { display:-webkit-box; -webkit-line-clamp:3; -webkit-box-orient:vertical; overflow:hidden; }
+@keyframes fadeIn { from { opacity:0; transform:translateY(8px); } to { opacity:1; transform:translateY(0); } }
+.fade-in { animation: fadeIn .3s ease-out; }
+@keyframes spin { to { transform:rotate(360deg); } }
+.spin { animation: spin 1s linear infinite; display:inline-block; }
+::-webkit-scrollbar { width:4px; height:4px; }
+::-webkit-scrollbar-track { background:#f1f5f9; }
+::-webkit-scrollbar-thumb { background:#cbd5e1; border-radius:4px; }
+
+/* 白底介面：保留既有元件結構，只覆寫原本的深色樣式。 */
+.light-theme { background:var(--page) !important; color:var(--text) !important; }
+.light-theme .bg-gray-900 { background-color:var(--surface) !important; }
+.light-theme .bg-gray-900\/30,
+.light-theme .bg-gray-800\/40,
+.light-theme .bg-gray-800\/60,
+.light-theme .bg-gray-800\/80 { background-color:var(--surface-soft) !important; }
+.light-theme .bg-gray-800,
+.light-theme .bg-gray-700 { background-color:#eef1f5 !important; }
+/* 灰色框線改為透明：區塊改用背景色深淺區隔（page < surface-soft < surface），
+   不再靠外框線分隔，減少多層 div 疊框造成的視覺干擾。彩色徽章（如
+   text-green-300 系列）的邊框不在此列，維持原本的色塊配色。 */
+.light-theme .border-gray-800\/40,
+.light-theme .border-gray-700,
+.light-theme .border-gray-700\/40,
+.light-theme .border-gray-700\/60,
+.light-theme .border-gray-600,
+.light-theme .border-gray-600\/50,
+.light-theme .border-gray-600\/60 { border-color:transparent !important; }
+.light-theme .text-gray-200,
+.light-theme .text-gray-300 { color:#334155 !important; }
+.light-theme .text-gray-400 { color:#475569 !important; }
+.light-theme .text-gray-500,
+.light-theme .text-gray-600,
+.light-theme .text-gray-700 { color:var(--muted) !important; }
+.light-theme .hover\:bg-gray-800:hover,
+.light-theme .hover\:bg-gray-800\/20:hover,
+.light-theme .hover\:bg-gray-700:hover { background-color:#e8edf3 !important; }
+.light-theme .hover\:text-gray-200:hover { color:#111827 !important; }
+.light-theme .hover\:border-gray-600:hover { border-color:#cbd5e1 !important; }
+.light-theme .from-red-950\/25 { --tw-gradient-from:rgba(150,0,20,.06) var(--tw-gradient-from-position) !important; }
+.light-theme .to-gray-900 { --tw-gradient-to:#fff var(--tw-gradient-to-position) !important; }
+.light-theme table { color:#334155; }
+.light-theme input,
+.light-theme select { color:#1f2937; background:#fff; border-color:#d1d5db; }
+/* 統一文字色彩：主資訊深灰、次要資訊灰藍、互動標題使用品牌紅。 */
+.light-theme .text-ink { color:#1f2937 !important; }
+.light-theme .text-secondary { color:#475569 !important; }
+.light-theme .content-title { color:#334155 !important; }
+.light-theme .group:hover .content-title { color:var(--brand) !important; }
+.light-theme button:focus-visible,
+.light-theme a:focus-visible { outline:3px solid rgba(150,0,20,.22); outline-offset:2px; }
+
+/* 深色版的彩色標籤轉成適合白底閱讀的柔和色票。 */
+.light-theme .bg-green-900\/40 { background:#ecfdf5 !important; }
+.light-theme .text-green-300 { color:#047857 !important; }
+.light-theme .border-green-700\/50 { border-color:#a7f3d0 !important; }
+.light-theme .bg-red-900\/40,
+.light-theme .bg-red-900\/60 { background:#fff1f2 !important; }
+.light-theme .text-red-300 { color:#be123c !important; }
+.light-theme .border-red-700\/40,
+.light-theme .border-red-700\/50 { border-color:#fecdd3 !important; }
+/* 漲跌／警示指標文字（原本只給了「-300」徽章配色，這幾個「-400/-500」
+   指標色沒跟著覆寫，在白底上維持深色系原本的高亮色，太亮不易閱讀）。
+   用中間色階（600），比徽章的 -300 深色版更淺、紅綠更好分辨，
+   同時比原本的 -400/-500 亮色在白底上清楚。*/
+.light-theme .text-green-400,
+.light-theme .text-green-400\/80 { color:#16a34a !important; }
+.light-theme .text-red-400,
+.light-theme .text-red-400\/70,
+.light-theme .text-red-400\/80 { color:#dc2626 !important; }
+.light-theme .text-amber-500,
+.light-theme .text-amber-500\/80 { color:#d97706 !important; }
+.light-theme .bg-blue-900\/60 { background:#eff6ff !important; }
+.light-theme .text-blue-300 { color:#1d4ed8 !important; }
+.light-theme .border-blue-700\/50 { border-color:#bfdbfe !important; }
+.light-theme .bg-yellow-900\/10,
+.light-theme .bg-yellow-900\/60 { background:#fffbeb !important; }
+.light-theme .text-yellow-300 { color:#a16207 !important; }
+.light-theme .border-yellow-700\/50,
+.light-theme .border-yellow-800\/30 { border-color:#fde68a !important; }
+.light-theme .bg-orange-900\/60 { background:#fff7ed !important; }
+.light-theme .text-orange-300 { color:#c2410c !important; }
+.light-theme .border-orange-700\/50 { border-color:#fed7aa !important; }
+.light-theme .bg-purple-900\/60 { background:#faf5ff !important; }
+.light-theme .text-purple-300 { color:#7e22ce !important; }
+.light-theme .border-purple-700\/50 { border-color:#e9d5ff !important; }
+.light-theme .bg-pink-900\/60 { background:#fdf2f8 !important; }
+.light-theme .text-pink-300 { color:#be185d !important; }
+.light-theme .border-pink-700\/50 { border-color:#fbcfe8 !important; }
+.light-theme .bg-cyan-900\/60 { background:#ecfeff !important; }
+.light-theme .text-cyan-300 { color:#0e7490 !important; }
+.light-theme .border-cyan-700\/50 { border-color:#a5f3fc !important; }
