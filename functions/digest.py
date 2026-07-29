@@ -182,13 +182,13 @@ def build_digest_email(label, items, now=None, lang='zh'):
             )
             card_html_parts.append(f'''
         <tr>
-          <td style="padding:14px 0;border-bottom:1px solid #e5e7eb;font-family:{FONT_STACK};">
-            <span style="display:inline-block;font-family:{FONT_STACK};font-size:11px;font-weight:bold;color:#ffffff;
-                         background:{badge_color};border-radius:10px;padding:2px 8px;margin-bottom:6px;">
+          <td style="padding:16px 0;border-bottom:1px solid #e5e7eb;font-family:{FONT_STACK};">
+            <span style="display:inline-block;font-family:{FONT_STACK};font-size:14px;font-weight:bold;color:#ffffff;
+                         background:{badge_color};border-radius:10px;padding:4px 10px;margin-bottom:8px;">
               {html.escape(badge_label)}
             </span>
-            <div style="font-family:{FONT_STACK};font-size:15px;font-weight:600;line-height:1.5;margin-top:4px;">{title_html}</div>
-            <div style="font-family:{FONT_STACK};font-size:12px;color:#6b7280;margin-top:4px;">{source}</div>
+            <div style="font-family:{FONT_STACK};font-size:18px;font-weight:600;line-height:1.5;margin-top:6px;">{title_html}</div>
+            <div style="font-family:{FONT_STACK};font-size:14px;color:#6b7280;margin-top:6px;">{source}</div>
           </td>
         </tr>''')
 
@@ -196,7 +196,7 @@ def build_digest_email(label, items, now=None, lang='zh'):
 
     items_html = (
         ''.join(card_html_parts) if items else
-        f'<tr><td style="padding:24px 0;color:#6b7280;font-size:14px;font-family:{FONT_STACK};">{html.escape(empty_line)}</td></tr>'
+        f'<tr><td style="padding:24px 0;color:#6b7280;font-size:16px;font-family:{FONT_STACK};">{html.escape(empty_line)}</td></tr>'
     )
 
     html_body = f'''<!doctype html>
@@ -218,8 +218,8 @@ def build_digest_email(label, items, now=None, lang='zh'):
           <tr>
             <td style="background:{BRAND_COLOR};padding:20px 24px;font-family:{FONT_STACK};">
               <img src="{LOGO_URL}" alt="Transcend" height="22" style="display:block;border:0;">
-              <div style="font-family:{FONT_STACK};color:#ffffff;font-size:16px;font-weight:bold;margin-top:10px;">{html.escape(label)}</div>
-              <div style="font-family:{FONT_STACK};color:rgba(255,255,255,0.7);font-size:12px;margin-top:2px;">{header_sub}</div>
+              <div style="font-family:{FONT_STACK};color:#ffffff;font-size:19px;font-weight:bold;margin-top:10px;">{html.escape(label)}</div>
+              <div style="font-family:{FONT_STACK};color:rgba(255,255,255,0.7);font-size:14px;margin-top:2px;">{header_sub}</div>
             </td>
           </tr>
           <tr>
@@ -230,7 +230,7 @@ def build_digest_email(label, items, now=None, lang='zh'):
             </td>
           </tr>
           <tr>
-            <td style="padding:16px 24px;background:#f8fafc;color:#9ca3af;font-size:11px;font-family:{FONT_STACK};">
+            <td style="padding:16px 24px;background:#f8fafc;color:#9ca3af;font-size:13px;font-family:{FONT_STACK};">
               {html.escape(footer_text)}
             </td>
           </tr>
