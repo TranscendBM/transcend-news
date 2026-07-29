@@ -1,5 +1,6 @@
 .firebase/
 node_modules/
+dist/
 firebase-debug.log
 .venv*/
 venv/
