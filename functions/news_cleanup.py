@@ -1,0 +1,225 @@
+"""
+新聞保存期限清理（只保留最近 365 天）。
+
+依 news 文件的 pubDate 判斷是否過期，過期的新聞連同相同 article id 的
+ai_jobs / ai_insights 文件一併刪除，避免孤兒資料。刻意不使用 Firestore
+TTL policy（那是額外付費功能，且 TTL 刪除時機不可控、無法先 dry-run
+確認範圍），改用排程 + 查詢分頁的方式自行實作，行為完全可預測、可測試。
+
+安全原則：
+- 只用 Firestore 查詢（where + order_by + limit）挑出候選文件，絕不把
+  整個 news 集合讀進記憶體篩選。
+- pubDate 缺失、型別不是合法 datetime 時一律跳過並記錄警告，不冒險判定
+  為過期——Firestore 的不等式查詢（`<`）本身就會排除欄位缺失或型別不一致
+  的文件，這裡的型別檢查是額外一層防禦，避免資料庫出現非預期格式時誤刪。
+- 分頁游標用「前一頁最後一筆文件的 snapshot」（start_after），不依賴
+  刪除動作本身推進分頁——因此 dry_run（完全不刪除）也能正確走完整個
+  過期範圍去統計數量與最舊/最新日期。
+- 真正執行刪除時，每頁最多 ARTICLES_PER_BATCH 篇文章會被放進同一個
+  Firestore WriteBatch，一次原子提交該頁所有文章的 news + ai_jobs +
+  ai_insights 三個集合的刪除（寧可整批失敗即可重試，也不要 news 刪了、
+  關聯文件卻因為分開提交而部分失敗變成孤兒）。單一 WriteBatch 最多
+  500 次操作，三個集合合計 = ARTICLES_PER_BATCH * 3，所以
+  ARTICLES_PER_BATCH 上限是 166；這裡取 150 留安全餘裕。
+- 每次執行最多刪除 MAX_DELETIONS_PER_RUN 篇，避免第一次補跑（可能累積
+  一次性大量過期新聞）超時，或瞬間對 Firestore 打出過量寫入操作；跑不完
+  的部分留到下一次排程繼續清（下次執行會重新查詢，已刪除的文件不會再
+  出現，天然冪等，不需要額外的跨次執行游標）。
+"""
+
+import datetime
+import logging
+
+logger = logging.getLogger(__name__)
+
+NEWS_RETENTION_DAYS = 365
+
+# 與 news 文件一併清理的關聯集合（依相同 article id 尋找對應文件）。
+# 不得動到 stocks / revenue / financials / dividends / material / daily /
+# meta 等其他集合。
+RELATED_COLLECTIONS = ('ai_jobs', 'ai_insights')
+
+# 單一 WriteBatch 最多 500 次操作；三個集合合計 = ARTICLES_PER_BATCH * 3，
+# 上限為 166（500 // 3），這裡取 150 留安全餘裕。
+ARTICLES_PER_BATCH = 150
+
+# 單次排程執行最多刪除筆數，其餘留到下次排程繼續清理。
+MAX_DELETIONS_PER_RUN = 2000
+
+
+def _retention_cutoff(now, retention_days):
+    """純函式：pubDate 嚴格早於這個時間點的新聞視為過期（不含邊界本身）。"""
+    return now - datetime.timedelta(days=retention_days)
+
+
+def _is_valid_pub_date(value):
+    return isinstance(value, datetime.datetime)
+
+
+def _query_expired_page(db, cutoff, page_size, start_after_snap):
+    """
+    查一頁 pubDate 早於 cutoff 的 news 文件，依 pubDate 由舊到新排序，
+    只回傳最多 page_size 筆。只用 where/order_by/limit（+ start_after
+    分頁游標），不讀取整個 news 集合。
+    """
+    query = (db.collection('news')
+               .where('pubDate', '<', cutoff)
+               .order_by('pubDate')
+               .limit(page_size))
+    if start_after_snap is not None:
+        query = query.start_after(start_after_snap)
+    return list(query.stream())
+
+
+def _iter_expired_pages(db, cutoff, page_size):
+    """
+    依序 yield 每一頁過期新聞的 document snapshot list，直到沒有更多為止。
+    游標是「前一頁最後一筆的 snapshot」，不依賴刪除動作推進——
+    因此 dry_run（完全不刪除）也能正確分頁走完整個過期範圍。
+    """
+    cursor = None
+    while True:
+        page = _query_expired_page(db, cutoff, page_size, cursor)
+        if not page:
+            return
+        yield page
+        cursor = page[-1]
+
+
+def _valid_ids_in_page(page, on_invalid):
+    """
+    從一頁 snapshot 中過濾出 pubDate 為合法 datetime 的文件 id 清單。
+    pubDate 缺失或型別無效時呼叫 on_invalid(snap) 記錄，並且不列入清單
+    （不冒險判定為過期、不刪除）。
+    回傳 [(doc_id, pub_date), ...]，維持頁面原本的（依 pubDate 由舊到新）順序。
+    """
+    result = []
+    for snap in page:
+        data = snap.to_dict() or {}
+        pub = data.get('pubDate')
+        if not _is_valid_pub_date(pub):
+            on_invalid(snap)
+            continue
+        result.append((snap.id, pub))
+    return result
+
+
+def _log_invalid_pub_date(snap):
+    logger.warning(
+        'news_cleanup: 文件 news/%s 的 pubDate 缺失或格式無效，'
+        '略過刪除（不冒險判定為過期）', snap.id)
+
+
+def _scan_dry_run(db, cutoff, page_size):
+    """
+    只統計：預計刪除筆數、最舊/最新過期 pubDate、略過的異常文件數。
+    完全不呼叫任何 delete。
+    """
+    matched = 0
+    skipped_invalid = 0
+    oldest = None
+    newest = None
+
+    def on_invalid(snap):
+        nonlocal skipped_invalid
+        skipped_invalid += 1
+        _log_invalid_pub_date(snap)
+
+    for page in _iter_expired_pages(db, cutoff, page_size):
+        for _doc_id, pub in _valid_ids_in_page(page, on_invalid):
+            matched += 1
+            if oldest is None or pub < oldest:
+                oldest = pub
+            if newest is None or pub > newest:
+                newest = pub
+
+    return {
+        'dry_run': True,
+        'matched': matched,
+        'oldest': oldest,
+        'newest': newest,
+        'skipped_invalid': skipped_invalid,
+    }
+
+
+def _delete_batch(db, article_ids):
+    """
+    以單一 WriteBatch 原子刪除這一批文章的 news + 關聯集合文件。
+    關聯文件不論是否存在都送出 delete（Firestore 對不存在的文件
+    delete 是合法且冪等的操作，仍計入該次 batch 的操作數）。
+    """
+    batch = db.batch()
+    for article_id in article_ids:
+        batch.delete(db.collection('news').document(article_id))
+        for coll in RELATED_COLLECTIONS:
+            batch.delete(db.collection(coll).document(article_id))
+    batch.commit()
+
+
+def _delete_expired(db, cutoff, page_size, max_deletions):
+    """
+    實際刪除過期新聞（連同關聯集合），最多刪除 max_deletions 篇。
+    回傳的 remaining=True 代表這次因達到 max_deletions 上限而中止，
+    可能還有更多過期新聞留到下次排程處理。
+    """
+    deleted = 0
+    skipped_invalid = 0
+    remaining = False
+
+    def on_invalid(snap):
+        nonlocal skipped_invalid
+        skipped_invalid += 1
+        _log_invalid_pub_date(snap)
+
+    for page in _iter_expired_pages(db, cutoff, page_size):
+        valid = _valid_ids_in_page(page, on_invalid)
+        if not valid:
+            continue
+
+        room = max_deletions - deleted
+        if room <= 0:
+            remaining = True
+            break
+
+        chunk = valid[:room]
+        if len(chunk) < len(valid):
+            remaining = True
+
+        _delete_batch(db, [article_id for article_id, _pub in chunk])
+        deleted += len(chunk)
+
+        if deleted >= max_deletions:
+            remaining = True
+            break
+
+    return {
+        'dry_run': False,
+        'deleted': deleted,
+        'skipped_invalid': skipped_invalid,
+        'remaining': remaining,
+    }
+
+
+def cleanup_expired_news(db, now=None, dry_run=True,
+                          retention_days=NEWS_RETENTION_DAYS,
+                          page_size=ARTICLES_PER_BATCH,
+                          max_deletions=MAX_DELETIONS_PER_RUN):
+    """
+    刪除（或 dry_run 模式下只統計）pubDate 嚴格早於 retention_days 天前
+    的 news 文件，並同步刪除相同 id 的 ai_jobs / ai_insights 文件。
+
+    dry_run=True（預設，安全值）：只統計預計刪除筆數、最舊/最新過期
+      pubDate、略過的異常文件數，不執行任何 delete。
+    dry_run=False：實際刪除，每頁最多 page_size 篇文章、一個 WriteBatch
+      原子刪除該頁所有文章的 news + ai_jobs + ai_insights 文件；單次
+      執行最多刪除 max_deletions 篇，其餘留到下次排程繼續清理。
+
+    回傳 dict：
+      dry_run=True：{dry_run, matched, oldest, newest, skipped_invalid}
+      dry_run=False：{dry_run, deleted, skipped_invalid, remaining}
+    """
+    now = now or datetime.datetime.now(datetime.timezone.utc)
+    cutoff = _retention_cutoff(now, retention_days)
+    if dry_run:
+        return _scan_dry_run(db, cutoff, page_size)
+    return _delete_expired(db, cutoff, page_size, max_deletions)
