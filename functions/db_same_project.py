@@ -30,11 +30,10 @@ projectId 來避免連錯專案）。
      專案那把對應的 service account 金鑰（撤銷前務必確認沒有其他用途
      還在用它）。
 
-Rollback（切換後如果需要退回）：
-  - MONITOR_SERVICE_ACCOUNT secret 保留不動、main.py 的舊 get_db() 版本
-    保留在 git 歷史中，回退就是把上面 1–3 的異動 revert 掉重新部署——
-    因為 transcend-news-monitor 的資料本身在整個搬遷/切換過程中完全
-    沒被修改或刪除，回退不會遺失任何資料。
+Rollback（切換後如果需要退回）：見 docs/firestore-migration/README.md
+的「Rollback 步驟」——切換後一旦 transcend-news-tbm 已經有新寫入，回退
+不再是「單純改回舊設定」這麼簡單，必須先暫停 writer、決定以哪邊資料為
+準、同步資料後才能切回，避免兩個專案同時接受寫入造成 split-brain。
 """
 
 import firebase_admin
@@ -49,10 +48,20 @@ def get_db():
     自己所在的專案（不需要、也不應該再傳 projectId——ADC 在 Cloud
     Functions 環境下已經知道自己是哪個專案，手動指定反而增加打錯的
     風險）。
+
+    先呼叫 firebase_admin.get_app() 確認有沒有現成的 default app，只有
+    在真的不存在（ValueError）時才 initialize_app()——直接呼叫
+    initialize_app() 在 default app 已經存在時會拋出
+    'The default Firebase app already exists' 錯誤（例如同一個執行環境
+    中有其他模組已經先建立過 default app），先檢查再視情況建立可以
+    正確重用既有的 app，不會因為呼叫順序而炸掉。
     """
     global _db
     if _db is None:
-        app = firebase_admin.initialize_app()
+        try:
+            app = firebase_admin.get_app()
+        except ValueError:
+            app = firebase_admin.initialize_app()
         _db = firestore.client(app=app)
         print('✅ Firestore 已連線（同專案 Application Default Credentials）')
     return _db

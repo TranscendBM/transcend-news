@@ -145,30 +145,61 @@ python3 tools/migrate_firestore.py \
 
 - **冪等**：文件 ID 完全比照來源，重跑只會覆寫成跟來源一致，不會產生
   重複資料。
-- **分頁**：依文件 ID（或 `news` 的 `pubDate`）排序分頁讀取，不會把整個
-  集合讀進記憶體。
-- **批次上限**：每個 WriteBatch 預設 400 筆、硬性拒絕超過 500。
-- **可安全中斷重跑**：`--checkpoint-file` 記錄每個集合目前搬到哪個文件
-  ID（只存 ID，不存內容）；某個 batch 寫入失敗時，該集合本次執行就此
-  停止（不會讓 checkpoint 被後面剛好成功的 batch 推到失敗點前面而遺漏
-  資料），下次重跑會從上一個成功的 checkpoint 繼續。
+- **分頁**：依文件 ID（或 `news` 的 `(pubDate, 文件 ID)` 複合排序，文件
+  ID 當穩定 tie-breaker，避免 pubDate 相同時分頁順序不穩定漏筆）排序
+  分頁讀取，不會把整個集合讀進記憶體。
+- **批次上限**：每個 WriteBatch 預設 400 筆、必須 > 0、硬性拒絕超過 500。
+- **可安全中斷重跑（fail-closed checkpoint）**：`stocks`/`revenue`/
+  `financials`/`dividends`/`material`/`daily`/`news`/`meta` 支援
+  `--checkpoint-file`，記錄每個集合「最後成功寫入的 Firestore 排序
+  游標值」（不是文件 ID 是否還存在的比對——即使該筆之後被刪除或不再
+  符合條件，游標值本身仍能正確定位分頁位置）。checkpoint 綁定這次執行
+  的來源/目的專案、cutoff、集合清單、page_size 與格式版本；任何一項
+  對不上、或檔案損毀，一律視為不可用、記錄警告、對應集合從頭開始
+  （絕不靜默沿用不符的舊 checkpoint，也絕不因為 cursor 無法確認就跳過
+  整個集合）。checkpoint 檔案採 atomic write（暫存檔 + fsync +
+  `os.replace()`），不會留下損毀的半寫入檔案。`ai_jobs`/`ai_insights`
+  刻意不支援 checkpoint——這兩個集合是依 news id 清單逐筆查詢，沒有
+  自然的 Firestore 分頁游標，以目前的資料量直接整個重新冪等執行更
+  簡單可靠。某個 batch 寫入失敗時，該集合本次執行就此停止。
 - **範圍**：`news` 只搬「本月＋上個月」（跟 `functions/news_cleanup.py`
   的保留政策同一份邏輯，見 `tests/test_migrate_firestore.py` 的一致性
   測試）；`ai_jobs`/`ai_insights` 只搬對應到本次搬移的 `news` 文件的
   那些；`meta` 只搬白名單（見第 3 節）。
+- **`--copy` 強制前置安全檢查**：執行寫入前一律先做一次等同 `--dry-run`
+  的掃描，發現任何一種情況就直接拒絕執行，**沒有任何旗標可以略過**：
+  來源端有未知頂層集合、任何文件底下有子集合（本工具不支援搬移子集合
+  內容）、或有未分類的 `meta` 文件。必須先處理清楚或更新程式碼白名單
+  才能繼續。
 - **防呆**：`--source-project` 與 `--dest-project` 相同時直接拒絕執行；
-  `--copy` 沒有額外加 `--i-approve-writing-to-dest` 也會拒絕執行。
-- **不外洩敏感資料**：所有輸出（含錯誤訊息）只包含集合名稱、文件 ID、
-  數量與錯誤類型，絕不印出文件內容或憑證內容
-  （見 `tests/test_migrate_firestore.py` 的 `TestCredentialErrorsDoNotLeakSecrets`）。
+  `--page-size`/`--batch-size` 必須是正整數，`--batch-size` 不得超過
+  500；`--collections` 只能是本工具已知的集合名稱；`--copy` 沒有額外
+  加 `--i-approve-writing-to-dest` 也會拒絕執行。
+- **verify 強化**：除了 `missing_in_dest`/`differs`/`matches`，也統計
+  `extra_in_dest`（目的端多出來、來源沒有的文件）、來源與目的端各自的
+  文件總數、以及目的端有沒有出現未知頂層集合；只要發現任何
+  missing/differs/extra/未知集合，CLI 結束碼回傳 `1`（方便 CI/腳本
+  判斷），一律不寫入任何一端。
+- **不外洩敏感資料**：所有輸出（含錯誤訊息、checkpoint 檔案內容）只包含
+  集合名稱、文件 ID、排序游標值、數量與錯誤類型，絕不印出文件內容或
+  憑證內容（見 `tests/test_migrate_firestore.py` 的
+  `TestCredentialErrorsDoNotLeakSecrets`）。
 
-測試：`tests/test_migrate_firestore.py`（35 個測試，完全離線，用自建的
-`FakeFirestoreDB` 模擬，不需要安裝 `google-cloud-firestore`）涵蓋：
-dry-run 零寫入、分頁與批次上限、重跑冪等、來源/目的專案防呆、lock 文件
-排除、meta allowlist、新聞保留邊界與跨年、部分失敗後可重跑（含
-checkpoint 不會跳過失敗批次的驗證）、verify 找出缺少/不同的文件、
-憑證與錯誤訊息不外洩秘密、跟 `functions/news_cleanup.py` 保留政策的
-一致性、未知頂層集合安全網。
+測試：`tests/test_migrate_firestore.py`（64 個測試）+
+`tests/test_db_same_project.py`（3 個測試），完全離線，用自建的
+`FakeFirestoreDB` 模擬、暫存檔一律用 `tempfile`（不寫死任何固定路徑，
+在 GitHub Actions／任何使用者帳號的乾淨環境都能跑），涵蓋：dry-run
+零寫入、分頁與批次上限（含 page-size/batch-size 必須為正數）、重跑
+冪等、來源/目的專案與 CLI 參數防呆（未知集合名稱拒絕、無 `--force`）、
+lock 文件排除、meta allowlist（含擋下 `--copy`）、新聞保留邊界與跨年、
+新聞 pubDate 相同時的穩定 tie-breaker、子集合安全網（含擋下
+`--copy`）、未知頂層集合安全網（含擋下 `--copy`）、copy 報告
+eligible/success/skipped/failed/excluded 一致性、checkpoint fail-closed
+（checkpoint 文件已刪除、cutoff 改變、來源/目的專案改變、checkpoint
+JSON 損壞、atomic write 不留暫存檔）、部分失敗後可重跑、verify
+找出缺少/不同/多出的文件與非 0 結束碼、憑證與錯誤訊息（含 checkpoint
+檔案）不外洩秘密、跟 `functions/news_cleanup.py` 保留政策的一致性、
+`db_same_project.py` 的 get_app()-優先/新建/singleton 三種情境。
 
 ---
 
@@ -256,41 +287,120 @@ Web App 是會實際建立雲端資源的動作，不屬於本輪「唯讀盤點
 
 ## 8. 正式切換步驟（本輪不執行，供之後參考）
 
-1. 依第 1 節取得 `transcend-news-monitor` 的 `roles/datastore.viewer`。
-2. `--dry-run` 確認真實的集合／文件數（補上第 2 節的「文件數」欄）。
-3. `--copy --i-approve-writing-to-dest`（建議先在非尖峰時段執行，並保留
-   `--checkpoint-file`）。
-4. `--verify` 確認來源與目的端一致（`missing_in_dest`/`differs` 都是空的）。
-5. 依第 6 節切換 Functions（`get_db()` 改用 `db_same_project.py`）並部署。
-6. 依第 6 節建立 Web App、切換前端 `FIREBASE_CONFIG` 並部署 Hosting。
-7. 依第 5/6 節把 Rules／Indexes 部署到 `transcend-news-tbm`。
-8. 觀察至少一個完整排程週期（含每天 02:30 的 `news_cleanup_job`、每天
+關鍵原則：**先把 tbm 端準備到「跟 monitor 行為一致」的狀態並驗證過，
+才暫停排程做最後一次同步，把 writer 切過去**——切換的瞬間 monitor 停止
+接受新寫入、tbm 開始接受新寫入，中間沒有兩邊都在寫的空窗，避免
+split-brain（見第 9 節 rollback 的說明，這也是切換後 rollback 不再是
+「單純改回舊設定」的原因）。
+
+**A. 建立 `transcend-news-tbm` Firebase Web App，但先不切換**
+   在 Firebase Console 建立 Web App、取得 `apiKey`/`appId` 等設定值，
+   先記下來，`src/services/firebase.js` 暫時不動。
+
+**B. 先部署 Firestore Rules 與 Indexes 到 `transcend-news-tbm`**
+   把 `docs/firestore-migration/firestore.tbm.{rules,indexes.json}`
+   複製成根目錄檔案，`firebase.json` 暫時加入 `"firestore"` 區塊，
+   `firebase deploy --only firestore:rules,firestore:indexes --project transcend-news-tbm`。
+
+**C. 等 composite index 狀態變成 `Enabled`**
+   在 Console 確認（`news` collection、`cat` Ascending + `pubDate`
+   Descending），通常幾分鐘，視資料量而定。**這一步之前不能有任何
+   讀取流量依賴這個 index**（此時前端還沒切過去，沒有影響）。
+
+**D. initial copy**
+   依第 1 節取得 `transcend-news-monitor` 的 `roles/datastore.viewer`後：
+   ```bash
+   python3 tools/migrate_firestore.py \
+     --source-project transcend-news-monitor --dest-project transcend-news-tbm \
+     --source-credentials <來源唯讀金鑰> --dest-credentials <目的讀寫金鑰> \
+     --checkpoint-file /path/to/checkpoint.json \
+     --copy --i-approve-writing-to-dest
+   ```
+   這時候 monitor 仍然是正式資料庫，Functions/前端都還沒切換，monitor
+   端持續有新資料寫入是預期的——這一步只是把「大部分資料」先搬過去，
+   減少最後停機同步的資料量。
+
+**E. verify**
+   確認 initial copy 沒有嚴重問題（`missing_in_dest`/`differs` 應該很少，
+   因為 monitor 端在 copy 期間仍持續變動是正常的）。
+
+**F. 暫停所有會寫 Firestore 的 Cloud Scheduler jobs**
+   `stocks_job`/`news_job`/`trading_job`/`finance_job`/
+   `finance_early_month_job`/`tw_dram_digest_job`/`us_dram_digest_job`/
+   `news_cleanup_job` 全部暫停（Cloud Scheduler 主控台或
+   `gcloud scheduler jobs pause`）。**從這一刻起，monitor 端不再有新
+   寫入**——這是避免 split-brain 的關鍵：writer 只會存在於這之後才
+   啟用的 tbm 端，不會同時有兩個專案接受寫入。
+
+**G. 不使用舊 checkpoint，執行 final full/delta copy**
+   刻意不沿用步驟 D 的 checkpoint 檔案（換一個新的 `--checkpoint-file`
+   路徑，或不指定）——因為現在 monitor 端已經靜止（writer 暫停），這次
+   要確保是對「靜止狀態」做一次完整、乾淨的同步，不是接續一個可能跨越
+   了 monitor 仍在寫入期間的舊游標。
+
+**H. final verify，必須零 missing、零 differs**
+   `--verify` 的 `missing_in_dest`/`differs`/`extra_in_dest` 必須全部
+   是空的（結束碼 `0`）才能繼續下一步；只要有任何一筆對不上，停下來
+   查清楚原因，不能帶著已知的不一致繼續切換。
+
+**I. 切換並部署 Functions**
+   依第 6 節切換 `main.py` 的 `get_db()`（改用 `db_same_project.py`）、
+   移除 `MONITOR_SERVICE_ACCOUNT` 依賴，
+   `firebase deploy --only functions --project transcend-news-tbm`。
+
+**J. 切換並部署 Hosting**
+   `src/services/firebase.js` 的 `FIREBASE_CONFIG` 換成步驟 A 的值，
+   `npm run build && firebase deploy --only hosting:main --project transcend-news-tbm`。
+
+**K. 做正式網站與 Firestore 寫入驗證**
+   打開正式網站確認資料正常顯示（PR/IR/上游市場三個分頁）、Console 沒有
+   新增錯誤；手動確認至少一次 Functions 執行有成功寫入 tbm 的 Firestore
+   （例如短暫恢復 `stocks_job` 觀察一次股價更新是否寫進 tbm）。
+
+**L. 恢復 Scheduler jobs**
+   確認 K 沒問題後，把步驟 F 暫停的所有 job 恢復正常排程。
+
+**M. 觀察完整排程週期**
+   觀察至少一個完整排程週期（含每天 02:30 的 `news_cleanup_job`、每天
    17:30 的 `finance_job`、平日 08:00/16:30 的兩個摘要信 job）確認一切
-   正常。
-9. 確認無誤且穩定運作一段時間後，才考慮撤銷 `MONITOR_SERVICE_ACCOUNT`
-   secret 與 `transcend-news-monitor` 那把對應金鑰——撤銷前務必再三確認
-   沒有其他用途還在依賴它。**`transcend-news-monitor` 的 Firestore 資料
-   庫本身，在整個流程中都不需要刪除**（多留著也不花費什麼，作為切換後
-   一段時間的最終備援）。
+   正常，才考慮之後撤銷 `MONITOR_SERVICE_ACCOUNT` secret 與
+   `transcend-news-monitor` 那把對應金鑰（撤銷前務必再三確認沒有其他
+   用途還在依賴它）。**`transcend-news-monitor` 的 Firestore 資料庫本身
+   不需要刪除**，作為切換後一段時間的最終備援。
 
 ## 9. Rollback 步驟
 
-因為整個流程中 `transcend-news-monitor` 從頭到尾只被讀取、從未被寫入或
-刪除，任何時間點都可以安全退回：
+**重要更正**：這裡不再宣稱「切換後任何時間都可以直接退回舊專案、不會
+遺失資料」——那個說法只在 monitor 端從頭到尾維持唯讀時才成立。一旦
+`transcend-news-tbm` 開始接受新寫入（第 8 節步驟 F 之後），rollback
+就不再是「單純改回舊設定」，必須先處理資料方向，避免退回後又反過來
+造成 monitor/tbm 兩邊都有寫入的 split-brain：
 
-- **切換 Functions 之後想退回**：把第 8 節步驟 5 的異動 `git revert`，
-  重新 `firebase deploy --only functions`，`MONITOR_SERVICE_ACCOUNT`
-  secret 全程沒有被移除過（除非已經執行了步驟 9），退回後立刻恢復連回
-  `transcend-news-monitor`。
-- **切換前端之後想退回**：把 `FIREBASE_CONFIG` 改回原本指向
-  `transcend-news-monitor` 的值，`npm run build && firebase deploy --only hosting:main`。
-- **部署了 Rules/Indexes 之後想退回**：`transcend-news-monitor` 的
-  Rules/Indexes 完全沒有被這次流程更動過，不需要對它做任何事；
-  `transcend-news-tbm` 上部署的 Rules/Indexes 即使先切回 Functions/前端
-  也不需要立刻撤除（反正沒人在讀寫它，多留著沒有風險）。
-- **最壞情況（切換後才發現資料有問題）**：只要還沒執行第 8 節步驟 9
-  （撤銷 monitor 的憑證/secret），`transcend-news-monitor` 的資料完整
-  保留，上面三步驟合起來就是完整退回；即使已經執行步驟 9，
-  `transcend-news-monitor` 的 Firestore 資料庫本身仍然存在（只是
-  Functions 沒有憑證存取），還原一把新的 service account 金鑰即可恢復
-  存取。
+- **步驟 A–E（Web App 建立／Rules-Indexes 部署／initial copy／verify，
+  Scheduler 尚未暫停）之前想退回**：monitor 端全程唯讀，直接放棄這些
+  準備動作即可，不影響任何正式服務，資料不會遺失。
+- **步驟 F 之後（Scheduler 已暫停，monitor 端不再接受新寫入）想退回，
+  但還沒切換 Functions/Hosting（步驟 I/J 之前）**：把步驟 F 暫停的
+  Scheduler jobs 恢復即可——monitor 端恢復接受寫入，因為 Functions/前端
+  都還沒切換到 tbm，沒有任何一方誤寫，資料不會遺失。
+- **步驟 I/J 之後（Functions/Hosting 已經切到 tbm、tbm 已經有新寫入）
+  想退回**：**不能只是把設定改回去**，必須：
+  1. 先暫停 tbm 端的 Scheduler jobs（此時的 writer）。
+  2. 決定資料方向：把切換後 tbm 新增/變更的資料同步回
+     `transcend-news-monitor`（用 `tools/migrate_firestore.py` 反過來
+     跑一次，`--source-project transcend-news-tbm --dest-project transcend-news-monitor`），
+     或明確決定「以 tbm 的資料為準，放棄 monitor 切換後這段期間錯過的
+     任何外部變化」——兩者只能選一個，不能都不選就切回去。
+  3. `--verify` 確認同步後兩端（或至少 monitor 端）資料一致，才能把
+     Functions/Hosting 設定改回指向 `transcend-news-monitor` 並部署。
+  4. 確認 monitor 端運作正常後，才恢復 Scheduler jobs——同一時間只能有
+     一個專案在接受寫入。
+- **Rules/Indexes**：`transcend-news-monitor` 的 Rules/Indexes 在整個
+  流程中都沒有被更動過，rollback 不需要對它做任何事；
+  `transcend-news-tbm` 上部署的 Rules/Indexes 即使切回 monitor 也不需要
+  立刻撤除（沒人在讀寫它，多留著沒有風險）。
+- **最壞情況（切換後才發現資料有問題，且已經撤銷了
+  `MONITOR_SERVICE_ACCOUNT`）**：`transcend-news-monitor` 的 Firestore
+  資料庫本身仍然存在（只是 Functions 沒有憑證存取），還原一把新的
+  service account 金鑰即可恢復存取，但仍然必須先執行上面「步驟 I/J
+  之後」的資料方向決定與同步流程，不能直接切回去。
