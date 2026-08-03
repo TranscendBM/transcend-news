@@ -167,35 +167,78 @@ result = cleanup_expired_news(db, dry_run=True)
 ## 📡 PR 媒體曝光統計（`src/features/news/usePRNews.js`）
 
 PR 媒體戰情分頁的統計卡片（今天/本週/本月）、重點媒體曝光排行、
-「創見最新報導」清單與其 Excel 匯出，改用獨立的 `usePRNews()` 查詢
-（只 `where('cat', '==', 'transcend')`，不加其他條件），不再從
-`useNewsFeed` 的結果裡篩選：
+「創見最新報導」清單與其 Excel 匯出，全部改用獨立的 `usePRNews()` 查詢，
+不再從 `useNewsFeed` 的結果裡篩選：
 
-- `useNewsFeed` 把全站新聞裁到最新 2000 則，本月＋上個月（現在的資料庫
-  保留範圍）的創見 PR 報導可能被排擠在這個上限之外，導致統計數字跟
-  畫面實際存在的報導對不上；`usePRNews` 直接查 Firestore 的
-  `cat=='transcend'` 分類，不受這個全站上限影響。
-- 只用單一等式篩選（沒有 `orderBy`/其他 `where`），Firestore 對這種
-  查詢一律有自動單欄位索引可用，**不需要手動部署 composite index**。
-  日期篩選（今天/本週/本月）在前端用查回來的完整 `transcend` 分類資料
-  自行計算，不會為了統計去讀整個 `news` 集合。
+```
+where('cat', '==', 'transcend')
+where('pubDate', '>=', taipeiMonthStart(now))   // 只查「本月」（Asia/Taipei）
+orderBy('pubDate', 'desc')
+```
+
+- **只查本月，不是整個 `transcend` 分類。** 最初的版本只有
+  `where('cat','==','transcend')`，在正式資料庫實測會直接讀取全部
+  **9,519 筆** `transcend` 文件——即使資料庫已經只保留「本月＋上個月」，
+  `transcend` 這個分類單獨的文件量仍可能達到數千筆（例如清理排程尚未
+  清完舊資料的過渡期），PR 統計卻只需要「本月」的資料，沒有理由連
+  上個月都讀進來。加上 `pubDate >=` 條件後，讀取量上限等於「本月全部
+  分類新聞則數」（實測當時約 289 則，`transcend` 只是其中一部分，
+  隨當月新聞量變動，沒有固定值）。
+- **不會 fallback 成不限日期的查詢**：查詢失敗（含缺少 index 時的
+  `FAILED_PRECONDITION`）一律顯示明確錯誤狀態，絕不悄悄退回讀全部
+  `transcend` 文件的舊行為。
+- 這個查詢需要 **Firestore composite index**（`cat` ASC + `pubDate`
+  DESC），定義在 repo 根目錄的 `firestore.indexes.json`——**這個檔案
+  刻意沒有被 `firebase.json` 引用**，本輪也**沒有部署**，避免日常
+  `firebase deploy` 意外對 Firestore 動作，也避免打到錯誤的專案
+  （這個 index 屬於 **`transcend-news-monitor`**，不是 Hosting/Functions
+  用的 `transcend-news-tbm`）。**部署前端這個改動之前，必須先由擁有
+  `transcend-news-monitor` 權限的（舊）帳號建立好這個 index，等狀態
+  變成 `Enabled` 之後才能部署**，否則 PR 頁面會持續顯示查詢失敗。
+  手動建立步驟：
+  1. 用有 `transcend-news-monitor` 權限的帳號登入
+     https://console.firebase.google.com/project/transcend-news-monitor/firestore/indexes
+  2. 「新增索引」→ Collection ID 填 `news`
+  3. 欄位依序加入：`cat`（Ascending）、`pubDate`（Descending）
+  4. Query scope 選 `Collection`
+  5. 建立後等狀態從 `Building` 變成 `Enabled`（通常幾分鐘，視資料量而定）
+  6. 也可以直接複製貼上 `firestore.indexes.json` 的內容用
+     `firebase deploy --only firestore:indexes --project transcend-news-monitor`
+     部署（需要暫時在 `firebase.json` 加入
+     `"firestore": {"indexes": "firestore.indexes.json"}`，用完記得移除，
+     避免留在預設設定裡讓日常 `npm run deploy` 誤打到 Firestore）
+- 跨月處理：`usePRNews` 內部每分鐘檢查一次是否已經跨入新的台灣日曆
+  月份，一旦跨月就取消舊的 `onSnapshot` 監聽器、用新的月份起點重新
+  訂閱，不會停留在已經不是「本月」的舊查詢範圍。
 - 統計卡片、排行榜、清單、匯出全部共用同一份「先過濾 `isValidTranscendPR`、
-  再 `dedupeArticlesByTitle` 去重」後的陣列，確保三處看到的「今天/本週/
-  本月」數字彼此一致、也跟畫面上實際渲染的新聞則數一致。
+  再 `dedupeArticlesByTitle` 去重、再套用搜尋／媒體／情緒篩選」後的
+  陣列，確保這幾處看到的數字彼此一致、也跟畫面上實際渲染的新聞則數
+  一致。PR 分頁上方的篩選工具列（搜尋／媒體／情緒）是整個 PR 頁面
+  唯一的一個篩選工具列，只影響創見 PR 的統計/排行/清單/匯出，不影響
+  下面的競品動態（`CompetitorNews` 仍是自己一份獨立的期間篩選，跟這個
+  工具列無關，避免同一個工具列的數字被誤讀成涵蓋兩份互不相干的清單）。
 - 期間邊界（今天/本週/本月）一律用 `src/utils/dates.js` 的
   `taipeiDayStart`／`taipeiWeekStart`／`taipeiMonthStart`（固定 UTC+8
   換算），跟後端 `news_cleanup.py` 的「本月＋上個月」保留範圍用同一套
   Asia/Taipei 時區定義，不依賴使用者瀏覽器的本地時區。
-- 查詢失敗時會顯示明確的錯誤狀態（`⚠ 載入失敗`），不會悄悄顯示看起來
-  正常的 0。
+- 查詢失敗時會顯示明確的錯誤狀態（`⚠ 載入失敗`／`⚠ 資料載入失敗`），
+  不會悄悄顯示看起來正常的 0；按頁面上的「重新整理」（或個別面板的
+  重試按鈕）可以重新啟動失敗的查詢。
 
-**讀取量粗估**：新訪客首次載入這個查詢，讀取數 ≈ 資料庫裡 `cat==
-'transcend'` 的文件總數（不是全站 `news` 文件數）。保留範圍改成「本月＋
-上個月」之後，這個分類的文件數大幅低於過去 365 天/全部歷史的量級——
-實際數字取決於當月創見 PR 報導的實際篇數，沒有固定值，也**不保證** Firestore
-本機快取一定完全命中（快取能大幅降低重複訪問的讀取量，但不是 0 次讀取
-的保證）；仍遠低於「讀整個 news 集合」的讀取量，且開新分頁後同一個
-瀏覽器由 `onSnapshot` 監聽增量更新，不會每次都整批重新讀取。
+**讀取量修正前後比較**（依 Codex 在正式資料庫的唯讀測試）：
+
+| | 舊設計（只 `cat==transcend`） | 新設計（`cat==transcend` + 本月 `pubDate`） |
+|---|---|---|
+| 讀取範圍 | 全部 `transcend` 文件 | 本月的 `transcend` 文件 |
+| 讀取量（實測當下） | 9,519 筆 | ≤ 289 筆（本月全部分類新聞則數，`transcend` 只是其中一部分） |
+
+實際數量隨當月新聞量變動，不是固定值。
+
+**關於快取，正確的說法（避免過度保證）**：
+- IndexedDB／多分頁本機快取通常可以減少重複訪問時的讀取量。
+- 但 listener 中斷太久、快取失效，或（如跨月）需要重新建立查詢時，
+  仍可能重新計算/重新產生讀取——**不是**「開新分頁就保證 0 次讀取」
+  或「一定只計異動文件」，只是實務上通常會比較省。
 
 ## 🚀 前端部署（Firebase Hosting）
 
@@ -251,6 +294,7 @@ firebase deploy --only functions
 ├── public/
 │   └── index.html                # 前端網頁（Firebase Hosting 只部署此目錄）
 ├── firestore.rules               # Firestore 安全規則（屬於 transcend-news-monitor 專案）
+├── firestore.indexes.json        # Firestore composite index 定義（屬於 transcend-news-monitor 專案，未被 firebase.json 引用、本輪未部署，見上方 PR 媒體曝光統計章節）
 ├── firebase.json / .firebaserc   # Firebase Hosting 設定（transcend-news-tbm 專案）
 ├── .github/
 │   └── workflows/                # GitHub Actions（僅手動備援；正式排程在 Cloud Functions）
