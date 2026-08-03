@@ -1,12 +1,19 @@
 import { useMemo } from 'react';
 import Card from '../../components/Card.jsx';
 import { dedupeArticlesByTitle, getBriefingMeta, getActionSuggestion } from '../../utils/news.js';
-import { fmtDate } from '../../utils/dates.js';
+import { fmtDate, taipeiDayStart } from '../../utils/dates.js';
+import { useNow } from '../../hooks/useNow.js';
 
 export default function TodayBriefing({ articles, title = '今日情報快報' }) {
+  // useNow()：「今天」必須用 Asia/Taipei 日曆邊界（taipeiDayStart），不是
+  // 瀏覽器本地時區的 getFullYear/getMonth/getDate——本地時區不保證是
+  // 台灣，跟後端 news_cleanup.py、usePRNews/useUpstreamNews 的期間篩選
+  // 用同一套時區定義才不會兜不起來。useMemo 依賴也必須包含 now：頁面
+  // 開著跨過台灣午夜時，即使 articles 完全沒變，也要重新計算「今天」
+  // 的邊界並讓已經不屬於今天的文章自動退出清單。
+  const now = useNow();
   const items = useMemo(() => {
-    const now = new Date();
-    const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    const todayStart = taipeiDayStart(now);
     const today = dedupeArticlesByTitle(articles).filter(n => {
       const d = n.pubDate?.toDate ? n.pubDate.toDate() : new Date(n.pubDate || 0);
       return d.getTime() >= todayStart.getTime();
@@ -19,7 +26,7 @@ export default function TodayBriefing({ articles, title = '今日情報快報' }
       .filter(item => item.meta.kind !== 'news')
       .sort((a, b) => b.meta.score - a.meta.score)
       .slice(0, 6);
-  }, [articles]);
+  }, [articles, now]);
 
   const summary = useMemo(() => ({
     important: items.length,
