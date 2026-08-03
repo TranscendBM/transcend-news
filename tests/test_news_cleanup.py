@@ -1,5 +1,5 @@
 """
-functions/news_cleanup.py（新聞保存期限清理，只留最近 365 天）單元測試 — 完全離線
+functions/news_cleanup.py（新聞保存期限清理，只留本月＋上個月）單元測試 — 完全離線
 
 用自建的 FakeCleanupDB 模擬 Firestore 的 where/order_by/limit/start_after
 分頁查詢與 WriteBatch delete，不需安裝 firebase_admin / google-cloud-firestore，
@@ -22,11 +22,20 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent / 'functions'))
 import news_cleanup  # noqa: E402
 
 TZ_UTC = datetime.timezone.utc
+TAIPEI = news_cleanup.TAIPEI_TZ
 NOW = datetime.datetime(2027, 1, 1, 0, 0, tzinfo=TZ_UTC)
 
 
 def _days_ago(n, now=NOW):
     return now - datetime.timedelta(days=n)
+
+
+def _taipei(year, month, day, hour=0, minute=0, second=0):
+    return datetime.datetime(year, month, day, hour, minute, second, tzinfo=TAIPEI)
+
+
+def _utc(year, month, day, hour=0, minute=0, second=0):
+    return datetime.datetime(year, month, day, hour, minute, second, tzinfo=TZ_UTC)
 
 
 def _mk_article(article_id, pub_date):
@@ -158,31 +167,107 @@ class FakeCleanupDB:
 
 
 # ══════════════════════════════════════════════════════════════
-# 保存期限邊界
+# 保存期限邊界：本月＋上個月（Asia/Taipei 日曆月份）
 # ══════════════════════════════════════════════════════════════
 
-class TestRetentionBoundary(unittest.TestCase):
+class TestCalendarMonthCutoffFunction(unittest.TestCase):
+    """純函式層級：_retention_cutoff(now) 本身的計算是否正確，不碰 DB。"""
+
+    def test_august_execution_cutoff_is_july_first(self):
+        now = _taipei(2026, 8, 3, 10, 0)
+        self.assertEqual(news_cleanup._retention_cutoff(now), _taipei(2026, 7, 1))
+
+    def test_september_execution_cutoff_is_august_first(self):
+        now = _taipei(2026, 9, 1, 2, 30)
+        self.assertEqual(news_cleanup._retention_cutoff(now), _taipei(2026, 8, 1))
+
+    def test_january_execution_crosses_year_boundary_to_december(self):
+        now = _taipei(2027, 1, 10, 2, 30)
+        self.assertEqual(news_cleanup._retention_cutoff(now), _taipei(2026, 12, 1))
+
+    def test_utc_now_just_past_taipei_midnight_is_already_next_month(self):
+        """UTC 2026-07-31 16:30 = 台灣時間 2026-08-01 00:30——已經跨進 8 月，
+        若沒有正確先轉換成台灣時間就直接看 UTC 的月份，會誤判成 7 月執行、
+        算出錯誤的 cutoff（6/1 而非 7/1）。"""
+        now_utc = _utc(2026, 7, 31, 16, 30)
+        self.assertEqual(news_cleanup._retention_cutoff(now_utc), _taipei(2026, 7, 1))
+
+    def test_utc_now_not_yet_past_taipei_midnight_is_still_same_month(self):
+        """UTC 2026-07-31 10:00 = 台灣時間 2026-07-31 18:00——仍是 7 月，
+        cutoff 應為 6/1，不能因為忘記轉換時區而提前算成 7/1。"""
+        now_utc = _utc(2026, 7, 31, 10, 0)
+        self.assertEqual(news_cleanup._retention_cutoff(now_utc), _taipei(2026, 6, 1))
+
+    def test_month_lengths_28_29_30_31_do_not_affect_cutoff(self):
+        """上個月無論是 31 天（1月）、28 天（平年2月）、29 天（閏年2月）
+        還是 30 天（4月），cutoff 都必須正確落在「上個月 1 日 00:00」，
+        不受月份實際天數影響（驗證用『月初往回推一天』取代手算天數的正確性）。"""
+        cases = [
+            (_taipei(2026, 2, 15), _taipei(2026, 1, 1), '上個月=1月(31天)'),
+            (_taipei(2026, 3, 15), _taipei(2026, 2, 1), '上個月=2月(28天，平年)'),
+            (_taipei(2028, 3, 15), _taipei(2028, 2, 1), '上個月=2月(29天，閏年)'),
+            (_taipei(2026, 5, 15), _taipei(2026, 4, 1), '上個月=4月(30天)'),
+        ]
+        for now, expected_cutoff, desc in cases:
+            with self.subTest(desc):
+                self.assertEqual(news_cleanup._retention_cutoff(now), expected_cutoff)
+
+
+class TestCalendarMonthRetentionEndToEnd(unittest.TestCase):
+    """透過 cleanup_expired_news 走完整流程，確認邊界文件真的被保留/刪除。"""
+
     def setUp(self):
         self.db = FakeCleanupDB()
 
-    def test_older_than_365_days_is_deleted(self):
-        self.db.seed('news', 'a1', _mk_article('a1', _days_ago(366)))
-        result = news_cleanup.cleanup_expired_news(self.db, now=NOW, dry_run=False)
+    def test_august_execution_keeps_july_first_midnight_taipei(self):
+        now = _taipei(2026, 8, 3, 10, 0)
+        self.db.seed('news', 'a1', _mk_article('a1', _taipei(2026, 7, 1, 0, 0, 0)))
+        result = news_cleanup.cleanup_expired_news(self.db, now=now, dry_run=False)
+        self.assertEqual(result['deleted'], 0)
+        self.assertTrue(self.db.exists('news', 'a1'), '剛好等於截止時間（7/1 00:00 台灣時間）不得刪除')
+
+    def test_one_second_before_july_first_midnight_is_deleted(self):
+        now = _taipei(2026, 8, 3, 10, 0)
+        self.db.seed('news', 'a1', _mk_article('a1', _taipei(2026, 6, 30, 23, 59, 59)))
+        result = news_cleanup.cleanup_expired_news(self.db, now=now, dry_run=False)
         self.assertEqual(result['deleted'], 1)
-        self.assertFalse(self.db.exists('news', 'a1'))
+        self.assertFalse(self.db.exists('news', 'a1'), '截止時間前一秒必須刪除')
 
-    def test_exactly_365_days_boundary_is_kept(self):
-        """剛好滿 365 天不算過期（判斷條件是「嚴格早於」cutoff，不含邊界本身）"""
-        self.db.seed('news', 'a1', _mk_article('a1', _days_ago(365)))
-        result = news_cleanup.cleanup_expired_news(self.db, now=NOW, dry_run=False)
+    def test_september_execution_cutoff_is_august_first(self):
+        now = _taipei(2026, 9, 1, 2, 30)
+        self.db.seed('news', 'kept', _mk_article('kept', _taipei(2026, 8, 1, 0, 0, 0)))
+        self.db.seed('news', 'deleted', _mk_article('deleted', _taipei(2026, 7, 31, 23, 59, 59)))
+        result = news_cleanup.cleanup_expired_news(self.db, now=now, dry_run=False)
+        self.assertEqual(result['deleted'], 1)
+        self.assertTrue(self.db.exists('news', 'kept'))
+        self.assertFalse(self.db.exists('news', 'deleted'))
+
+    def test_january_execution_correctly_keeps_december_across_year_boundary(self):
+        now = _taipei(2027, 1, 10, 2, 30)
+        self.db.seed('news', 'dec-kept', _mk_article('dec-kept', _taipei(2026, 12, 1, 0, 0, 0)))
+        self.db.seed('news', 'nov-deleted', _mk_article('nov-deleted', _taipei(2026, 11, 30, 23, 59, 59)))
+        result = news_cleanup.cleanup_expired_news(self.db, now=now, dry_run=False)
+        self.assertEqual(result['deleted'], 1)
+        self.assertTrue(self.db.exists('news', 'dec-kept'))
+        self.assertFalse(self.db.exists('news', 'nov-deleted'))
+
+    def test_utc_now_converts_correctly_across_taipei_midnight(self):
+        """now 以 UTC 傳入（排程預設值就是 UTC）時，仍必須先轉換成台灣時間
+        才能判斷正確的日曆月份，端到端驗證（非只測純函式）。"""
+        now_utc = _utc(2026, 7, 31, 16, 30)   # 台灣時間已是 8/1 00:30
+        self.db.seed('news', 'a1', _mk_article('a1', _taipei(2026, 7, 1, 0, 0, 0)))
+        result = news_cleanup.cleanup_expired_news(self.db, now=now_utc, dry_run=False)
         self.assertEqual(result['deleted'], 0)
         self.assertTrue(self.db.exists('news', 'a1'))
 
-    def test_364_days_is_kept(self):
-        self.db.seed('news', 'a1', _mk_article('a1', _days_ago(364)))
-        result = news_cleanup.cleanup_expired_news(self.db, now=NOW, dry_run=False)
-        self.assertEqual(result['deleted'], 0)
-        self.assertTrue(self.db.exists('news', 'a1'))
+    def test_february_boundary_end_to_end_non_leap_year(self):
+        now = _taipei(2026, 3, 15)   # 2026 非閏年，上個月 2 月只有 28 天
+        self.db.seed('news', 'feb-kept', _mk_article('feb-kept', _taipei(2026, 2, 1, 0, 0, 0)))
+        self.db.seed('news', 'jan-deleted', _mk_article('jan-deleted', _taipei(2026, 1, 31, 23, 59, 59)))
+        result = news_cleanup.cleanup_expired_news(self.db, now=now, dry_run=False)
+        self.assertEqual(result['deleted'], 1)
+        self.assertTrue(self.db.exists('news', 'feb-kept'))
+        self.assertFalse(self.db.exists('news', 'jan-deleted'))
 
 
 # ══════════════════════════════════════════════════════════════
@@ -248,7 +333,7 @@ class TestDryRun(unittest.TestCase):
         db = FakeCleanupDB()
         db.seed('news', 'a1', _mk_article('a1', _days_ago(400)))
         db.seed('news', 'a2', _mk_article('a2', _days_ago(500)))
-        db.seed('news', 'a3', _mk_article('a3', _days_ago(100)))  # 未過期
+        db.seed('news', 'a3', _mk_article('a3', _days_ago(5)))  # 未過期（在本月＋上個月保留範圍內）
         result = news_cleanup.cleanup_expired_news(db, now=NOW, dry_run=True)
         self.assertEqual(result, {
             'dry_run': True,
@@ -451,11 +536,6 @@ class TestParameterValidation(unittest.TestCase):
         for bad in (0, -1, -2000):
             with self.assertRaises(ValueError):
                 news_cleanup.cleanup_expired_news(self.db, now=NOW, dry_run=False, max_deletions=bad)
-
-    def test_retention_days_must_be_positive(self):
-        for bad in (0, -1, -365):
-            with self.assertRaises(ValueError):
-                news_cleanup.cleanup_expired_news(self.db, now=NOW, dry_run=True, retention_days=bad)
 
     def test_validation_happens_even_in_dry_run_mode(self):
         with self.assertRaises(ValueError):

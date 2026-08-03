@@ -12,7 +12,7 @@
   finance_early_month_job  每月 1–10 日 09–18 時每小時（申報期加密）
   tw_dram_digest_job  平日 08:00                台灣 DRAM/Flash 產業新聞摘要信
   us_dram_digest_job  平日 16:30                美國 DRAM/Flash 產業新聞摘要信
-  news_cleanup_job    每天 02:30                新聞保存期限清理（只留最近 365 天）
+  news_cleanup_job    每天 02:30                新聞保存期限清理（只留本月＋上個月）
 
 防重疊機制：每個 job 皆設 max_instances=1，並以 Firestore lease lock
 （meta/lock_*）防止「上一次還在跑、下一次又觸發」的重疊執行；
@@ -183,7 +183,7 @@ def us_dram_digest_job(event: scheduler_fn.ScheduledEvent) -> None:
     _run_locked('digest_us', work, ttl_minutes=5)
 
 
-# ─── 新聞保存期限清理：只保留最近 365 天（見 news_cleanup.py）───
+# ─── 新聞保存期限清理：只保留本月＋上個月（Asia/Taipei 日曆月份，見 news_cleanup.py）───
 # 每天凌晨低峰期執行一次，使用獨立鎖 news_cleanup（跟每 15 分鐘一次的
 # news RSS 抓取鎖分開，互不影響、可各自獨立重試）。刪除失敗時例外會
 # 直接往外拋（不吞掉），Cloud Logging 能看到失敗紀錄，下次排程會

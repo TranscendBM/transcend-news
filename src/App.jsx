@@ -15,10 +15,14 @@ import NewsFilterToolbar from './components/filters/NewsFilterToolbar.jsx';
 import NewsCard from './features/news/NewsCard.jsx';
 import USNewsCard from './features/news/USNewsCard.jsx';
 import { useNewsFeed } from './features/news/useNewsFeed.js';
+import { usePRNews } from './features/news/usePRNews.js';
 import TodayBriefing from './features/intelligence/TodayBriefing.jsx';
 import { useNow } from './hooks/useNow.js';
 import { exportNewsExcel } from './utils/formatting.js';
-import { sortByDate, isStockStale, fmtStockUpdated } from './utils/dates.js';
+import {
+  sortByDate, isStockStale, fmtStockUpdated,
+  taipeiDayStart, taipeiWeekStart, taipeiMonthStart,
+} from './utils/dates.js';
 import {
   BRAND, KEY_MEDIA, getSentiment, dedupeArticlesByTitle, isValidTranscendPR,
   isBriefingCandidate, getUSBrand, US_BRAND_CFG, filterNewsList,
@@ -183,68 +187,59 @@ function USMarketTab({ news }) {
 // ═══════════════════════════════════════════════════════════
 // PR TAB — 統計卡片 + 各媒體曝光篇數圖
 // ═══════════════════════════════════════════════════════════
-export function PRStatsPanel({ articles }) {
-  // 用 useNow() 而非 new Date() 直接呼叫：today/month/year 的邊界必須
+export function PRStatsPanel({ articles, status = 'ready' }) {
+  // 用 useNow() 而非 new Date() 直接呼叫：today/week/month 的邊界必須
   // 隨「目前時間」定期更新，不能只在 articles 改變時才重新計算——否則
-  // 頁面開著跨過午夜/跨月/跨年，統計會停在舊邊界（見下方不再用 useMemo
-  // 包住 counts/mediaData 的說明）。
+  // 頁面開著跨過午夜/跨週/跨月，統計會停在舊邊界。三個邊界一律用
+  // Asia/Taipei 日曆（taipeiDayStart/taipeiWeekStart/taipeiMonthStart），
+  // 不用瀏覽器本地時區的 Date getter——使用者瀏覽器時區不保證是台灣，
+  // 且要跟後端 news_cleanup.py 的「本月＋上個月」保留範圍用同一套時區
+  // 定義，避免兩邊對「今天/本月」認知不一致。
   const now = useNow();
-  const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-  const weekStart = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
-  const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
-  const yearStart = new Date(now.getFullYear(), 0, 1);
+  const todayStart = taipeiDayStart(now);
+  const weekStart = taipeiWeekStart(now);
+  const monthStart = taipeiMonthStart(now);
   const getD = n => n.pubDate?.toDate ? n.pubDate.toDate() : new Date(n.pubDate || 0);
 
-  // 註：不用 useMemo。todayStart/monthStart/yearStart 每次 render 都可能
+  // 註：不用 useMemo。todayStart/weekStart/monthStart 每次 render 都可能
   // 因為時間經過而改變，但只依賴 [articles] 的 useMemo 在 articles 沒變
   // 時就不會重新執行，會讓這幾個統計卡在建立當下的舊日期邊界，跨午夜/
-  // 跨月/跨年都不會自動更新。資料量上限 2000 則，直接 filter 的成本可
-  // 忽略，改成每次 render 直接算，反而比「看似有快取、實際會算錯」安全。
+  // 跨週/跨月都不會自動更新。改成每次 render 直接算，反而比「看似有
+  // 快取、實際會算錯」安全。
   const counts = {
     today: articles.filter(n => getD(n) >= todayStart).length,
     week: articles.filter(n => getD(n) >= weekStart).length,
     month: articles.filter(n => getD(n) >= monthStart).length,
-    year: articles.filter(n => getD(n) >= yearStart).length,
   };
-
-  // 註：mediaData 在原始檔案中就是算出來後未被畫面使用（無對應圖表渲染），
-  // 隨模組搬移原樣保留，非本次遺漏。同上，改成直接計算，不用 useMemo。
-  // eslint-disable-next-line no-unused-vars
-  const mediaData = (() => {
-    const map = {};
-    articles.filter(n => getD(n) >= yearStart).forEach(n => {
-      const m = n.mediaName || n.sourceName || '其他';
-      if (m === '未知媒體' || m === '其他') return;
-      map[m] = (map[m] || 0) + 1;
-    });
-    return Object.entries(map)
-      .map(([media, count]) => ({ media, count }))
-      .sort((a, b) => b.count - a.count)
-      .slice(0, 12);
-  })();
 
   const PERIODS = [
     { label: '今天', val: counts.today, color: '#dc2626' },
     { label: '本週', val: counts.week, color: '#ea580c' },
     { label: '本月', val: counts.month, color: '#ca8a04' },
-    { label: '本年', val: counts.year, color: '#16a34a' },
   ];
 
   return (
     <div className="space-y-4">
-      {/* 4 個統計卡片 */}
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+      {/* 3 個統計卡片：查詢失敗時明確顯示錯誤，不悄悄顯示 0 */}
+      <div className="grid grid-cols-3 gap-3">
         {PERIODS.map(p => (
           <div key={p.label} className="bg-gray-900 border border-gray-700/60 rounded-2xl p-4 text-center">
             <p className="text-xs text-gray-500 mb-1">媒體曝光｜{p.label}</p>
-            <p className="text-3xl font-bold tabular-nums leading-none mt-1" style={{ color: p.color }}>
-              {p.val}
-            </p>
-            <p className="text-xs text-gray-600 mt-1">篇</p>
+            {status === 'error' ? (
+              <p className="text-sm text-red-400 mt-1">⚠ 載入失敗</p>
+            ) : status === 'loading' ? (
+              <p className="text-sm text-gray-600 mt-1">載入中…</p>
+            ) : (
+              <>
+                <p className="text-3xl font-bold tabular-nums leading-none mt-1" style={{ color: p.color }}>
+                  {p.val}
+                </p>
+                <p className="text-xs text-gray-600 mt-1">篇</p>
+              </>
+            )}
           </div>
         ))}
       </div>
-
     </div>
   );
 }
@@ -252,44 +247,45 @@ export function PRStatsPanel({ articles }) {
 // ═══════════════════════════════════════════════════════════
 // PR TAB — 重點媒體曝光分析
 // ═══════════════════════════════════════════════════════════
-export function KeyMediaPanel({ articles }) {
-  // useNow()：見 PRStatsPanel 同樣的說明——月/年邊界必須隨目前時間更新。
+export function KeyMediaPanel({ articles, status = 'ready' }) {
+  // useNow()：見 PRStatsPanel 同樣的說明——月邊界必須隨目前時間更新，
+  // 且用 Asia/Taipei 日曆月份（taipeiMonthStart），不是瀏覽器本地時區。
   const now = useNow();
-  const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
-  const yearStart = new Date(now.getFullYear(), 0, 1);
+  const monthStart = taipeiMonthStart(now);
   const getD = n => n.pubDate?.toDate ? n.pubDate.toDate() : new Date(n.pubDate || 0);
 
-  // 註：不用 useMemo，理由同 PRStatsPanel——避免 monthStart/yearStart
-  // 隨時間變動時，只依賴 [articles] 的 memo 卡在舊邊界。
+  // 註：不用 useMemo，理由同 PRStatsPanel——避免 monthStart 隨時間變動時，
+  // 只依賴 [articles] 的 memo 卡在舊邊界。
   const stats = (() => {
-    const yearArticles = articles.filter(n => getD(n) >= yearStart);
     const monthArticles = articles.filter(n => getD(n) >= monthStart);
-    const total = yearArticles.length || 1;
     const mTotal = monthArticles.length || 1;
 
     return KEY_MEDIA.map(km => {
-      const yearCount = yearArticles.filter(n =>
-        (n.mediaName || n.sourceName || '').includes(km.name)).length;
       const monthCount = monthArticles.filter(n =>
         (n.mediaName || n.sourceName || '').includes(km.name)).length;
       return {
         ...km,
-        yearCount,
         monthCount,
-        yearPct: Math.round(yearCount / total * 100),
         monthPct: Math.round(monthCount / mTotal * 100),
       };
-    }).sort((a, b) => b.yearCount - a.yearCount);
+    }).sort((a, b) => b.monthCount - a.monthCount);
   })();
 
-  const maxYear = Math.max(...stats.map(s => s.yearCount), 1);
+  const maxMonth = Math.max(...stats.map(s => s.monthCount), 1);
+
+  if (status === 'error') {
+    return (
+      <Card title="重點媒體曝光監控" icon="🎯">
+        <div className="text-sm text-red-400 text-center py-6">⚠ 資料載入失敗，請稍後重新整理</div>
+      </Card>
+    );
+  }
 
   return (
     <Card title="重點媒體曝光監控" icon="🎯">
       <div className="flex items-center gap-4 mb-3 text-xs text-gray-500">
-        <span>本年累計曝光篇數（各媒體佔比）</span>
-        <span className="ml-auto">本月</span>
-        <span className="w-12 text-right">本年</span>
+        <span>本月累計曝光篇數（各媒體佔比）</span>
+        <span className="ml-auto w-12 text-right">本月</span>
       </div>
       <div className="space-y-2.5">
         {stats.map((s, i) => (
@@ -303,20 +299,19 @@ export function KeyMediaPanel({ articles }) {
               {/* bar */}
               <div className="flex-1 h-2 rounded-full bg-gray-800 overflow-hidden">
                 <div className="h-full rounded-full transition-all"
-                  style={{ width: `${Math.round(s.yearCount / maxYear * 100)}%`, background: i === 0 ? '#ef4444' : BRAND }} />
+                  style={{ width: `${Math.round(s.monthCount / maxMonth * 100)}%`, background: i === 0 ? '#ef4444' : BRAND }} />
               </div>
-              {/* counts */}
-              <span className={`text-xs tabular-nums w-8 text-right font-semibold ${s.monthCount > 0 ? 'text-yellow-400' : 'text-gray-600'}`}>
+              {/* count */}
+              <span className={`text-xs tabular-nums w-8 text-right font-bold ${s.monthCount > 0 ? 'text-ink' : 'text-gray-600'}`}>
                 {s.monthCount}
-              </span>
-              <span className={`text-xs tabular-nums w-8 text-right font-bold ${s.yearCount > 0 ? 'text-ink' : 'text-gray-600'}`}>
-                {s.yearCount}
               </span>
             </div>
           </div>
         ))}
       </div>
-      <p className="text-xs text-gray-700 mt-3 text-right">本月 / 本年各媒體篇數</p>
+      <p className="text-xs text-gray-700 mt-3 text-right">
+        本月各媒體篇數{status === 'loading' ? '（載入中…）' : ''}
+      </p>
     </Card>
   );
 }
@@ -1013,69 +1008,140 @@ function CompetitorMaterial({ material }) {
   );
 }
 
+// PR 媒體戰情自己的期間設定：只保留今天/本週/本月。故意不共用上面
+// CompetitorNews／USMarketTab 用的 TIME_FILTERS（今天/本週/本月/本年/
+// 已載入資料）——那個陣列被那兩處共用，若直接在這裡砍成 3 個選項，
+// 會連帶把上游市場等其他分頁的期間篩選也改掉。
+const PR_LIST_TIME_FILTERS = [
+  { id: 'today', label: '今天' },
+  { id: 'week', label: '本週' },
+  { id: 'month', label: '本月' },
+];
+
 // ═══════════════════════════════════════════════════════════
 // PR TAB
 // ═══════════════════════════════════════════════════════════
-function PRTab({ news }) {
+// prArticles/prStatus/refreshPRNews 由 App() 呼叫 usePRNews() 後往下傳
+// （不在這裡直接呼叫 hook）：頁面上方「重新整理」按鈕會呼叫 App() 的
+// fetchAll()，需要能一併觸發 PR 查詢的 refresh，放在 App() 層級才能
+// 跟其他資料來源（股價/財報/新聞…）用同一個按鈕統一觸發。
+export function PRTab({ news, prArticles, prStatus, refreshPRNews }) {
   const [timeFilter, setTimeFilter] = useState('month');
+  const [prQuery, setPrQuery] = useState('');
+  const [prMedia, setPrMedia] = useState('all');
+  const [prSentiment, setPrSentiment] = useState('all');
 
-  // 所有有效創見 PR 文章（已排除 CMoney / 券商明細）
-  const validTranscend = useMemo(() => news.filter(isValidTranscendPR), [news]);
+  // 所有有效創見 PR 文章（已排除 CMoney / 券商明細），並在這裡就先去重
+  // （dedupeArticlesByTitle）——同一則報導可能因為不同 RSS/搜尋條件被
+  // 存成多筆 Firestore 文件，下面的搜尋/媒體/情緒篩選、統計卡片、
+  // 排行榜、清單、匯出全部共用這同一份「已去重」結果，確保這幾處看到
+  // 的數字彼此一致、也精準對應畫面上實際會顯示的新聞則數。
+  const validTranscend = useMemo(
+    () => dedupeArticlesByTitle(prArticles.filter(isValidTranscendPR)),
+    [prArticles]);
 
-  // 依時間篩選的新聞列表
-  const transcend = useMemo(() => {
-    const now = new Date();
+  const mediaOptions = useMemo(
+    () => [...new Set(validTranscend.map(n => n.mediaName || n.sourceName || '未知媒體'))]
+      .sort((a, b) => a.localeCompare(b, 'zh-Hant')),
+    [validTranscend]);
+
+  // PR 頁面唯一的一個篩選工具列（搜尋／媒體／情緒），只影響下面的創見
+  // PR 統計/排行/清單/匯出，不影響 CompetitorNews（那是獨立的期間篩選，
+  // 資料來源也不同——見下方 <CompetitorNews> 的說明）。
+  const searchFiltered = useMemo(
+    () => filterNewsList(validTranscend, { query: prQuery, media: prMedia, sentiment: prSentiment }),
+    [validTranscend, prQuery, prMedia, prSentiment]);
+
+  const resetPRFilters = () => {
+    setPrQuery('');
+    setPrMedia('all');
+    setPrSentiment('all');
+  };
+
+  // useNow()：時間篩選的邊界必須隨「目前時間」更新，不能只在
+  // searchFiltered/timeFilter 改變時才重新計算，否則頁面開著跨過
+  // 午夜/跨週/跨月，清單會停在舊邊界（同 PRStatsPanel 的說明）。
+  const now = useNow();
+
+  // 完整的期間篩選結果（未截斷，searchFiltered 已經套用搜尋/媒體/情緒，
+  // 這裡只需要再依日期篩選）：統計用途（例如 Excel 匯出）需要跟畫面上
+  // 「這個期間有幾篇」的實際定義完全一致，不能只看畫面上顯示的前 N 筆。
+  const transcendFull = useMemo(() => {
     const cutoffs = {
-      today: new Date(now.getFullYear(), now.getMonth(), now.getDate()),
-      week: new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000),
-      month: new Date(now.getFullYear(), now.getMonth(), 1),
-      year: new Date(now.getFullYear(), 0, 1),
-      all: null,
+      today: taipeiDayStart(now),
+      week: taipeiWeekStart(now),
+      month: taipeiMonthStart(now),
     };
     const cutoff = cutoffs[timeFilter];
-    return dedupeArticlesByTitle(sortByDate(validTranscend.filter(n => {
-      if (!cutoff) return true;
+    return searchFiltered.filter(n => {
       const d = n.pubDate?.toDate ? n.pubDate.toDate() : new Date(n.pubDate || 0);
       return d >= cutoff;
-    }))).slice(0, 50);
-  }, [validTranscend, timeFilter]);
+    });
+  }, [searchFiltered, timeFilter, now]);
+
+  // 畫面清單只顯示前 50 篇（渲染效能考量，不是資料本身被裁切）；
+  // Excel 匯出用上面未截斷的 transcendFull，兩者不是同一份陣列。
+  const transcend = useMemo(() => transcendFull.slice(0, 50), [transcendFull]);
 
   return (
     <div className="space-y-4 fade-in">
       <TodayBriefing articles={news.filter(isBriefingCandidate)} />
 
-      {/* 統計卡片 + 各媒體篇數圖 */}
-      <PRStatsPanel articles={validTranscend} />
+      {/* PR 專用篩選工具列：搜尋/媒體/情緒，resultCount／totalCount 一律
+          來自 usePRNews 的本月資料，不是受全站 2000 筆上限限制的 news。 */}
+      <NewsFilterToolbar
+        query={prQuery} setQuery={setPrQuery}
+        media={prMedia} setMedia={setPrMedia}
+        sentiment={prSentiment} setSentiment={setPrSentiment}
+        mediaOptions={mediaOptions}
+        resultCount={searchFiltered.length} totalCount={validTranscend.length}
+        onReset={resetPRFilters}
+      />
+
+      {/* 統計卡片 + 各媒體篇數圖：套用搜尋/媒體/情緒篩選（searchFiltered），
+          但不套用今天/本週/本月的期間篩選——三個期間的數字本來就要同時顯示。 */}
+      <PRStatsPanel articles={searchFiltered} status={prStatus} />
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
         <Card title="創見最新報導" icon="📰" className="h-full"
           actions={
-            <button onClick={() => exportNewsExcel(transcend, '創見最新報導', '創見最新報導')}
-              disabled={transcend.length === 0}
+            <button onClick={() => exportNewsExcel(transcendFull, '創見最新報導', '創見最新報導')}
+              disabled={transcendFull.length === 0}
               className="text-xs px-2.5 py-1 rounded-lg border border-gray-700/60 text-gray-400 hover:text-gray-200 hover:bg-gray-800 transition disabled:opacity-40 disabled:cursor-not-allowed shrink-0">
               ⬇ 匯出 Excel
             </button>
           }>
-          {/* 時間篩選 */}
+          {/* 時間篩選：只有今天/本週/本月，PR 專用（見上方 PR_LIST_TIME_FILTERS） */}
           <div className="flex gap-1.5 mb-3">
-            {TIME_FILTERS.map(f => (
+            {PR_LIST_TIME_FILTERS.map(f => (
               <TabBtn key={f.id} active={timeFilter === f.id} onClick={() => setTimeFilter(f.id)}>
                 {f.label}
               </TabBtn>
             ))}
           </div>
-          {transcend.length > 0
+          {prStatus === 'error'
+            ? <div className="h-32 flex flex-col items-center justify-center gap-2 text-red-400 text-sm">
+                <span>⚠ 報導載入失敗</span>
+                <button onClick={refreshPRNews}
+                  className="text-xs px-3 py-1 rounded-lg border border-red-700/60 text-red-300 hover:bg-red-900/30 transition">
+                  重試
+                </button>
+              </div>
+            : transcend.length > 0
             ? <div className="space-y-2">{transcend.map((n, i) => <NewsCard key={n.id || i} article={n} />)}</div>
             : <div className="h-32 flex items-center justify-center text-gray-600 text-sm">
-                {news.length > 0 ? '此區間暫無符合報導' : '載入中…'}
+                {prStatus === 'ready' ? '此區間暫無符合報導' : '載入中…'}
               </div>
           }
         </Card>
+        {/* CompetitorNews 仍是自己一份獨立的期間篩選、資料來源是 useNewsFeed
+            的 news（不受上面 PR 工具列的搜尋/媒體/情緒篩選影響）——兩者
+            刻意分開，避免同一個工具列的數字被誤讀成同時涵蓋兩份清單。 */}
         <CompetitorNews news={news} />
       </div>
 
-      {/* 重點媒體曝光監控：移至最下方 */}
-      <KeyMediaPanel articles={validTranscend} />
+      {/* 重點媒體曝光監控：移至最下方，同樣套用搜尋/媒體/情緒篩選 */}
+      <KeyMediaPanel articles={searchFiltered} status={prStatus} />
     </div>
   );
 }
@@ -1421,6 +1487,7 @@ export default function App() {
   const { news, refresh: refreshNews } = useNewsFeed({
     onFirstPublish: () => setLoading(false),
   });
+  const { articles: prArticles, status: prStatus, refresh: refreshPRNews } = usePRNews();
 
   // ─── Firebase init ───────────────────────────────────────
   // getDb() 同步完成離線快取設定（initializeFirestore + persistentLocalCache），
@@ -1470,15 +1537,20 @@ export default function App() {
     return () => clearInterval(tick);
   }, []);
 
-  // includeNewsRefresh=false 用在掛載時的初始呼叫：useNewsFeed 自己的
-  // useEffect 已經會在掛載時啟動新聞管線，這裡不需要（也不應該）再呼叫
-  // refreshNews() 一次，否則會在監聽器建立前的非同步空窗期造成重複啟動。
-  // 手動按「重新整理」則維持 includeNewsRefresh=true（預設值），
-  // refreshNews() 在監聽器已存在時只會重試 cursor 補抓，不會重建監聽。
+  // includeNewsRefresh=false 用在掛載時的初始呼叫：useNewsFeed／usePRNews
+  // 自己的 useEffect 已經會在掛載時啟動各自的管線，這裡不需要（也不應該）
+  // 再呼叫 refreshNews()/refreshPRNews() 一次，否則會在監聽器建立前的
+  // 非同步空窗期造成重複啟動。手動按「重新整理」則維持
+  // includeNewsRefresh=true（預設值）——這是 PR 查詢失敗後主要的重試
+  // 管道：refreshNews() 在監聽器已存在時只會重試 cursor 補抓，
+  // refreshPRNews() 則會取消舊監聽器並重新訂閱一次新的查詢。
   async function fetchAll(includeNewsRefresh = true) {
     setLoading(true);
     const tasks = [fetchStocks(), fetchRevenue(), fetchFinancials(), fetchDividends(), fetchMaterial(), fetchDaily(), fetchCompRevenue()];
-    if (includeNewsRefresh) tasks.push(refreshNews());
+    if (includeNewsRefresh) {
+      tasks.push(refreshNews());
+      refreshPRNews();
+    }
     await Promise.all(tasks);
     setLoading(false);
     setUpdated(new Date());
@@ -1549,16 +1621,18 @@ export default function App() {
     [news]
   );
 
-  // PR / 上游市場共用的前端篩選：只處理已載入資料，不增加 Firestore 讀取。
+  // 上游市場分頁的前端篩選：只處理已載入資料，不增加 Firestore 讀取。
+  // PR 分頁改由 PRTab 自己管理一份獨立的篩選工具列（資料來源是
+  // usePRNews，不是這裡的 news），避免同一個工具列同時代表兩套
+  // 互不相干的資料/結果數量（見 PRTab 內的說明）。
   const filterPool = useMemo(() => {
-    if (tab === 'pr') return news.filter(n => n.cat === 'transcend' || n.cat === 'competitor');
     if (tab === 'us') return news.filter(n => n.cat === 'usMarket' || n.cat === 'supplier');
     return [];
   }, [news, tab]);
   const mediaOptions = useMemo(() => [...new Set(filterPool.map(n => n.mediaName || n.sourceName || '未知媒體'))]
     .sort((a, b) => a.localeCompare(b, 'zh-Hant')), [filterPool]);
   const filteredNews = useMemo(() => {
-    if (tab === 'ir') return news;
+    if (tab !== 'us') return news;
     const allowedIds = new Set(filterNewsList(filterPool, {
       query: newsQuery, media: newsMedia, sentiment: newsSentiment,
     }).map(n => n.id));
@@ -1658,7 +1732,7 @@ export default function App() {
 
       {/* ─────────── MAIN ─────────── */}
       <main className="max-w-7xl mx-auto px-4 py-5">
-        {tab !== 'ir' && (
+        {tab === 'us' && (
           <div className="mb-4">
             <NewsFilterToolbar
               query={newsQuery} setQuery={setNewsQuery}
@@ -1670,8 +1744,9 @@ export default function App() {
             />
           </div>
         )}
-        {tab === 'pr' ? <PRTab news={filteredNews} /> :
-         tab === 'us' ? <USMarketTab news={filteredNews} /> :
+        {tab === 'pr' ? (
+          <PRTab news={news} prArticles={prArticles} prStatus={prStatus} refreshPRNews={refreshPRNews} />
+        ) : tab === 'us' ? <USMarketTab news={filteredNews} /> :
          <IRTab news={news} stocks={stocks} community={community} revenue={revenue} financials={financials} dividends={dividends} material={material} daily={daily} compRev={compRev} />}
       </main>
 
