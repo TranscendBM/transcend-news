@@ -56,6 +56,25 @@ def _is_valid_pub_date(value):
     return isinstance(value, datetime.datetime)
 
 
+def _validate_params(retention_days, page_size, max_deletions):
+    """
+    在任何 Firestore 查詢或刪除之前，先驗證參數是否合法；不合法一律
+    拋出 ValueError，絕不用預設值悄悄帶過或送出無意義的查詢。
+    """
+    if retention_days <= 0:
+        raise ValueError(f'retention_days 必須 > 0，收到 {retention_days}')
+    if page_size <= 0:
+        raise ValueError(f'page_size 必須 > 0，收到 {page_size}')
+    ops_per_batch = page_size * (1 + len(RELATED_COLLECTIONS))
+    if ops_per_batch > 500:
+        raise ValueError(
+            f'page_size={page_size} 會讓單一 WriteBatch 操作數達到 '
+            f'{ops_per_batch}（page_size × {1 + len(RELATED_COLLECTIONS)} 個集合），'
+            f'超過 Firestore 單一 WriteBatch 500 次操作上限')
+    if max_deletions <= 0:
+        raise ValueError(f'max_deletions 必須 > 0，收到 {max_deletions}')
+
+
 def _query_expired_page(db, cutoff, page_size, start_after_snap):
     """
     查一頁 pubDate 早於 cutoff 的 news 文件，依 pubDate 由舊到新排序，
@@ -156,6 +175,17 @@ def _delete_batch(db, article_ids):
     batch.commit()
 
 
+def _more_expired_exists(db, cutoff):
+    """
+    達到單次刪除上限（或某一頁的刪除額度用完）後，用一個 limit(1) 的
+    小型查詢確認資料庫裡「現在」是否還有其他過期新聞——而不是直接假設
+    一定還有。避免「剛好清完 max_deletions 篇、其實已經沒有更多過期
+    資料」時被誤報為 remaining=True。這個查詢在本次已刪除的文件生效
+    之後才執行，看到的是刪除後的最新狀態。
+    """
+    return bool(_query_expired_page(db, cutoff, page_size=1, start_after_snap=None))
+
+
 def _delete_expired(db, cutoff, page_size, max_deletions):
     """
     實際刪除過期新聞（連同關聯集合），最多刪除 max_deletions 篇。
@@ -178,18 +208,16 @@ def _delete_expired(db, cutoff, page_size, max_deletions):
 
         room = max_deletions - deleted
         if room <= 0:
-            remaining = True
+            remaining = _more_expired_exists(db, cutoff)
             break
 
         chunk = valid[:room]
-        if len(chunk) < len(valid):
-            remaining = True
 
         _delete_batch(db, [article_id for article_id, _pub in chunk])
         deleted += len(chunk)
 
         if deleted >= max_deletions:
-            remaining = True
+            remaining = _more_expired_exists(db, cutoff)
             break
 
     return {
@@ -217,7 +245,12 @@ def cleanup_expired_news(db, now=None, dry_run=True,
     回傳 dict：
       dry_run=True：{dry_run, matched, oldest, newest, skipped_invalid}
       dry_run=False：{dry_run, deleted, skipped_invalid, remaining}
+
+    參數不合法（page_size/max_deletions/retention_days 不是正數，或
+    page_size 會讓單一 WriteBatch 操作數超過 500）一律拋出 ValueError，
+    且保證發生在任何 Firestore 查詢或刪除之前。
     """
+    _validate_params(retention_days, page_size, max_deletions)
     now = now or datetime.datetime.now(datetime.timezone.utc)
     cutoff = _retention_cutoff(now, retention_days)
     if dry_run:

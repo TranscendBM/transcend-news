@@ -322,6 +322,23 @@ class TestMaxDeletionsPerRun(unittest.TestCase):
         self.assertEqual(result['deleted'], 50)
         self.assertFalse(result['remaining'])
 
+    def test_exactly_max_deletions_with_nothing_left_reports_no_remaining(self):
+        """
+        剛好有 MAX_DELETIONS_PER_RUN 篇過期新聞、全部清完的情況：
+        deleted 達到上限本身不代表還有更多資料——達到上限後必須用
+        limit(1) 查詢確認資料庫「現在」是否真的還有其他過期新聞，
+        而不是看到 deleted==max_deletions 就直接回報 remaining=True。
+        """
+        db = FakeCleanupDB()
+        total = news_cleanup.MAX_DELETIONS_PER_RUN
+        for i in range(total):
+            aid = f'a{i:05d}'
+            db.seed('news', aid, _mk_article(aid, _days_ago(400 + i)))
+        result = news_cleanup.cleanup_expired_news(db, now=NOW, dry_run=False)
+        self.assertEqual(result['deleted'], news_cleanup.MAX_DELETIONS_PER_RUN)
+        self.assertFalse(result['remaining'], '剛好清完全部過期新聞，不應誤報還有剩餘')
+        self.assertEqual(len(db.store['news']), 0)
+
 
 # ══════════════════════════════════════════════════════════════
 # 關聯集合（ai_jobs / ai_insights）清理
@@ -392,6 +409,57 @@ class TestIdempotentRerun(unittest.TestCase):
         self.assertEqual(second['deleted'], 50)
         self.assertFalse(second['remaining'])
         self.assertEqual(len(db.store['news']), 0)
+
+
+# ══════════════════════════════════════════════════════════════
+# 參數安全檢查：不合法參數必須在任何 Firestore 呼叫前拋出 ValueError
+# ══════════════════════════════════════════════════════════════
+
+class _PoisonedDB:
+    """一碰就炸的假 DB：只要 collection()/batch() 被呼叫就代表驗證沒有
+    真的搶在任何 Firestore 互動之前完成，測試會直接失敗在這裡。"""
+    def collection(self, name):
+        raise AssertionError(
+            f'不合法參數必須在任何 Firestore 查詢/刪除之前被擋下，'
+            f'但 collection({name!r}) 被呼叫了')
+
+    def batch(self):
+        raise AssertionError('不合法參數必須在任何 Firestore 寫入之前被擋下')
+
+
+class TestParameterValidation(unittest.TestCase):
+    def setUp(self):
+        self.db = _PoisonedDB()
+
+    def test_page_size_must_be_positive(self):
+        for bad in (0, -1, -150):
+            with self.assertRaises(ValueError):
+                news_cleanup.cleanup_expired_news(self.db, now=NOW, dry_run=True, page_size=bad)
+
+    def test_page_size_times_three_collections_must_not_exceed_500(self):
+        # 167 * 3 = 501 > 500
+        with self.assertRaises(ValueError):
+            news_cleanup.cleanup_expired_news(self.db, now=NOW, dry_run=True, page_size=167)
+
+    def test_page_size_at_exactly_166_is_allowed(self):
+        # 166 * 3 = 498 <= 500，屬於合法邊界，只驗證不拋例外（不觸碰 DB 之外的行為）
+        db = FakeCleanupDB()
+        result = news_cleanup.cleanup_expired_news(db, now=NOW, dry_run=True, page_size=166)
+        self.assertEqual(result['matched'], 0)
+
+    def test_max_deletions_must_be_positive(self):
+        for bad in (0, -1, -2000):
+            with self.assertRaises(ValueError):
+                news_cleanup.cleanup_expired_news(self.db, now=NOW, dry_run=False, max_deletions=bad)
+
+    def test_retention_days_must_be_positive(self):
+        for bad in (0, -1, -365):
+            with self.assertRaises(ValueError):
+                news_cleanup.cleanup_expired_news(self.db, now=NOW, dry_run=True, retention_days=bad)
+
+    def test_validation_happens_even_in_dry_run_mode(self):
+        with self.assertRaises(ValueError):
+            news_cleanup.cleanup_expired_news(self.db, now=NOW, dry_run=True, page_size=0)
 
 
 if __name__ == '__main__':
