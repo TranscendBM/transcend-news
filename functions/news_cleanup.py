@@ -1,10 +1,20 @@
 """
-新聞保存期限清理（只保留最近 365 天）。
+新聞保存期限清理（只保留「本月＋上個月」）。
 
 依 news 文件的 pubDate 判斷是否過期，過期的新聞連同相同 article id 的
 ai_jobs / ai_insights 文件一併刪除，避免孤兒資料。刻意不使用 Firestore
 TTL policy（那是額外付費功能，且 TTL 刪除時機不可控、無法先 dry-run
 確認範圍），改用排程 + 查詢分頁的方式自行實作，行為完全可預測、可測試。
+
+保留範圍：以 **Asia/Taipei 日曆月份**計算「本月＋上個月」，不是最近
+N 天。截止時間固定是「上個月 1 日 00:00 台灣時間」——pubDate 嚴格早於
+這個時間點才刪除，剛好等於這個時間點不刪除。例如：
+  2026/8/3 執行  → 保留 2026/7/1 00:00（台灣時間）之後的新聞
+  2026/9/1 執行  → 保留 2026/8/1 00:00（台灣時間）之後的新聞
+  2027/1/10 執行 → 保留 2026/12/1 00:00（台灣時間）之後的新聞（跨年）
+用「本月第一天 00:00 台灣時間往前推一天」取得上個月的日期，再取該日期
+所在月份的第一天，避免手算月份/年份進位（1 月要回推到去年 12 月）時
+自行寫錯進位邏輯。
 
 安全原則：
 - 只用 Firestore 查詢（where + order_by + limit）挑出候選文件，絕不把
@@ -29,10 +39,12 @@ TTL policy（那是額外付費功能，且 TTL 刪除時機不可控、無法�
 
 import datetime
 import logging
+from zoneinfo import ZoneInfo
 
 logger = logging.getLogger(__name__)
 
-NEWS_RETENTION_DAYS = 365
+# 保留範圍以這個時區的日曆月份計算，跟 functions/main.py 其他排程一致。
+TAIPEI_TZ = ZoneInfo('Asia/Taipei')
 
 # 與 news 文件一併清理的關聯集合（依相同 article id 尋找對應文件）。
 # 不得動到 stocks / revenue / financials / dividends / material / daily /
@@ -47,22 +59,32 @@ ARTICLES_PER_BATCH = 150
 MAX_DELETIONS_PER_RUN = 2000
 
 
-def _retention_cutoff(now, retention_days):
-    """純函式：pubDate 嚴格早於這個時間點的新聞視為過期（不含邊界本身）。"""
-    return now - datetime.timedelta(days=retention_days)
+def _retention_cutoff(now):
+    """
+    純函式：保留「本月＋上個月」（Asia/Taipei 日曆月份）。回傳「上個月
+    1 日 00:00 台灣時間」——pubDate 嚴格早於這個時間點的新聞才視為過期，
+    剛好等於這個時間點不算過期（不含邊界本身）。
+
+    now 可以是任何時區的 aware datetime（呼叫端通常傳 UTC）；轉換成
+    台灣時間才能正確判斷「現在是台灣的哪個日曆月份」——例如 UTC 16:30
+    在台灣已經是隔天 00:30，若直接拿 UTC 的年/月判斷會誤判成前一個月。
+    """
+    taipei_now = now.astimezone(TAIPEI_TZ)
+    this_month_start = datetime.datetime(taipei_now.year, taipei_now.month, 1, tzinfo=TAIPEI_TZ)
+    last_day_of_prev_month = this_month_start - datetime.timedelta(days=1)
+    return datetime.datetime(
+        last_day_of_prev_month.year, last_day_of_prev_month.month, 1, tzinfo=TAIPEI_TZ)
 
 
 def _is_valid_pub_date(value):
     return isinstance(value, datetime.datetime)
 
 
-def _validate_params(retention_days, page_size, max_deletions):
+def _validate_params(page_size, max_deletions):
     """
     在任何 Firestore 查詢或刪除之前，先驗證參數是否合法；不合法一律
     拋出 ValueError，絕不用預設值悄悄帶過或送出無意義的查詢。
     """
-    if retention_days <= 0:
-        raise ValueError(f'retention_days 必須 > 0，收到 {retention_days}')
     if page_size <= 0:
         raise ValueError(f'page_size 必須 > 0，收到 {page_size}')
     ops_per_batch = page_size * (1 + len(RELATED_COLLECTIONS))
@@ -229,12 +251,12 @@ def _delete_expired(db, cutoff, page_size, max_deletions):
 
 
 def cleanup_expired_news(db, now=None, dry_run=True,
-                          retention_days=NEWS_RETENTION_DAYS,
                           page_size=ARTICLES_PER_BATCH,
                           max_deletions=MAX_DELETIONS_PER_RUN):
     """
-    刪除（或 dry_run 模式下只統計）pubDate 嚴格早於 retention_days 天前
-    的 news 文件，並同步刪除相同 id 的 ai_jobs / ai_insights 文件。
+    刪除（或 dry_run 模式下只統計）pubDate 早於「本月＋上個月」保留範圍
+    （見 _retention_cutoff）的 news 文件，並同步刪除相同 id 的 ai_jobs /
+    ai_insights 文件。
 
     dry_run=True（預設，安全值）：只統計預計刪除筆數、最舊/最新過期
       pubDate、略過的異常文件數，不執行任何 delete。
@@ -246,13 +268,13 @@ def cleanup_expired_news(db, now=None, dry_run=True,
       dry_run=True：{dry_run, matched, oldest, newest, skipped_invalid}
       dry_run=False：{dry_run, deleted, skipped_invalid, remaining}
 
-    參數不合法（page_size/max_deletions/retention_days 不是正數，或
-    page_size 會讓單一 WriteBatch 操作數超過 500）一律拋出 ValueError，
-    且保證發生在任何 Firestore 查詢或刪除之前。
+    參數不合法（page_size/max_deletions 不是正數，或 page_size 會讓
+    單一 WriteBatch 操作數超過 500）一律拋出 ValueError，且保證發生在
+    任何 Firestore 查詢或刪除之前。
     """
-    _validate_params(retention_days, page_size, max_deletions)
+    _validate_params(page_size, max_deletions)
     now = now or datetime.datetime.now(datetime.timezone.utc)
-    cutoff = _retention_cutoff(now, retention_days)
+    cutoff = _retention_cutoff(now)
     if dry_run:
         return _scan_dry_run(db, cutoff, page_size)
     return _delete_expired(db, cutoff, page_size, max_deletions)

@@ -48,6 +48,55 @@ export function fmtDate(ts) {
   }
 }
 
+// ─────────────────────────────────────────────────────────────
+// 台灣時間（Asia/Taipei，固定 UTC+8、無日光節約）的「今天/本週/本月」
+// 起點計算，回傳的是實際時刻（Date，內部時間戳正確，可直接跟 pubDate
+// 比較），不是「看起來是台灣時間的假本地時間」。
+//
+// 用固定 +8 小時位移換算，而不是瀏覽器本地時區或 Intl：這個網站的
+// 使用者、伺服器（Cloud Functions）都在台灣，但瀏覽器的「本地時區」
+// 不可控（例如筆電系統時區設成別的地方），若用 new Date().getDate()
+// 這類本地時區讀法，換了時區看到的「今天/本週/本月」會跟着變、
+// 跟後端 functions/news_cleanup.py 用 Asia/Taipei 日曆月份算出的
+// 保留範圍對不上。台灣沒有 DST，固定位移在任何時候都精確。
+// ─────────────────────────────────────────────────────────────
+const TAIPEI_OFFSET_MS = 8 * 60 * 60 * 1000;
+
+function taipeiPartsOf(date) {
+  const shifted = new Date(date.getTime() + TAIPEI_OFFSET_MS);
+  return {
+    year: shifted.getUTCFullYear(),
+    month: shifted.getUTCMonth(),
+    date: shifted.getUTCDate(),
+    day: shifted.getUTCDay(), // 0=週日 .. 6=週六
+  };
+}
+
+function taipeiInstant(year, month, date) {
+  // Date.UTC 對超出範圍的 date（例如 0 或負數）會自動正確地跨月/跨年
+  // 往前借位，不需要自己手算月份天數。
+  return new Date(Date.UTC(year, month, date) - TAIPEI_OFFSET_MS);
+}
+
+/** 台灣時間「今天」00:00 對應的實際時刻。 */
+export function taipeiDayStart(now = new Date()) {
+  const { year, month, date } = taipeiPartsOf(now);
+  return taipeiInstant(year, month, date);
+}
+
+/** 台灣時間「本週一」00:00 對應的實際時刻（週一為一週起點，不是最近 7 天）。 */
+export function taipeiWeekStart(now = new Date()) {
+  const { year, month, date, day } = taipeiPartsOf(now);
+  const diffToMonday = (day + 6) % 7; // 週日(0)->6, 週一(1)->0, ..., 週六(6)->5
+  return taipeiInstant(year, month, date - diffToMonday);
+}
+
+/** 台灣時間「本月 1 日」00:00 對應的實際時刻。 */
+export function taipeiMonthStart(now = new Date()) {
+  const { year, month } = taipeiPartsOf(now);
+  return taipeiInstant(year, month, 1);
+}
+
 export function sortByDate(arr) {
   return [...arr].sort((a, b) => {
     const da = a.pubDate?.toDate ? a.pubDate.toDate() : new Date(a.pubDate || 0);

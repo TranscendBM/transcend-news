@@ -115,23 +115,35 @@ ollama pull gemma3:4b
   只需替換 `build_digest_email()` 產生的內文來源，篩選/寄信/進度追蹤都不用動；
   本機摘要若當次沒準備好，可退回規則版內容當備援，避免開天窗
 
-## 🗑 新聞保存期限（`functions/news_cleanup.py`，只留最近 365 天）
+## 🗑 新聞保存期限（`functions/news_cleanup.py`，只留本月＋上個月）
 
-`news` 集合只保留最近 **365 天**的新聞（依 `pubDate` 判斷，嚴格早於
-365 天前才刪除，剛好滿 365 天不刪）。刻意不使用 Firestore TTL policy——
-那是額外付費功能，而且刪除時機不可控、無法先確認範圍——改以每天一次
-的排程 + 查詢分頁自行實作，行為完全可預測、有測試覆蓋。
+`news` 集合只保留**本月＋上個月**的新聞（依 `pubDate` 判斷，以
+**Asia/Taipei 日曆月份**計算，不是「最近 N 天」）。截止時間固定是
+「上個月 1 日 00:00 台灣時間」，pubDate 嚴格早於這個時間點才刪除，
+剛好等於這個時間點不刪除。例如：
+
+- 2026/8/3 執行 → 保留 2026/7/1 00:00（台灣時間）之後的新聞
+- 2026/9/1 執行 → 保留 2026/8/1 00:00（台灣時間）之後的新聞
+- 2027/1/10 執行 → 保留 2026/12/1 00:00（台灣時間）之後的新聞（跨年）
+
+刻意不使用 Firestore TTL policy——那是額外付費功能，而且刪除時機不可控、
+無法先確認範圍——改以每天一次的排程 + 查詢分頁自行實作，行為完全可預測、
+有測試覆蓋。
 
 | 項目 | 設定 |
 |---|---|
 | 排程 | `news_cleanup_job`，每天 02:30（台灣時間，離峰時段） |
 | 鎖 | `news_cleanup`（獨立鎖，與 `news` 抓取鎖互不影響） |
-| 保存天數 | 365 天（`news_cleanup.NEWS_RETENTION_DAYS`） |
+| 保存範圍 | 本月＋上個月（Asia/Taipei 日曆月份，`news_cleanup._retention_cutoff()`） |
 | 單批操作數 | 每批 150 篇文章 × 3 個集合（news + ai_jobs + ai_insights）= 450 次操作，在 Firestore 單一 WriteBatch 500 次上限內 |
 | 單次執行上限 | 最多刪除 2,000 篇（`news_cleanup.MAX_DELETIONS_PER_RUN`），超過的留到下次排程繼續清 |
 
 - 只用 Firestore 查詢（`where(pubDate <) + order_by + limit`）分頁挑出候選
   文件，不會把整個 `news` 集合讀進記憶體篩選。
+- 截止時間的計算一律先把 `now`（呼叫端傳入的時間，預設為 UTC）用
+  `zoneinfo.ZoneInfo('Asia/Taipei')` 轉成台灣時間 aware datetime，
+  再判斷「現在是台灣的哪個日曆月份」——避免 UTC 與台灣時間相差 8 小時
+  導致月份邊界判斷錯誤（例如 UTC 16:30 在台灣已經是隔天）。
 - `pubDate` 缺失或型別無效的文件一律**跳過並記錄警告**，不冒險刪除。
 - 新聞刪除時，會一併刪除相同 article id 的 `ai_jobs`／`ai_insights`
   文件，避免孤兒資料；不影響 `stocks`／`revenue`／`financials`／
@@ -151,6 +163,39 @@ result = cleanup_expired_news(db, dry_run=True)
 
 正式排程一律使用 `dry_run=False`；`dry_run=True` 只用於人工確認即將
 刪除的範圍，不會執行任何 `delete`。
+
+## 📡 PR 媒體曝光統計（`src/features/news/usePRNews.js`）
+
+PR 媒體戰情分頁的統計卡片（今天/本週/本月）、重點媒體曝光排行、
+「創見最新報導」清單與其 Excel 匯出，改用獨立的 `usePRNews()` 查詢
+（只 `where('cat', '==', 'transcend')`，不加其他條件），不再從
+`useNewsFeed` 的結果裡篩選：
+
+- `useNewsFeed` 把全站新聞裁到最新 2000 則，本月＋上個月（現在的資料庫
+  保留範圍）的創見 PR 報導可能被排擠在這個上限之外，導致統計數字跟
+  畫面實際存在的報導對不上；`usePRNews` 直接查 Firestore 的
+  `cat=='transcend'` 分類，不受這個全站上限影響。
+- 只用單一等式篩選（沒有 `orderBy`/其他 `where`），Firestore 對這種
+  查詢一律有自動單欄位索引可用，**不需要手動部署 composite index**。
+  日期篩選（今天/本週/本月）在前端用查回來的完整 `transcend` 分類資料
+  自行計算，不會為了統計去讀整個 `news` 集合。
+- 統計卡片、排行榜、清單、匯出全部共用同一份「先過濾 `isValidTranscendPR`、
+  再 `dedupeArticlesByTitle` 去重」後的陣列，確保三處看到的「今天/本週/
+  本月」數字彼此一致、也跟畫面上實際渲染的新聞則數一致。
+- 期間邊界（今天/本週/本月）一律用 `src/utils/dates.js` 的
+  `taipeiDayStart`／`taipeiWeekStart`／`taipeiMonthStart`（固定 UTC+8
+  換算），跟後端 `news_cleanup.py` 的「本月＋上個月」保留範圍用同一套
+  Asia/Taipei 時區定義，不依賴使用者瀏覽器的本地時區。
+- 查詢失敗時會顯示明確的錯誤狀態（`⚠ 載入失敗`），不會悄悄顯示看起來
+  正常的 0。
+
+**讀取量粗估**：新訪客首次載入這個查詢，讀取數 ≈ 資料庫裡 `cat==
+'transcend'` 的文件總數（不是全站 `news` 文件數）。保留範圍改成「本月＋
+上個月」之後，這個分類的文件數大幅低於過去 365 天/全部歷史的量級——
+實際數字取決於當月創見 PR 報導的實際篇數，沒有固定值，也**不保證** Firestore
+本機快取一定完全命中（快取能大幅降低重複訪問的讀取量，但不是 0 次讀取
+的保證）；仍遠低於「讀整個 news 集合」的讀取量，且開新分頁後同一個
+瀏覽器由 `onSnapshot` 監聽增量更新，不會每次都整批重新讀取。
 
 ## 🚀 前端部署（Firebase Hosting）
 
@@ -214,7 +259,7 @@ firebase deploy --only functions
 │   ├── fetch_news.py             # 抓取邏輯（Functions 與 Actions 共用）
 │   ├── intelligence.py           # 零成本相關性、優先順序與事件規則
 │   ├── digest.py                 # DRAM/Flash 產業新聞摘要信（Phase 1，規則版摘要）
-│   ├── news_cleanup.py           # 新聞保存期限清理（只留最近 365 天）
+│   ├── news_cleanup.py           # 新聞保存期限清理（只留本月＋上個月）
 │   ├── sectigo-intermediate.pem  # Mail2000 寄信用 TLS 中介憑證（見上方摘要信章節）
 │   └── requirements.txt          # Python 相依套件（固定版本）
 ├── tools/
