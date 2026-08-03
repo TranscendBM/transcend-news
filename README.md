@@ -115,6 +115,43 @@ ollama pull gemma3:4b
   只需替換 `build_digest_email()` 產生的內文來源，篩選/寄信/進度追蹤都不用動；
   本機摘要若當次沒準備好，可退回規則版內容當備援，避免開天窗
 
+## 🗑 新聞保存期限（`functions/news_cleanup.py`，只留最近 365 天）
+
+`news` 集合只保留最近 **365 天**的新聞（依 `pubDate` 判斷，嚴格早於
+365 天前才刪除，剛好滿 365 天不刪）。刻意不使用 Firestore TTL policy——
+那是額外付費功能，而且刪除時機不可控、無法先確認範圍——改以每天一次
+的排程 + 查詢分頁自行實作，行為完全可預測、有測試覆蓋。
+
+| 項目 | 設定 |
+|---|---|
+| 排程 | `news_cleanup_job`，每天 02:30（台灣時間，離峰時段） |
+| 鎖 | `news_cleanup`（獨立鎖，與 `news` 抓取鎖互不影響） |
+| 保存天數 | 365 天（`news_cleanup.NEWS_RETENTION_DAYS`） |
+| 單批操作數 | 每批 150 篇文章 × 3 個集合（news + ai_jobs + ai_insights）= 450 次操作，在 Firestore 單一 WriteBatch 500 次上限內 |
+| 單次執行上限 | 最多刪除 2,000 篇（`news_cleanup.MAX_DELETIONS_PER_RUN`），超過的留到下次排程繼續清 |
+
+- 只用 Firestore 查詢（`where(pubDate <) + order_by + limit`）分頁挑出候選
+  文件，不會把整個 `news` 集合讀進記憶體篩選。
+- `pubDate` 缺失或型別無效的文件一律**跳過並記錄警告**，不冒險刪除。
+- 新聞刪除時，會一併刪除相同 article id 的 `ai_jobs`／`ai_insights`
+  文件，避免孤兒資料；不影響 `stocks`／`revenue`／`financials`／
+  `dividends`／`material`／`daily`／`meta` 等其他集合。
+- 重跑具冪等性：已刪除的文件不會再被選中，不需要額外的跨次執行游標。
+- 刪除失敗時例外會直接往外拋，Cloud Logging 能看到失敗紀錄，鎖也會在
+  `finally` 內釋放，下次排程會重新查詢過期範圍再試一次。
+
+**Dry-run（只統計、不刪除）**：本機或有 Firestore 存取權限的環境可直接呼叫
+
+```python
+from news_cleanup import cleanup_expired_news
+result = cleanup_expired_news(db, dry_run=True)
+# {'dry_run': True, 'matched': 已過期筆數, 'oldest': 最舊過期日期,
+#  'newest': 最新過期日期, 'skipped_invalid': 略過的異常 pubDate 筆數}
+```
+
+正式排程一律使用 `dry_run=False`；`dry_run=True` 只用於人工確認即將
+刪除的範圍，不會執行任何 `delete`。
+
 ## 🚀 前端部署（Firebase Hosting）
 
 改完 `public/index.html` 後：
@@ -177,6 +214,7 @@ firebase deploy --only functions
 │   ├── fetch_news.py             # 抓取邏輯（Functions 與 Actions 共用）
 │   ├── intelligence.py           # 零成本相關性、優先順序與事件規則
 │   ├── digest.py                 # DRAM/Flash 產業新聞摘要信（Phase 1，規則版摘要）
+│   ├── news_cleanup.py           # 新聞保存期限清理（只留最近 365 天）
 │   ├── sectigo-intermediate.pem  # Mail2000 寄信用 TLS 中介憑證（見上方摘要信章節）
 │   └── requirements.txt          # Python 相依套件（固定版本）
 ├── tools/
@@ -187,6 +225,7 @@ firebase deploy --only functions
     ├── test_intelligence.py       # 相關性與風險規則測試
     ├── test_local_ai_worker.py    # 本機端點、輸出與防衝突測試
     ├── test_digest.py            # 摘要信篩選、進度追蹤與寄信流程測試
+    ├── test_news_cleanup.py      # 新聞保存期限清理測試
 　　└── test_main_functions.py    # Cloud Functions 進入點測試（全離線）
 ```
 

@@ -329,7 +329,7 @@ const TIME_FILTERS = [
   { id: 'week', label: '本週' },
   { id: 'month', label: '本月' },
   { id: 'year', label: '本年' },
-  { id: 'all', label: '全部' },
+  { id: 'all', label: '已載入資料' },
 ];
 
 function CompetitorNews({ news }) {

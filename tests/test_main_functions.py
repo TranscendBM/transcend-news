@@ -184,7 +184,8 @@ class TestScheduledEntrypoints(unittest.TestCase):
     def test_all_jobs_have_max_instances_1(self):
         jobs = [main.stocks_job, main.news_job,
                 main.trading_job, main.finance_job, main.finance_early_month_job,
-                main.tw_dram_digest_job, main.us_dram_digest_job]
+                main.tw_dram_digest_job, main.us_dram_digest_job,
+                main.news_cleanup_job]
         for job in jobs:
             self.assertEqual(job._schedule_opts.get('max_instances'), 1,
                              f'{job.__name__} 必須設 max_instances=1')
@@ -194,7 +195,8 @@ class TestScheduledEntrypoints(unittest.TestCase):
         # (job, 對應 _run_locked ttl_minutes)——與 main.py 內設定同步維護
         ttls = {'stocks_job': 3, 'news_job': 12,
                 'trading_job': 8, 'finance_job': 12, 'finance_early_month_job': 12,
-                'tw_dram_digest_job': 5, 'us_dram_digest_job': 5}
+                'tw_dram_digest_job': 5, 'us_dram_digest_job': 5,
+                'news_cleanup_job': 15}
         for job_name, ttl in ttls.items():
             timeout_sec = getattr(main, job_name)._schedule_opts['timeout_sec']
             self.assertGreater(ttl * 60, timeout_sec,
@@ -244,6 +246,47 @@ class TestScheduledEntrypoints(unittest.TestCase):
             main.stocks_job(None)
         mrun.assert_called_once()
         self.assertEqual(mrun.call_args[0][0], 'stocks')
+
+    def test_news_cleanup_job_routes_through_lock(self):
+        with patch.object(main, '_run_locked') as mrun:
+            main.news_cleanup_job(None)
+        mrun.assert_called_once()
+        self.assertEqual(mrun.call_args[0][0], 'news_cleanup')
+
+    def test_news_cleanup_job_schedule_is_daily_at_0230_taipei(self):
+        opts = main.news_cleanup_job._schedule_opts
+        self.assertEqual(opts['schedule'], '30 2 * * *')
+        self.assertEqual(opts['timezone'], main.TZ)
+        self.assertEqual(opts['region'], main.REGION)
+        self.assertEqual(opts['max_instances'], 1)
+        # 只需要跨專案寫入權限，不需要寄信密碼；不直接比對 main.MONITOR_SERVICE_ACCOUNT
+        # 物件本身──GetDbTestBase 會在其他測試中重新賦值該全域變數，比對物件
+        # identity 會受測試執行順序影響（既有的 TestGetDb 就是這樣重新賦值的）。
+        self.assertEqual(len(opts['secrets']), 1)
+        self.assertNotIn(main.MAIL2000_SMTP_PASSWORD, opts['secrets'],
+                         '清理只需要跨專案寫入權限，不需要寄信密碼')
+
+    def test_news_cleanup_job_calls_cleanup_with_dry_run_false(self):
+        db = MagicMock(name='db')
+        with patch.object(main, 'get_db', return_value=db), \
+             patch.object(fetch_news, 'acquire_lock', return_value='tok-cleanup'), \
+             patch.object(fetch_news, 'release_lock') as mrel, \
+             patch.object(main.news_cleanup, 'cleanup_expired_news',
+                          return_value={'deleted': 3, 'skipped_invalid': 0, 'remaining': False}) as mcleanup:
+            main.news_cleanup_job(None)
+        mcleanup.assert_called_once_with(db, dry_run=False)
+        mrel.assert_called_once_with(db, 'news_cleanup', 'tok-cleanup')
+
+    def test_news_cleanup_job_releases_lock_even_when_cleanup_raises(self):
+        db = MagicMock(name='db')
+        with patch.object(main, 'get_db', return_value=db), \
+             patch.object(fetch_news, 'acquire_lock', return_value='tok-cleanup'), \
+             patch.object(fetch_news, 'release_lock') as mrel, \
+             patch.object(main.news_cleanup, 'cleanup_expired_news',
+                          side_effect=RuntimeError('Firestore 寫入失敗')):
+            with self.assertRaises(RuntimeError):
+                main.news_cleanup_job(None)
+        mrel.assert_called_once_with(db, 'news_cleanup', 'tok-cleanup')
 
 
 if __name__ == '__main__':

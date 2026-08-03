@@ -12,6 +12,7 @@
   finance_early_month_job  每月 1–10 日 09–18 時每小時（申報期加密）
   tw_dram_digest_job  平日 08:00                台灣 DRAM/Flash 產業新聞摘要信
   us_dram_digest_job  平日 16:30                美國 DRAM/Flash 產業新聞摘要信
+  news_cleanup_job    每天 02:30                新聞保存期限清理（只留最近 365 天）
 
 防重疊機制：每個 job 皆設 max_instances=1，並以 Firestore lease lock
 （meta/lock_*）防止「上一次還在跑、下一次又觸發」的重疊執行；
@@ -30,6 +31,7 @@ from firebase_functions.params import SecretParam
 
 import fetch_news
 import digest
+import news_cleanup
 
 TZ = 'Asia/Taipei'
 REGION = 'asia-east1'
@@ -179,3 +181,21 @@ def us_dram_digest_job(event: scheduler_fn.ScheduledEvent) -> None:
         result = digest.run_digest(db, 'us', MAIL2000_SMTP_PASSWORD.value)
         print(f"  ✉ 美國 DRAM/Flash 新聞摘要已寄出（{result['count']} 則）")
     _run_locked('digest_us', work, ttl_minutes=5)
+
+
+# ─── 新聞保存期限清理：只保留最近 365 天（見 news_cleanup.py）───
+# 每天凌晨低峰期執行一次，使用獨立鎖 news_cleanup（跟每 15 分鐘一次的
+# news RSS 抓取鎖分開，互不影響、可各自獨立重試）。刪除失敗時例外會
+# 直接往外拋（不吞掉），Cloud Logging 能看到失敗紀錄，下次排程會
+# 重新查詢過期範圍再試一次——不需要額外的失敗重試邏輯。
+@scheduler_fn.on_schedule(
+    schedule='30 2 * * *', timezone=TZ, region=REGION,
+    memory=MemoryOption.MB_256, timeout_sec=540, max_instances=1,
+    secrets=[MONITOR_SERVICE_ACCOUNT])
+def news_cleanup_job(event: scheduler_fn.ScheduledEvent) -> None:
+    def work(db):
+        result = news_cleanup.cleanup_expired_news(db, dry_run=False)
+        status = '尚有餘量待下次清理' if result['remaining'] else '本次已清完現有過期新聞'
+        print(f"  🗑 新聞保存期限清理：刪除 {result['deleted']} 篇"
+              f"（略過異常 pubDate {result['skipped_invalid']} 篇，{status}）")
+    _run_locked('news_cleanup', work, ttl_minutes=15)
