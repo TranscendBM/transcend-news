@@ -16,9 +16,14 @@ vi.mock('./services/firebase.js', () => ({
 // 確保不管測試實際執行的日期是哪一天，這些文章一定落在「本週」範圍內。
 const now = new Date();
 const newsFeedNews = [
+  { id: 'comp1', title: '威剛財報', cat: 'competitor', brand: 'ADATA', mediaName: '媒體C', pubDate: now },
+];
+
+// 上游市場資料改由 useUpstreamNews 專用查詢提供（不再從 useNewsFeed 的
+// news 篩選），mock 直接回傳 usUpstreamArticles。
+const usUpstreamArticles = [
   { id: 'us1', title: '上游市場新聞A', cat: 'usMarket', mediaName: '媒體A', pubDate: now },
   { id: 'us2', title: '上游市場新聞B', cat: 'usMarket', mediaName: '媒體B', pubDate: now },
-  { id: 'comp1', title: '威剛財報', cat: 'competitor', brand: 'ADATA', mediaName: '媒體C', pubDate: now },
 ];
 
 vi.mock('./features/news/useNewsFeed.js', () => ({
@@ -27,6 +32,10 @@ vi.mock('./features/news/useNewsFeed.js', () => ({
 
 vi.mock('./features/news/usePRNews.js', () => ({
   usePRNews: () => ({ articles: [], status: 'ready', refresh: vi.fn() }),
+}));
+
+vi.mock('./features/news/useUpstreamNews.js', () => ({
+  useUpstreamNews: () => ({ articles: usUpstreamArticles, status: 'ready', refresh: vi.fn() }),
 }));
 
 import App from './App.jsx';

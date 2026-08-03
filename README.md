@@ -240,6 +240,52 @@ orderBy('pubDate', 'desc')
   仍可能重新計算/重新產生讀取——**不是**「開新分頁就保證 0 次讀取」
   或「一定只計異動文件」，只是實務上通常會比較省。
 
+## 🌐 上游市場新聞（`src/features/news/useUpstreamNews.js`）
+
+上游市場分頁（供應鏈＋ DRAM/Flash 市場）的統計卡片、品牌篩選、「創見最新
+報導」以外的新聞清單，比照 PR 媒體戰情的做法，改用獨立的
+`useUpstreamNews()` 查詢，不再從 `useNewsFeed` 的結果裡篩選：
+
+```
+where('cat', 'in', ['usMarket', 'supplier'])
+where('pubDate', '>=', taipeiMonthStart(now))   // 只查「本月」（Asia/Taipei）
+orderBy('pubDate', 'desc')
+```
+
+- **只查本月，不是整個 `usMarket`/`supplier` 分類**，理由跟 `usePRNews`
+  完全相同——正式資料庫只保留「本月＋上個月」，但單一分類的文件量仍可能
+  達到數千筆，上游市場統計只需要本月資料。
+- **沿用既有的 composite index，不需要另外建立**：`transcend-news-monitor`
+  已經建立好的 index（`news` collection、`cat` Ascending、`pubDate`
+  Descending、`__name__` Descending、Collection scope）同樣能支援這個
+  `in` 查詢——Firestore 的 `in` 查詢在執行面等同拆成多個 `==` 查詢後再
+  合併結果，所需要的 index 跟單一 `==` 等值查詢相同，不需要替 `in`
+  另外申請 index。也就是說，只要 PR 媒體戰情那個 index 已經是
+  `Enabled`，上游市場這個查詢可以直接沿用，**不需要額外部署任何東西**。
+  萬一實際查詢仍回報缺少 index（`FAILED_PRECONDITION`），畫面會顯示
+  明確的「⚠ 上游新聞載入失敗」錯誤（並在瀏覽器 console 印出完整錯誤
+  訊息，其中含 Firebase 提供的建立連結），**不會**自動退回不限日期的
+  查詢；此時應照錯誤訊息裡的連結，在 `transcend-news-monitor` 專案手動
+  建立所需 index，絕不從這個 sandbox 自行部署。
+- **不會 fallback 成不限日期的查詢**：查詢失敗一律顯示明確錯誤狀態，
+  絕不悄悄退回讀取全部上游文件的舊行為。
+- `enabled` 參數：`useUpstreamNews({ enabled: tab === 'us' })`——使用者
+  停留在 PR 或 IR 分頁時不建立查詢（若已有監聽器，立即取消），切到
+  「上游市場」分頁才開始訂閱，離開時立即取消，避免不必要的讀取。
+- 跨月處理、StrictMode／unmount 安全性、`refresh()` 重試，做法都跟
+  `usePRNews` 一致（見上方章節）。
+- 資料流程統一為：`useUpstreamNews` 本月資料 → `dedupeArticlesByTitle`
+  去重 → 搜尋／媒體／情緒篩選（`NewsFilterToolbar`）→ 今天／本週／本月
+  期間篩選 → 品牌篩選（Samsung/Micron/SK Hynix…）→ 統計卡片／今日重要
+  情報／新聞清單，全部共用同一份最終結果，避免數字和清單不一致（若目前
+  選了特定品牌，「最多討論」／「品牌數量」會如實反映只剩該品牌，這是
+  同一份資料的自然結果）。
+- 期間篩選只保留今天/本週/本月（拿掉本年、已載入資料），期間邊界一律
+  用 `taipeiDayStart`／`taipeiWeekStart`／`taipeiMonthStart`，跟 PR 媒體
+  戰情、後端保留範圍用同一套 Asia/Taipei 時區定義。
+- 競品動態監測（`CompetitorNews`）維持原本自己的期間篩選與資料來源
+  （`useNewsFeed`），本次調整未變動。
+
 ## 🚀 前端部署（Firebase Hosting）
 
 改完 `public/index.html` 後：
