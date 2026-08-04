@@ -1,0 +1,78 @@
+rules_version = '2';
+
+// ─────────────────────────────────────────────────────────────
+// 創見新聞監控 — Firestore 安全規則（transcend-news-tbm 專案版本）
+//
+// 這份檔案內容跟 repo 根目錄的 firestore.rules（transcend-news-monitor
+// 專案用）逐字相同——Firestore Rules 檔案本身不含專案 ID，同一份規則
+// 邏輯可以直接套用到任何專案，這裡另存一份只是為了讓「這是為
+// transcend-news-tbm 準備的」這件事在檔名上就看得出來，避免搬遷過程中
+// 跟舊專案的版本搞混。
+//
+// ⚠️ 這份檔案本輪刻意「準備但不啟用」：
+//   - 沒有被 firebase.json 引用（"firestore": {"rules": ...} 區塊不存在）
+//   - 沒有被部署到任何專案
+// 只有在資料搬遷（tools/migrate_firestore.py --copy）完成、verify 確認
+// 一致、且已經決定要正式切換到 transcend-news-tbm 之後，才需要：
+//   1. 把這份檔案內容複製/改名成 firestore.rules（或直接調整
+//      firebase.json 的路徑指向這份檔案）
+//   2. 在 firebase.json 加入 "firestore": {"rules": "firestore.rules"}
+//   3. firebase deploy --only firestore:rules --project transcend-news-tbm
+// 詳見 docs/firestore-migration/README.md 的「正式切換步驟」。
+//
+// 原則：前端實際讀取的集合開放「公開唯讀」；所有客戶端一律禁止寫入。
+// 寫入僅由 Admin SDK 執行。內部集合 meta/*（排程鎖 lock_*、去重索引
+// 分片 newsIndex_0..f）由檔末的預設拒絕涵蓋：客戶端不可讀寫，僅
+// Admin SDK 存取。
+// ─────────────────────────────────────────────────────────────
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // 新聞（前端以 collection query 讀取）
+    match /news/{articleId} {
+      allow read: if true;
+      allow write: if false;
+    }
+
+    // 即時股價（前端讀 stocks/latest 單一文件，並以 onSnapshot 監聽）
+    match /stocks/latest {
+      allow read: if true;
+      allow write: if false;
+    }
+
+    // 月營收（前端讀 revenue/2451 與競品 3260/8271/4967/5289/4973）
+    match /revenue/{stockCode} {
+      allow read: if true;
+      allow write: if false;
+    }
+
+    // 季度損益（前端讀 financials/2451）
+    match /financials/{stockCode} {
+      allow read: if true;
+      allow write: if false;
+    }
+
+    // 股利（前端讀 dividends/2451）
+    match /dividends/{stockCode} {
+      allow read: if true;
+      allow write: if false;
+    }
+
+    // 競品重大訊息（前端讀 material/competitors 單一文件）
+    match /material/competitors {
+      allow read: if true;
+      allow write: if false;
+    }
+
+    // 每日交易資料（前端讀 daily/2451）
+    match /daily/{stockCode} {
+      allow read: if true;
+      allow write: if false;
+    }
+
+    // 其他未列出的集合一律拒絕（讀＋寫）
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}
