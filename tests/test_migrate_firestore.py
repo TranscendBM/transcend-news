@@ -753,6 +753,109 @@ class TestUnrecognizedCollections(unittest.TestCase):
 
 
 # ══════════════════════════════════════════════════════════════
+# --copy 的目的端唯讀前置檢查（來源端安全之外，目的端本身也要盤點）
+# ══════════════════════════════════════════════════════════════
+
+class TestDestPreflight(unittest.TestCase):
+    def setUp(self):
+        self.source = FakeFirestoreDB()
+        self.dest = FakeFirestoreDB()
+        self.now = _taipei(2026, 8, 3, 10, 0)
+
+    def test_reports_existing_document_counts_without_blocking(self):
+        """目的端已經有這次要搬的集合的既有文件（例如重跑續傳、或分階段
+        執行）：這是正常情況，只需要列出數量，不能被當成阻擋條件。"""
+        self.dest.seed('stocks', 'doc1', {'v': 1})
+        self.dest.seed('stocks', 'doc2', {'v': 2})
+        self.dest.seed('meta', 'digest_tw', {'lastSentAt': self.now})
+
+        report = mig._dest_preflight_report(self.dest, page_size=10, order_by_id_fn=order_by_id,
+                                             collections=('stocks', 'meta'))
+
+        self.assertEqual(report['_dest_existing_counts']['stocks'], 2)
+        self.assertEqual(report['_dest_existing_counts']['meta'], 1)
+        self.assertEqual(report['_dest_unexpected_meta_ids'], [])
+        self.assertEqual(report['_dest_unrecognized_collections'], [])
+
+    def test_dest_unrecognized_collection_blocks_the_copy_preflight_check(self):
+        self.dest.seed('some_unexpected_collection', 'x', {'y': 1})
+        source_preflight = mig.dry_run_report(self.source, self.now, page_size=10,
+                                               order_by_id_fn=order_by_id,
+                                               order_by_pubdate_fn=order_by_pubdate,
+                                               collections=('stocks',))
+        dest_preflight = mig._dest_preflight_report(self.dest, page_size=10,
+                                                     order_by_id_fn=order_by_id,
+                                                     collections=('stocks',))
+        source_preflight.update(dest_preflight)
+
+        issues = mig._blocking_issues(source_preflight)
+        self.assertTrue(any('目的端' in i and 'some_unexpected_collection' in i for i in issues))
+
+    def test_dest_unexpected_meta_doc_blocks_the_copy_preflight_check(self):
+        self.dest.seed('meta', 'some_other_apps_leftover_data', {'x': 1})
+        source_preflight = mig.dry_run_report(self.source, self.now, page_size=10,
+                                               order_by_id_fn=order_by_id,
+                                               order_by_pubdate_fn=order_by_pubdate,
+                                               collections=('meta',))
+        dest_preflight = mig._dest_preflight_report(self.dest, page_size=10,
+                                                     order_by_id_fn=order_by_id,
+                                                     collections=('meta',))
+        source_preflight.update(dest_preflight)
+
+        issues = mig._blocking_issues(source_preflight)
+        self.assertTrue(any('目的端' in i and 'some_other_apps_leftover_data' in i for i in issues))
+
+    def test_dest_lock_and_preserve_meta_docs_do_not_block_copy(self):
+        """lock_* 是排程用的暫時鎖，preserve 名單內的 ID 是本工具本來就
+        會冪等覆寫的白名單文件——這兩種都不算「非預期」，不該擋下 --copy。"""
+        self.dest.seed('meta', 'lock_news', {'owner': 'someone'})
+        self.dest.seed('meta', 'digest_tw', {'lastSentAt': self.now})
+        dest_preflight = mig._dest_preflight_report(self.dest, page_size=10,
+                                                     order_by_id_fn=order_by_id,
+                                                     collections=('meta',))
+        self.assertEqual(dest_preflight['_dest_unexpected_meta_ids'], [])
+
+    def test_dest_preflight_is_not_checked_when_absent_from_reports(self):
+        """單純呼叫 --dry-run（沒有目的端可讀）時合併進來的 reports 完全
+        沒有 _dest_* 開頭的 key——_blocking_issues 不應該把『沒有做過
+        目的端檢查』誤判成『目的端有問題』。"""
+        preflight = mig.dry_run_report(self.source, self.now, page_size=10,
+                                        order_by_id_fn=order_by_id,
+                                        order_by_pubdate_fn=order_by_pubdate,
+                                        collections=('stocks',))
+        self.assertEqual(mig._blocking_issues(preflight), [])
+
+    def test_main_copy_is_rejected_when_dest_has_an_unrecognized_collection(self):
+        self.source.seed('stocks', 'a', {'v': 1})
+        self.dest.seed('some_unexpected_collection', 'x', {'y': 1})
+
+        def fake_build_client(project_id, credentials_path=None):
+            return self.source if project_id == 'src-proj' else self.dest
+
+        with mock.patch.object(mig, 'build_client', side_effect=fake_build_client), \
+                mock.patch.object(mig, '_order_by_id_real', order_by_id), \
+                mock.patch.object(mig, '_order_by_pubdate_real', order_by_pubdate):
+            with self.assertRaises(mig.MigrationError) as ctx:
+                mig.main(['--source-project', 'src-proj', '--dest-project', 'dst-proj',
+                          '--copy', '--i-approve-writing-to-dest',
+                          '--collections', 'stocks',
+                          '--now', '2026-08-03T10:00:00+00:00'])
+        self.assertIn('目的端', str(ctx.exception))
+        # 拒絕執行時完全不應該寫入任何東西。
+        self.assertFalse(self.dest.exists('stocks', 'a'))
+
+    def test_tool_never_calls_any_firestore_delete_method(self):
+        """--copy 是純新增/覆寫；這裡直接檢查原始碼裡完全沒有呼叫任何
+        Firestore 文件/批次的 .delete()，確保『不得刪除目的端任何資料』
+        不是只靠測試涵蓋率湊出來的，而是原始碼結構上就不存在這個能力
+        （`os.remove()` 是 Checkpoint atomic write 清理暫存檔用的，跟
+        Firestore 文件刪除無關，不算在檢查範圍內）。"""
+        import inspect
+        source_code = inspect.getsource(mig)
+        self.assertNotIn('.delete(', source_code)
+
+
+# ══════════════════════════════════════════════════════════════
 # copy 報告一致性（eligible/success/skipped/failed/excluded 可核對）
 # ══════════════════════════════════════════════════════════════
 
@@ -1296,6 +1399,18 @@ class TestCredentialErrorsDoNotLeakSecrets(unittest.TestCase):
                 self.assertIn('MigrationError', type(e).__name__)
                 self.assertNotIn('private_key', msg)
                 self.assertNotIn('BEGIN PRIVATE KEY', msg)
+
+    def test_missing_credentials_file_is_detected_before_importing_google_oauth2(self):
+        """檔案存不存在的檢查必須排在 `from google.oauth2 import
+        service_account` 之前——用 sys.modules 裡塞 None 模擬『這台機器
+        根本沒安裝 google-auth』，驗證缺檔案的錯誤完全不需要碰到這個
+        import，也不會被它擋下來變成不相關的 ImportError。"""
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            fake_key_path = os.path.join(tmp_dir, 'does_not_exist_key.json')
+            with mock.patch.dict(sys.modules, {'google.oauth2': None}):
+                with self.assertRaises(mig.MigrationError) as ctx:
+                    mig.build_client('transcend-news-tbm', credentials_path=fake_key_path)
+            self.assertIn('不存在', str(ctx.exception))
 
     def test_malformed_credentials_file_error_does_not_echo_file_content(self):
         with tempfile.TemporaryDirectory() as tmp_dir:

@@ -104,6 +104,7 @@ import logging
 import os
 import sys
 import tempfile
+from pathlib import Path
 from zoneinfo import ZoneInfo
 
 logger = logging.getLogger('migrate_firestore')
@@ -534,6 +535,20 @@ def _blocking_issues(reports):
     if scan_errors:
         issues.append(f'{len(scan_errors)} 個文件的子集合檢查失敗，無法確認是否有子集合'
                        f'（無法確認不等於確認沒有，基於 fail-closed 原則拒絕 --copy）：{scan_errors}')
+    # 目的端唯讀盤點（見 _dest_preflight_report）：只有 --copy 會做這項
+    # 檢查（--dry-run 沒有目的端可讀），用 key 是否存在來判斷這次呼叫端
+    # 有沒有做過這個盤點，不能只看值是不是空的（None／[] 意義不同）。
+    if '_dest_unrecognized_collections' in reports:
+        dest_unrecognized = reports['_dest_unrecognized_collections']
+        if dest_unrecognized is None:
+            issues.append('無法列出目的端頂層集合（憑證或替身不支援 collections()），'
+                          '無法確認目的端是否有未知集合，基於 fail-closed 原則拒絕 --copy')
+        elif dest_unrecognized:
+            issues.append(f'目的端發現未知頂層集合，可能是本工具搬移範圍以外寫入的資料，'
+                          f'基於安全考量拒絕 --copy：{dest_unrecognized}')
+    if reports.get('_dest_unexpected_meta_ids'):
+        issues.append(f'目的端發現非預期的 meta 文件（不在白名單、也不是 lock_* 排程鎖），'
+                       f'拒絕 --copy：{reports["_dest_unexpected_meta_ids"]}')
     for coll, r in reports.items():
         if coll.startswith('_'):
             continue
@@ -907,6 +922,46 @@ def verify_has_findings(reports):
 
 
 # ══════════════════════════════════════════════════════════════
+# --copy 的目的端唯讀前置檢查：來源端的 dry-run 安全檢查只看得到來源，
+# 沒辦法確認目的端本身有沒有非預期的資料。這裡完全唯讀，絕不呼叫任何
+# write/set/delete/batch。
+# ══════════════════════════════════════════════════════════════
+
+def _dest_preflight_report(dest_db, page_size, order_by_id_fn, collections=ALL_KNOWN_COLLECTIONS):
+    """
+    --copy 執行前，除了來源端的 dry-run 安全檢查，也要唯讀盤點目的端
+    （transcend-news-tbm）本身現況：--copy 本身是冪等覆寫、不會刪除任何
+    資料，所以目的端已經有「這次要搬的集合」的既有文件是正常情況（重跑
+    續傳、或分階段執行），可以放行，只需要列出數量供人工核對；但如果
+    目的端出現本工具不認得的頂層集合、或不在白名單也不像 lock_* 排程鎖
+    的 meta 文件，代表目的端可能已經有本工具搬移範圍以外的資料在，直接
+    冪等覆寫可能會掩蓋掉一個原本應該先查清楚的問題，所以要擋下 --copy。
+
+    回傳 {'_dest_unrecognized_collections': [...] 或 None（無法列出）,
+          '_dest_unexpected_meta_ids': [...],
+          '_dest_existing_counts': {collection: 現有文件數}}。
+    """
+    report = {
+        '_dest_unrecognized_collections': _list_unrecognized_collections(dest_db, collections),
+        '_dest_existing_counts': {},
+        '_dest_unexpected_meta_ids': [],
+    }
+
+    for coll in FULL_COPY_COLLECTIONS + ('news',) + NEWS_RELATED_COLLECTIONS:
+        if coll in collections:
+            report['_dest_existing_counts'][coll] = _count_collection(
+                dest_db, coll, page_size, order_by_id_fn)
+
+    if 'meta' in collections:
+        dest_meta_ids = _dest_doc_ids(dest_db, 'meta', page_size, order_by_id_fn)
+        report['_dest_existing_counts']['meta'] = len(dest_meta_ids)
+        report['_dest_unexpected_meta_ids'] = sorted(
+            doc_id for doc_id in dest_meta_ids if classify_meta_doc_id(doc_id) == 'unclassified')
+
+    return report
+
+
+# ══════════════════════════════════════════════════════════════
 # Firestore client 建構（真正連線用；測試一律傳入 fake db，不會呼叫這裡）
 # ══════════════════════════════════════════════════════════════
 
@@ -917,19 +972,26 @@ def build_client(project_id, credentials_path=None):
     Application Default Credentials（環境需自行設定好）。
     絕不印出憑證內容，只在錯誤訊息中提及檔案路徑。
     """
-    # 先驗證憑證檔案、憑證檔案有問題就在這裡直接失敗——刻意排在
-    # `google.cloud.firestore` 的 import 之前，讓憑證檔案錯誤（常見的
-    # 使用者操作失誤）不需要真的建立網路用戶端就能回報清楚的錯誤，
-    # 也不需要在乾淨環境安裝 google-cloud-firestore 才能測到這個分支。
+    # 先用 Path.is_file() 檢查檔案是否存在，這一步刻意排在
+    # `from google.oauth2 import service_account` 之前——檔案不存在是
+    # 最常見的使用者操作失誤，不應該依賴（甚至先觸發）匯入
+    # google-auth／google-cloud-firestore 這兩個套件才能回報清楚的
+    # 錯誤，測試這個分支也完全不需要安裝它們。
     creds = None
     if credentials_path:
+        if not Path(credentials_path).is_file():
+            raise MigrationError(
+                f'--source-credentials/--dest-credentials 指定的檔案不存在：'
+                f'{credentials_path}（請確認路徑正確；這裡只檢查檔案是否存在，'
+                f'不會讀取或印出內容）')
+
         from google.oauth2 import service_account
         try:
             creds = service_account.Credentials.from_service_account_file(credentials_path)
-        except (FileNotFoundError, ValueError) as e:
+        except ValueError as e:
             raise MigrationError(
                 f'無法載入 --source-credentials/--dest-credentials 指定的檔案'
-                f'（{type(e).__name__}），請確認路徑正確且是合法的 service account JSON'
+                f'（{type(e).__name__}），請確認是合法的 service account JSON'
             ) from None
 
     from google.cloud import firestore as gcf  # 延後 import：測試不需要安裝這個套件
@@ -1119,15 +1181,21 @@ def main(argv=None):
         _print_verify_report(reports)
         return 1 if verify_has_findings(reports) else 0
 
-    # --copy：一律先做一次等同 --dry-run 的安全檢查，發現任何阻擋條件
-    # 就拒絕執行——沒有任何旗標可以略過這個檢查。
+    # --copy：一律先做一次等同 --dry-run 的安全檢查（來源端），加上目的端
+    # 唯讀盤點（見 _dest_preflight_report），發現任何阻擋條件就拒絕
+    # 執行——沒有任何旗標可以略過這個檢查。
     preflight = dry_run_report(source_db, now, args.page_size,
                                 _order_by_id_real, _order_by_pubdate_real, collections)
+    preflight.update(_dest_preflight_report(dest_db, args.page_size, _order_by_id_real, collections))
     issues = _blocking_issues(preflight)
     if issues:
         raise MigrationError(
             '--copy 前置安全檢查未通過，拒絕執行（沒有旗標可以略過這個檢查，'
             '請先確認/處理後再重跑，或更新程式碼白名單）：\n  - ' + '\n  - '.join(issues))
+    if preflight['_dest_existing_counts']:
+        logger.info(
+            '目的端各集合現有文件數（--copy 是冪等覆寫，不會刪除，只會覆寫/新增；'
+            '如果是重跑續傳這是正常的）：%s', preflight['_dest_existing_counts'])
 
     checkpoint = Checkpoint(args.checkpoint_file)
     reports = copy_all(source_db, dest_db, now, args.page_size, args.batch_size,

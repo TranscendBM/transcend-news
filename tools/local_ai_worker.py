@@ -3,6 +3,14 @@
 
 worker 只會從 Firestore 讀取 ``ai_jobs``，並呼叫本機 loopback 位址上的
 Ollama。它不對外提供 HTTP 服務，也不接受新聞文字中的任何工具指令。
+
+連線設定（見 init_db()）：``FIREBASE_PROJECT_ID`` 指定要連的 Firestore
+專案；憑證優先讀 ``FIREBASE_SERVICE_ACCOUNT``（新名稱），沒有設定時
+回退到舊名稱 ``MONITOR_SERVICE_ACCOUNT``（暫時向下相容，見
+docs/firestore-migration/README.md 的 local_ai_worker 切換步驟），兩者
+都沒有時使用 Application Default Credentials。**這個檔案本身不會、也
+不應該把任何 service account JSON 寫進這個 repo**——憑證只能透過環境
+變數或這台機器既有的 ADC 設定注入。
 """
 
 import argparse
@@ -138,7 +146,16 @@ def build_rules_only_output(article, rule_analysis):
 
 
 def init_db():
-    """使用環境變數或 ADC 初始化；不讀取 repo 內任何憑證檔。"""
+    """使用環境變數或 ADC 初始化；不讀取 repo 內任何憑證檔。
+
+    優先讀 FIREBASE_SERVICE_ACCOUNT（新名稱，Firestore 搬到
+    transcend-news-tbm 之後應該用這個，名稱不再暗示「monitor」這個
+    即將棄用的舊專案）；沒有設定時回退到 MONITOR_SERVICE_ACCOUNT（舊
+    名稱，向下相容，跨專案指向 transcend-news-monitor 時期使用，暫時
+    保留、不在這個改動裡移除）。兩者都沒有設定時使用 Application
+    Default Credentials——這是切換到同專案（transcend-news-tbm）之後
+    建議的做法，公司電腦上不需要放任何 service account JSON 檔案。
+    """
     import firebase_admin
     from firebase_admin import credentials, firestore
 
@@ -146,19 +163,24 @@ def init_db():
     try:
         app = firebase_admin.get_app(app_name)
     except ValueError:
-        raw = (os.environ.get('MONITOR_SERVICE_ACCOUNT') or '').strip()
+        raw = (os.environ.get('FIREBASE_SERVICE_ACCOUNT')
+               or os.environ.get('MONITOR_SERVICE_ACCOUNT') or '').strip()
         project_id = (os.environ.get('FIREBASE_PROJECT_ID') or '').strip()
         if raw:
             try:
                 service_account = json.loads(raw)
             except json.JSONDecodeError:
-                raise RuntimeError('MONITOR_SERVICE_ACCOUNT 不是有效 JSON（內容不會顯示）') from None
+                raise RuntimeError(
+                    'FIREBASE_SERVICE_ACCOUNT/MONITOR_SERVICE_ACCOUNT 不是有效 JSON'
+                    '（內容不會顯示）') from None
             project_id = service_account.get('project_id') or project_id
             cred = credentials.Certificate(service_account)
         else:
             cred = credentials.ApplicationDefault()
         if not project_id:
-            raise RuntimeError('請設定 FIREBASE_PROJECT_ID，或提供含 project_id 的 MONITOR_SERVICE_ACCOUNT')
+            raise RuntimeError(
+                '請設定 FIREBASE_PROJECT_ID，或提供含 project_id 的 '
+                'FIREBASE_SERVICE_ACCOUNT/MONITOR_SERVICE_ACCOUNT')
         app = firebase_admin.initialize_app(cred, {'projectId': project_id}, name=app_name)
     return firestore.client(app=app)
 

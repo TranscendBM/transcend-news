@@ -273,6 +273,48 @@ Web App 是會實際建立雲端資源的動作，不屬於本輪「唯讀盤點
 所在的專案脈絡已經是 `transcend-news-tbm`，不能不小心用同一份
 `firebase.json` 又打去部署 `transcend-news-monitor`。）
 
+### 本機 AI Worker（`tools/local_ai_worker.py`）
+
+這是切換流程裡容易被漏掉的第三個 Firestore writer——它不是 Cloud
+Scheduler 觸發的 Functions，而是在公司電腦上手動／常駐執行的程序，
+會讀寫 `ai_jobs`、寫入 `ai_insights`、更新工作的 `processing`/`pending`/
+`completed` 狀態（見 `claim_job()`/`complete_job()`/`fail_job()`）。**暫停
+Cloud Scheduler 不會影響它**——它跟 Scheduler 完全獨立，切換流程如果
+只暫停 Scheduler、沒有處理這個 worker，final copy 期間它仍然會繼續對
+（切換前的）舊專案寫入，造成 split-brain。
+
+切換時要做的事（詳細時機見第 8 節步驟 F／G／M／N）：
+
+1. **切換前停止**：在所有跑這個 worker 的公司電腦上停止全部
+   `local_ai_worker.py` 程序（`--once` 模式跑完自然結束；常駐模式需要
+   手動中止），並確認沒有 `ai_jobs` 文件停在 `processing`——`claim_job()`
+   會設定 10 分鐘的 `leaseUntil`，停止程序後只要等到現有的 lease 過期
+   （或看到工作已經 `completed`/`failed`），就可以安全視為靜止，不需要
+   手動改資料。
+2. **final copy／final verify 期間必須保持停止**：這段期間不應該有
+   任何 worker 程序在跑，否則 final copy 讀到的 `ai_jobs`/`ai_insights`
+   會跟實際狀態對不上。
+3. **切換後改連 `transcend-news-tbm`**：把執行 worker 的環境變數
+   `FIREBASE_PROJECT_ID` 改成 `transcend-news-tbm`。憑證優先使用
+   Application Default Credentials（`gcloud auth application-default
+   login`，這台電腦本身的登入身分，不需要任何檔案）；如果一定要用
+   service account，只給 `roles/datastore.user` 這種最小權限，而且
+   **絕對不能把 service account JSON 寫進這個 repo**（見第 7 節 IAM
+   表格）。舊的 `MONITOR_SERVICE_ACCOUNT` 環境變數暫時保留、不用
+   立刻改名——`init_db()` 已經支援新名稱 `FIREBASE_SERVICE_ACCOUNT`
+   並向下相容舊名稱（見 `tools/local_ai_worker.py`），這個 PR 不移除
+   舊名稱的相容性。
+4. **驗證後才恢復執行**：改完環境變數後，先手動執行一次
+   `python3 tools/local_ai_worker.py --once --rules-only`（或非
+   `--rules-only`，如果 Ollama 也已經備妥），確認能從 `transcend-news-tbm`
+   讀到 `ai_jobs`、正確寫入 `ai_insights`，才能讓它恢復常駐執行；不能
+   假設「Functions 那邊測過就代表這個 worker 也沒問題」——兩者是完全
+   獨立的連線設定。
+5. **觀察期後才撤銷舊憑證**：舊的 `MONITOR_SERVICE_ACCOUNT`（連同
+   Functions 那份，見第 8 節步驟 O）先保留一段觀察期，確認所有跑這個
+   worker 的機器都已經改用新設定、運作正常後，才連同 Functions 的
+   Secret 一起撤銷。
+
 ---
 
 ## 7. 實際所需 IAM 權限
@@ -282,6 +324,7 @@ Web App 是會實際建立雲端資源的動作，不屬於本輪「唯讀盤點
 | `transcend-news-monitor` | `--dry-run`／`--copy`／`--verify` 的來源端讀取（自始至終唯讀） | `roles/datastore.viewer` | **缺少**（兩把現有金鑰皆 403，見第 1 節） |
 | `transcend-news-tbm` | `--copy` 的目的端寫入、`--verify` 的目的端讀取 | `roles/datastore.user` | 已具備（`deploy-bot@transcend-news-tbm` 與 `firebase-adminsdk-fbsvc@transcend-news-tbm` 皆可讀寫，`transcend-news-tbm` 這次做 `listCollectionIds` 測試回傳 `200`） |
 | `transcend-news-tbm`（切換後，Functions 執行身分） | 同專案 Firestore 讀寫（取代現在跨專案的 `MONITOR_SERVICE_ACCOUNT`） | `roles/datastore.user`（通常 Cloud Functions 預設服務帳號已有） | 待切換時確認 |
+| `transcend-news-tbm`（切換後，`tools/local_ai_worker.py` 執行身分） | 讀 `news`/`ai_jobs`、寫 `ai_insights`、更新 `ai_jobs` 狀態 | `roles/datastore.user`；優先用這台公司電腦的 Application Default Credentials，不要另外簽發、更不能把 service account JSON 寫進 repo | 待切換時確認（見第 6 節「本機 AI Worker」小節） |
 
 ---
 
@@ -324,49 +367,98 @@ split-brain（見第 9 節 rollback 的說明，這也是切換後 rollback 不�
    確認 initial copy 沒有嚴重問題（`missing_in_dest`/`differs` 應該很少，
    因為 monitor 端在 copy 期間仍持續變動是正常的）。
 
-**F. 暫停所有會寫 Firestore 的 Cloud Scheduler jobs**
-   `stocks_job`/`news_job`/`trading_job`/`finance_job`/
-   `finance_early_month_job`/`tw_dram_digest_job`/`us_dram_digest_job`/
-   `news_cleanup_job` 全部暫停（Cloud Scheduler 主控台或
-   `gcloud scheduler jobs pause`）。**從這一刻起，monitor 端不再有新
-   寫入**——這是避免 split-brain 的關鍵：writer 只會存在於這之後才
-   啟用的 tbm 端，不會同時有兩個專案接受寫入。
+**F. 停止所有會寫 Firestore 的 writer——Cloud Scheduler 與本機 AI Worker**
+   這一步有兩個獨立的 writer 都要處理，缺一個都不夠：
+   1. 暫停 `stocks_job`/`news_job`/`trading_job`/`finance_job`/
+      `finance_early_month_job`/`tw_dram_digest_job`/`us_dram_digest_job`/
+      `news_cleanup_job` 全部 8 個 Cloud Scheduler jobs（Console 或
+      `gcloud scheduler jobs pause`）。
+   2. 依第 6 節「本機 AI Worker」小節，停止所有公司電腦上的
+      `local_ai_worker.py` 程序，並確認沒有 `ai_jobs` 文件停在
+      `processing`（或等現有 `leaseUntil` 過期／工作已完成）。**暫停
+      Scheduler 不會停止這個 worker**——它是獨立程序，這一步不能省略。
 
-**G. 不使用舊 checkpoint，執行 final full/delta copy**
+   **從這一刻起，monitor 端不應該再有任何新寫入**——這是避免
+   split-brain 的關鍵：writer 只會存在於這之後才啟用的 tbm 端，不會
+   同時有兩個專案接受寫入。但「暫停」本身不保證「已經沒有寫入在飛行
+   中」，下一步 G 是正式的最終確認。
+
+**G. final copy 前的靜止狀態確認清單**
+   Scheduler 暫停不會取消已經在執行中的 Cloud Function——這一步要
+   實際確認「真的靜止了」，不是「已經下指令暫停」。以下每一項都要
+   個別確認，**任何一項無法確認，就停止切換、查清楚原因，不能帶著
+   不確定性繼續執行 final copy**：
+   - [ ] 8 個 Cloud Scheduler jobs 全部確認是 `PAUSED`（用 Console 或
+     `gcloud scheduler jobs describe <job> --format='value(state)'`
+     逐一確認狀態欄位，不能只憑「有按過暫停」就假設成功）。
+   - [ ] Cloud Logging／Console 確認沒有任何排程 Function 仍在執行中
+     （查最近一次 invocation 的結束時間，確保沒有卡住或還在跑的
+     instance）。
+   - [ ] `meta/lock_*` 沒有任何有效的 lease（讀取這些文件確認鎖定用的
+     時間戳記已經過期或文件不存在；仍在有效期內的鎖代表對應的排程
+     可能還在跑）。
+   - [ ] 步驟 F 停止的所有 `local_ai_worker.py` 程序都已確認結束（沒有
+     殘留的 process）。
+   - [ ] 沒有 `ai_jobs` 文件停在 `status == 'processing'`（或其
+     `leaseUntil` 已經過期，可視為安全跳過——`recover_stale_jobs()`
+     本來就會在下次執行時把這種工作收回成 `pending`）。
+   - [ ] 記錄這次 final copy 即將使用的固定 `--now` 時間（寫進切換
+     紀錄，不要用「不指定、讓工具讀系統當下時間」——固定下來才能在
+     事後追查 retention cutoff 邊界時對得上）。
+
+**H. 不使用舊 checkpoint，執行 final full/delta copy**
    刻意不沿用步驟 D 的 checkpoint 檔案（換一個新的 `--checkpoint-file`
-   路徑，或不指定）——因為現在 monitor 端已經靜止（writer 暫停），這次
-   要確保是對「靜止狀態」做一次完整、乾淨的同步，不是接續一個可能跨越
-   了 monitor 仍在寫入期間的舊游標。
+   路徑，或不指定），並使用步驟 G 記錄下來的固定 `--now`——因為現在
+   monitor 端已經確認靜止（步驟 G），這次要確保是對「靜止狀態」做一次
+   完整、乾淨的同步，不是接續一個可能跨越了 monitor 仍在寫入期間的
+   舊游標。
 
-**H. final verify，必須零 missing、零 differs**
+**I. final verify，必須零 missing、零 differs**
    `--verify` 的 `missing_in_dest`/`differs`/`extra_in_dest` 必須全部
    是空的（結束碼 `0`）才能繼續下一步；只要有任何一筆對不上，停下來
    查清楚原因，不能帶著已知的不一致繼續切換。
 
-**I. 切換並部署 Functions**
+**J. 切換並部署 Functions**
    依第 6 節切換 `main.py` 的 `get_db()`（改用 `db_same_project.py`）、
    移除 `MONITOR_SERVICE_ACCOUNT` 依賴，
    `firebase deploy --only functions --project transcend-news-tbm`。
 
-**J. 切換並部署 Hosting**
+**K. 部署後再次確認 Scheduler 仍為 PAUSED**
+   部署 scheduled Functions（`@scheduler_fn.on_schedule(...)`）有可能
+   連帶更新 Cloud Scheduler 的 job 設定（包含 enabled/disabled 狀態）——
+   步驟 J 的部署完成後，**立刻**用 Console 或 `gcloud scheduler jobs
+   describe` 重新逐一確認全部 8 個 job 仍然是 `PAUSED`。如果發現任何
+   job 被部署重新啟用了，立刻重新暫停，不要等到步驟 M 才發現——避免
+   部分函式部署完成、Scheduler 又被意外恢復的情況下，在 Hosting 前端
+   都還沒切換、正式驗證也還沒做完之前，就提前開始寫入 `transcend-news-tbm`。
+
+**L. 切換並部署 Hosting**
    `src/services/firebase.js` 的 `FIREBASE_CONFIG` 換成步驟 A 的值，
    `npm run build && firebase deploy --only hosting:main --project transcend-news-tbm`。
 
-**K. 做正式網站與 Firestore 寫入驗證**
-   打開正式網站確認資料正常顯示（PR/IR/上游市場三個分頁）、Console 沒有
-   新增錯誤；手動確認至少一次 Functions 執行有成功寫入 tbm 的 Firestore
-   （例如短暫恢復 `stocks_job` 觀察一次股價更新是否寫進 tbm）。
+**M. 做正式網站、Firestore 寫入、與本機 AI Worker 的驗證**
+   - 打開正式網站確認資料正常顯示（PR/IR/上游市場三個分頁）、Console
+     沒有新增錯誤；手動確認至少一次 Functions 執行有成功寫入 tbm 的
+     Firestore（例如短暫恢復 `stocks_job` 觀察一次股價更新是否寫進
+     tbm，驗證完再暫停回去，等步驟 N 才正式恢復）。
+   - 依第 6 節「本機 AI Worker」小節，把 `local_ai_worker.py` 的
+     `FIREBASE_PROJECT_ID` 改成 `transcend-news-tbm` 後，先手動執行一次
+     確認能正確從 tbm 讀到 `ai_jobs`、寫入 `ai_insights`，才能讓它恢復
+     常駐執行（下一步 N）。
 
-**L. 恢復 Scheduler jobs**
-   確認 K 沒問題後，把步驟 F 暫停的所有 job 恢復正常排程。
+**N. 恢復 Scheduler jobs 與本機 AI Worker**
+   確認 M 沒問題後，把步驟 F 暫停的所有 Scheduler job 恢復正常排程，
+   並讓改連 tbm 後驗證過的 `local_ai_worker.py` 恢復常駐執行。
 
-**M. 觀察完整排程週期**
+**O. 觀察完整排程週期**
    觀察至少一個完整排程週期（含每天 02:30 的 `news_cleanup_job`、每天
-   17:30 的 `finance_job`、平日 08:00/16:30 的兩個摘要信 job）確認一切
-   正常，才考慮之後撤銷 `MONITOR_SERVICE_ACCOUNT` secret 與
-   `transcend-news-monitor` 那把對應金鑰（撤銷前務必再三確認沒有其他
-   用途還在依賴它）。**`transcend-news-monitor` 的 Firestore 資料庫本身
-   不需要刪除**，作為切換後一段時間的最終備援。
+   17:30 的 `finance_job`、平日 08:00/16:30 的兩個摘要信 job，以及
+   `local_ai_worker.py` 至少完成幾輪工作）確認一切正常，才考慮之後
+   撤銷 `MONITOR_SERVICE_ACCOUNT` secret（Functions 用的）、
+   `MONITOR_SERVICE_ACCOUNT`/舊 service account（`local_ai_worker.py`
+   若曾經用同一組憑證）、以及 `transcend-news-monitor` 那把對應金鑰
+   （撤銷前務必再三確認沒有其他用途還在依賴它）。**`transcend-news-monitor`
+   的 Firestore 資料庫本身不需要刪除**，作為切換後一段時間的最終備援。
 
 ## 9. Rollback 步驟
 
@@ -379,11 +471,12 @@ split-brain（見第 9 節 rollback 的說明，這也是切換後 rollback 不�
 - **步驟 A–E（Web App 建立／Rules-Indexes 部署／initial copy／verify，
   Scheduler 尚未暫停）之前想退回**：monitor 端全程唯讀，直接放棄這些
   準備動作即可，不影響任何正式服務，資料不會遺失。
-- **步驟 F 之後（Scheduler 已暫停，monitor 端不再接受新寫入）想退回，
-  但還沒切換 Functions/Hosting（步驟 I/J 之前）**：把步驟 F 暫停的
-  Scheduler jobs 恢復即可——monitor 端恢復接受寫入，因為 Functions/前端
-  都還沒切換到 tbm，沒有任何一方誤寫，資料不會遺失。
-- **步驟 I/J 之後（Functions/Hosting 已經切到 tbm、tbm 已經有新寫入）
+- **步驟 F 之後（Scheduler 已暫停、`local_ai_worker.py` 已停止，monitor
+  端不再接受新寫入）想退回，但還沒切換 Functions/Hosting（步驟 J/L
+  之前）**：把步驟 F 暫停的 Scheduler jobs 恢復、`local_ai_worker.py`
+  改回原本連 monitor 的設定即可——monitor 端恢復接受寫入，因為
+  Functions/前端都還沒切換到 tbm，沒有任何一方誤寫，資料不會遺失。
+- **步驟 J/L 之後（Functions/Hosting 已經切到 tbm、tbm 已經有新寫入）
   想退回**：**不能只是把設定改回去**，而且**絕對不能把
   `tools/migrate_firestore.py` 的 `--source-project`/`--dest-project`
   對調直接反過來跑一次當作 rollback 手段**——這個工具是針對「monitor
@@ -404,7 +497,8 @@ split-brain（見第 9 節 rollback 的說明，這也是切換後 rollback 不�
      取捨」這種雙向同步情境。
 
   正確做法：
-  1. **立即先暫停 tbm 端的 Scheduler jobs（此時唯一的 writer）**，停止
+  1. **立即先暫停 tbm 端的 Scheduler jobs，並停止所有連到 tbm 的
+     `local_ai_worker.py` 程序（這兩者是此時僅有的 writer）**，停止
      任何一端繼續寫入——這是切換後一旦發現問題應該做的第一步，不需要
      等資料方向想清楚了才做。
   2. Rollback 需要一個**獨立規劃、審查並測試過的增量同步工具**（目前
@@ -428,5 +522,5 @@ split-brain（見第 9 節 rollback 的說明，這也是切換後 rollback 不�
 - **最壞情況（切換後才發現資料有問題，且已經撤銷了
   `MONITOR_SERVICE_ACCOUNT`）**：`transcend-news-monitor` 的 Firestore
   資料庫本身仍然存在（只是 Functions 沒有憑證存取），還原一把新的
-  service account 金鑰即可恢復存取，但仍然必須先執行上面「步驟 I/J
+  service account 金鑰即可恢復存取，但仍然必須先執行上面「步驟 J/L
   之後」的資料方向決定與同步流程，不能直接切回去。
