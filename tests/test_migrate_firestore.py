@@ -16,6 +16,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / 'tools'))
 
@@ -56,6 +57,9 @@ class _FakeDocRef:
         return _FakeSnap(self.doc_id, data, exists=data is not None, reference=self)
 
     def collections(self):
+        error = self.db.collections_call_errors.get((self.coll, self.doc_id))
+        if error is not None:
+            raise error
         names = self.db.subcollections.get((self.coll, self.doc_id), [])
         return [_FakeCollection(self.db, name) for name in names]
 
@@ -169,6 +173,7 @@ class FakeFirestoreDB:
     def __init__(self):
         self.store = {}  # {collection: {doc_id: data}}
         self.subcollections = {}  # {(collection, doc_id): [sub_collection_name, ...]}
+        self.collections_call_errors = {}  # {(collection, doc_id): Exception instance}
         self.commit_calls = 0
         self.write_calls = 0
         self.fail_at_commit_number = None  # 1-indexed；剛好是第幾次 commit() 呼叫時模擬失敗
@@ -187,6 +192,11 @@ class FakeFirestoreDB:
 
     def seed_subcollection(self, coll, doc_id, sub_collection_name):
         self.subcollections.setdefault((coll, doc_id), []).append(sub_collection_name)
+
+    def seed_collections_error(self, coll, doc_id, exception):
+        """讓 <coll>/<doc_id> 的 .reference.collections() 呼叫拋出
+        exception，模擬子集合檢查本身失敗（例如權限不足或 API 錯誤）。"""
+        self.collections_call_errors[(coll, doc_id)] = exception
 
     def exists(self, coll, doc_id):
         return doc_id in self.store.get(coll, {})
@@ -636,6 +646,7 @@ class TestSubcollectionSafetyNet(unittest.TestCase):
                                      order_by_id_fn=order_by_id, order_by_pubdate_fn=order_by_pubdate,
                                      collections=('stocks',))
         self.assertEqual(report['_subcollections_found'], [])
+        self.assertEqual(report['_subcollection_scan_errors'], [])
 
     def test_subcollection_finding_blocks_the_copy_preflight_check(self):
         self.source.seed('stocks', 'latest', {'price': 1})
@@ -645,6 +656,64 @@ class TestSubcollectionSafetyNet(unittest.TestCase):
                                         collections=('stocks',))
         issues = mig._blocking_issues(preflight)
         self.assertTrue(any('子集合' in i for i in issues))
+
+    def test_collections_check_error_is_recorded_as_a_scan_error_not_confirmed_safe(self):
+        """檢查子集合時發生錯誤（例如權限不足、API 暫時失敗）：這是
+        『無法確認』，絕不能被誤判成『確認沒有子集合』——dry-run 仍然要
+        能跑完，但必須把這個文件明確列在 scan_errors 裡，且不能出現在
+        _subcollections_found（那裡只放『確認找到』的）。"""
+        self.source.seed('stocks', 'latest', {'price': 1})
+        self.source.seed_collections_error('stocks', 'latest', PermissionError('no access'))
+
+        report = mig.dry_run_report(self.source, self.now, page_size=10,
+                                     order_by_id_fn=order_by_id, order_by_pubdate_fn=order_by_pubdate,
+                                     collections=('stocks',))
+
+        self.assertEqual(report['_subcollections_found'], [])
+        scan_errors = report['_subcollection_scan_errors']
+        self.assertEqual(len(scan_errors), 1)
+        self.assertEqual(scan_errors[0]['collection'], 'stocks')
+        self.assertEqual(scan_errors[0]['doc_id'], 'latest')
+
+    def test_subcollection_scan_error_blocks_the_copy_preflight_check(self):
+        self.source.seed('stocks', 'latest', {'price': 1})
+        self.source.seed_collections_error('stocks', 'latest', PermissionError('no access'))
+
+        preflight = mig.dry_run_report(self.source, self.now, page_size=10,
+                                        order_by_id_fn=order_by_id, order_by_pubdate_fn=order_by_pubdate,
+                                        collections=('stocks',))
+        issues = mig._blocking_issues(preflight)
+        self.assertTrue(any('無法確認' in i for i in issues))
+
+    def test_api_error_during_subcollection_check_also_blocks_the_copy_preflight_check(self):
+        """不只是權限錯誤——任何在檢查子集合時發生的例外（例如暫時性的
+        API 錯誤）都要 fail-closed，一樣擋下 --copy。"""
+        self.source.seed('stocks', 'latest', {'price': 1})
+        self.source.seed_collections_error('stocks', 'latest', RuntimeError('503 backend error'))
+
+        preflight = mig.dry_run_report(self.source, self.now, page_size=10,
+                                        order_by_id_fn=order_by_id, order_by_pubdate_fn=order_by_pubdate,
+                                        collections=('stocks',))
+        issues = mig._blocking_issues(preflight)
+        self.assertTrue(any('無法確認' in i for i in issues))
+
+    def test_snapshot_without_a_checkable_reference_is_recorded_as_a_scan_error(self):
+        """就算文件快照根本沒有可用的 reference（理論上不該發生，但如果
+        發生了）：一樣要記錄成『無法確認』，不能被 _check_subcollections
+        直接默默略過當作沒事。"""
+
+        class _NoReferenceSnap:
+            id = 'weird-doc'
+            reference = None
+
+        findings = []
+        scan_errors = []
+        mig._check_subcollections(_NoReferenceSnap(), 'stocks', findings, scan_errors)
+
+        self.assertEqual(findings, [])
+        self.assertEqual(len(scan_errors), 1)
+        self.assertEqual(scan_errors[0]['collection'], 'stocks')
+        self.assertEqual(scan_errors[0]['doc_id'], 'weird-doc')
 
 
 # ══════════════════════════════════════════════════════════════
@@ -789,10 +858,18 @@ class TestCheckpointFailClosed(unittest.TestCase):
             cp_path = os.path.join(tmp_dir, 'checkpoint.json')
             now_august = _taipei(2026, 8, 3, 10, 0)
             checkpoint = mig.Checkpoint(cp_path)
-            mig.copy_all(self.source, self.dest, now_august, page_size=10, batch_size=400,
-                         order_by_id_fn=order_by_id, order_by_pubdate_fn=order_by_pubdate,
-                         checkpoint=checkpoint, collections=('news',),
-                         source_project='p-src', dest_project='p-dst')
+            report1 = mig.copy_all(self.source, self.dest, now_august, page_size=10, batch_size=400,
+                                    order_by_id_fn=order_by_id, order_by_pubdate_fn=order_by_pubdate,
+                                    checkpoint=checkpoint, collections=('news',),
+                                    source_project='p-src', dest_project='p-dst')
+            # 第一次執行必須真的成功寫入 news 文件——這裡曾經因為 news 的
+            # checkpoint 游標含 datetime、無法 JSON 序列化，導致 commit 明明
+            # 成功卻被誤判成批次寫入失敗；如果沒有斷言這裡，那次迴歸會被
+            # 完全漏掉（第二次執行仍然「看起來」正常）。
+            self.assertEqual(report1['news']['failed'], 0)
+            self.assertFalse(report1['news']['halted'])
+            self.assertEqual(report1['news']['success'], 1)
+            self.assertTrue(self.dest.exists('news', 'july'))
 
             self.source.seed('news', 'september', _news('九月', _taipei(2026, 9, 10)))
             now_september = _taipei(2026, 9, 15, 10, 0)  # cutoff 從 7/1 變成 8/1
@@ -807,6 +884,36 @@ class TestCheckpointFailClosed(unittest.TestCase):
             # 搬移；'september' 是這次唯一符合範圍的文章。
             self.assertEqual(report['news']['success'], 1)
             self.assertTrue(self.dest.exists('news', 'september'))
+
+    def test_news_with_checkpoint_file_never_attempts_to_serialize_a_datetime(self):
+        """news 的排序游標是 (pubDate datetime, 文件 ID)，即使呼叫端指定了
+        --checkpoint-file，news 也絕不能把這個游標寫進 checkpoint 檔案——
+        json.dump() 沒辦法序列化 datetime。這裡同時搬 news 與 stocks，
+        確認：(1) news 複製成功且不留任何 checkpoint 紀錄；(2) stocks 這種
+        真的支援續傳的集合，checkpoint 檔案裡有它的紀錄；(3) 檔案本身
+        全程是合法 JSON（沒有中途因為 news 而寫入失敗)。"""
+        self.source.seed('news', 'a', _news('文章A', _taipei(2026, 7, 10)))
+        self.source.seed('news', 'b', _news('文章B', _taipei(2026, 7, 11)))
+        self.source.seed('stocks', 'doc1', {'v': 1})
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            cp_path = os.path.join(tmp_dir, 'checkpoint.json')
+            checkpoint = mig.Checkpoint(cp_path)
+            report = mig.copy_all(self.source, self.dest, self.now, page_size=10, batch_size=400,
+                                   order_by_id_fn=order_by_id, order_by_pubdate_fn=order_by_pubdate,
+                                   checkpoint=checkpoint, collections=('news', 'stocks'),
+                                   source_project='p-src', dest_project='p-dst')
+
+            self.assertEqual(report['news']['failed'], 0)
+            self.assertFalse(report['news']['halted'])
+            self.assertEqual(report['news']['success'], 2)
+            self.assertIsNone(report['news']['checkpoint_error'])
+            self.assertTrue(self.dest.exists('news', 'a'))
+            self.assertTrue(self.dest.exists('news', 'b'))
+
+            with open(cp_path, 'r', encoding='utf-8') as f:
+                on_disk = json.load(f)  # 必須是合法 JSON——news 從未嘗試寫入非法內容
+            self.assertNotIn('news', on_disk['cursors'])
+            self.assertIn('stocks', on_disk['cursors'])
 
     def test_source_or_dest_project_change_invalidates_the_checkpoint(self):
         self.source.seed('stocks', 'a', {'v': 1})
@@ -883,6 +990,69 @@ class TestCheckpointFailClosed(unittest.TestCase):
                 self.assertEqual(self.dest.store['stocks'][f'doc{i:03d}'], {'v': i})
 
 
+class _CheckpointThatFailsToPersist:
+    """跟 mig.Checkpoint 介面相容的測試替身：cursor_for()/load_or_reset()
+    正常運作，但 mark() 一律拋出例外，模擬「batch commit 已經成功，但
+    checkpoint 進度檔寫入失敗」（例如磁碟已滿、檔案系統暫時唯讀）。"""
+
+    def __init__(self):
+        self.data = {'fingerprint': None, 'cursors': {}}
+
+    def load_or_reset(self, fingerprint):
+        pass
+
+    def cursor_for(self, collection):
+        return None
+
+    def mark(self, collection, cursor_values):
+        raise OSError('simulated: checkpoint 進度檔寫入失敗（例如磁碟已滿）')
+
+
+class TestCommitSuccessCheckpointPersistenceFailure(unittest.TestCase):
+    """commit 成功、checkpoint 寫檔失敗必須分開處理：已經成功寫入目的端
+    的文件要計入 success，不能因為後面的 checkpoint 寫檔失敗就同時算進
+    failed（那樣 success+failed 會超過實際處理的文件數，等於重複計數），
+    但仍然要中止這個集合本次的後續處理並回報 checkpoint_error。"""
+
+    def setUp(self):
+        self.source = FakeFirestoreDB()
+        self.dest = FakeFirestoreDB()
+        self.now = _taipei(2026, 8, 3, 10, 0)
+
+    def test_documents_count_as_success_not_failed_when_only_checkpoint_write_fails(self):
+        for i in range(5):
+            self.source.seed('stocks', f'doc{i:03d}', {'v': i})
+        checkpoint = _CheckpointThatFailsToPersist()
+
+        report = mig.copy_all(self.source, self.dest, self.now, page_size=10, batch_size=10,
+                               order_by_id_fn=order_by_id, order_by_pubdate_fn=order_by_pubdate,
+                               checkpoint=checkpoint, collections=('stocks',),
+                               source_project='p-src', dest_project='p-dst')
+
+        r = report['stocks']
+        # commit 本身確實成功——目的端真的收到這 5 筆——所以必須計入
+        # success，絕不能同時把這批算進 failed。
+        self.assertEqual(r['success'], 5)
+        self.assertEqual(r['failed'], 0)
+        self.assertEqual(r['failed_ids'], [])
+        for i in range(5):
+            self.assertTrue(self.dest.exists('stocks', f'doc{i:03d}'))
+        self.assertTrue(r['halted'])
+        self.assertIsNotNone(r['checkpoint_error'])
+        self.assertIn('OSError', r['checkpoint_error'])
+
+    def test_checkpoint_persistence_failure_makes_copy_has_failures_true(self):
+        self.source.seed('stocks', 'a', {'v': 1})
+        checkpoint = _CheckpointThatFailsToPersist()
+
+        report = mig.copy_all(self.source, self.dest, self.now, page_size=10, batch_size=10,
+                               order_by_id_fn=order_by_id, order_by_pubdate_fn=order_by_pubdate,
+                               checkpoint=checkpoint, collections=('stocks',),
+                               source_project='p-src', dest_project='p-dst')
+
+        self.assertTrue(mig.copy_has_failures(report))
+
+
 # ══════════════════════════════════════════════════════════════
 # 部分失敗後可重跑（沒有 checkpoint 檔案時：從頭冪等重跑）
 # ══════════════════════════════════════════════════════════════
@@ -929,6 +1099,86 @@ class TestPartialFailureThenResume(unittest.TestCase):
         self.assertFalse(report2['ai_jobs']['halted'])
         self.assertTrue(self.dest.exists('ai_jobs', 'a'))
         self.assertTrue(self.dest.exists('ai_jobs', 'b'))
+
+
+# ══════════════════════════════════════════════════════════════
+# copy 有失敗時，CLI 結束碼必須非 0（copy_has_failures + main() 本身）
+# ══════════════════════════════════════════════════════════════
+
+class TestCopyHasFailures(unittest.TestCase):
+    def test_false_when_nothing_failed(self):
+        reports = {'stocks': {'failed': 0, 'halted': False, 'checkpoint_error': None}}
+        self.assertFalse(mig.copy_has_failures(reports))
+
+    def test_true_when_any_collection_has_failed_docs(self):
+        reports = {'stocks': {'failed': 0, 'halted': False, 'checkpoint_error': None},
+                   'news': {'failed': 3, 'halted': True, 'checkpoint_error': None}}
+        self.assertTrue(mig.copy_has_failures(reports))
+
+    def test_true_when_any_collection_is_halted_even_without_a_failed_count(self):
+        # commit 成功、checkpoint 寫檔失敗的情境：failed 仍是 0，但 halted
+        # 為 True——這種情況也必須讓 CLI 非 0 結束，不能只看 failed。
+        reports = {'stocks': {'failed': 0, 'halted': True, 'checkpoint_error': None}}
+        self.assertTrue(mig.copy_has_failures(reports))
+
+    def test_true_when_any_collection_has_a_checkpoint_error(self):
+        reports = {'stocks': {'failed': 0, 'halted': True,
+                              'checkpoint_error': 'OSError: disk full'}}
+        self.assertTrue(mig.copy_has_failures(reports))
+
+    def test_ignores_underscore_prefixed_summary_keys(self):
+        reports = {'_unrecognized_collections': ['x'],
+                   'stocks': {'failed': 0, 'halted': False, 'checkpoint_error': None}}
+        self.assertFalse(mig.copy_has_failures(reports))
+
+
+class TestMainCopyExitCode(unittest.TestCase):
+    """直接呼叫 mig.main([...])，而不是只測 copy_has_failures() 這個輔助
+    函式本身——確保 CLI 層真的把這個判斷接了起來，不會出現「輔助函式
+    邏輯正確，但 main() 忘了呼叫它」這種情況漏測。"""
+
+    def test_main_returns_nonzero_when_a_batch_commit_fails(self):
+        source = FakeFirestoreDB()
+        dest = FakeFirestoreDB()
+        for i in range(20):
+            source.seed('stocks', f'doc{i:03d}', {'v': i})
+        dest.fail_at_commit_number = 1
+
+        def fake_build_client(project_id, credentials_path=None):
+            return source if project_id == 'src-proj' else dest
+
+        with mock.patch.object(mig, 'build_client', side_effect=fake_build_client), \
+                mock.patch.object(mig, '_order_by_id_real', order_by_id), \
+                mock.patch.object(mig, '_order_by_pubdate_real', order_by_pubdate):
+            exit_code = mig.main([
+                '--source-project', 'src-proj', '--dest-project', 'dst-proj',
+                '--copy', '--i-approve-writing-to-dest',
+                '--collections', 'stocks', '--batch-size', '10',
+                '--now', '2026-08-03T10:00:00+00:00',
+            ])
+
+        self.assertNotEqual(exit_code, 0)
+
+    def test_main_returns_zero_when_copy_fully_succeeds(self):
+        source = FakeFirestoreDB()
+        dest = FakeFirestoreDB()
+        source.seed('stocks', 'a', {'v': 1})
+
+        def fake_build_client(project_id, credentials_path=None):
+            return source if project_id == 'src-proj' else dest
+
+        with mock.patch.object(mig, 'build_client', side_effect=fake_build_client), \
+                mock.patch.object(mig, '_order_by_id_real', order_by_id), \
+                mock.patch.object(mig, '_order_by_pubdate_real', order_by_pubdate):
+            exit_code = mig.main([
+                '--source-project', 'src-proj', '--dest-project', 'dst-proj',
+                '--copy', '--i-approve-writing-to-dest',
+                '--collections', 'stocks',
+                '--now', '2026-08-03T10:00:00+00:00',
+            ])
+
+        self.assertEqual(exit_code, 0)
+        self.assertTrue(dest.exists('stocks', 'a'))
 
 
 # ══════════════════════════════════════════════════════════════
@@ -1009,10 +1259,12 @@ class TestVerify(unittest.TestCase):
                                  order_by_id_fn=order_by_id, order_by_pubdate_fn=order_by_pubdate)
         self.assertEqual(1 if mig.verify_has_findings(report) else 0, 1)
 
-    def test_meta_extra_only_flags_preserve_like_ids_not_locks_or_unclassified(self):
-        """目的端如果自己另外有 lock_* 或未分類的 meta 文件（例如
-        Functions 已經切換過去自己產生的鎖），不該被 verify 誤判成
-        『多出來的』——那不是這個工具的搬移範圍需要處理的問題。"""
+    def test_meta_extra_flags_all_unexpected_dest_docs_including_locks_and_unclassified(self):
+        """切換前 final verify 的時間點，目的端本來就不該有任何排程寫入
+        的資料——所以任何不在來源預期範圍內的目的端 meta 文件都必須列為
+        extra_in_dest，即使它的命名看起來像 lock_* 或未分類的其他應用
+        資料，也不能被特別放行，否則 final verify 可能在目的端其實已經
+        有非預期資料的情況下仍然回報「沒問題」。"""
         self.source.seed('meta', 'digest_tw', {'lastSentAt': self.now})
         self.dest.seed('meta', 'digest_tw', {'lastSentAt': self.now})
         self.dest.seed('meta', 'lock_news', {'owner': 'someone-else'})
@@ -1022,8 +1274,10 @@ class TestVerify(unittest.TestCase):
                                  order_by_id_fn=order_by_id, order_by_pubdate_fn=order_by_pubdate,
                                  collections=('meta',))
 
-        self.assertEqual(report['meta']['extra_in_dest'], [])
+        self.assertEqual(sorted(report['meta']['extra_in_dest']),
+                          ['lock_news', 'some_other_app_data'])
         self.assertEqual(report['meta']['matches'], 1)
+        self.assertTrue(mig.verify_has_findings(report))
 
 
 # ══════════════════════════════════════════════════════════════

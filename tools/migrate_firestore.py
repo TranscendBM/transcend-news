@@ -40,24 +40,30 @@ Secret Manager 的 MONITOR_SERVICE_ACCOUNT 跨專案讀寫）。這個工具是�
     （預設 400，硬性上限 500，超過會直接拒絕啟動）。
 
 安全中斷後重跑：
-  - `stocks`/`revenue`/`financials`/`dividends`/`material`/`daily`/`news`/
-    `meta` 這幾個集合支援 --checkpoint-file：記錄每個集合「最後成功
-    寫入的 Firestore 排序游標值」（不是文件 ID 比對——即使該筆之後在
-    來源端被刪除或不再符合條件，游標值本身仍然可以正確定位分頁位置，
-    不會因為「找不到那個文件」就整個集合的後續資料都被誤判成已處理
-    而略過）。checkpoint 綁定這次執行的來源/目的專案、cutoff、集合
-    清單、頁面大小與格式版本（fingerprint）；只要其中任何一項對不上
-    （例如換了專案、跨月導致 cutoff 改變、集合清單不同），或檔案損毀/
-    不完整，一律視為不可用、記錄警告、該次執行對所有集合從頭開始（絕
-    不靜默沿用一個對不上的舊 checkpoint、也絕不因為 cursor 無法確認就
-    跳過整個集合）。checkpoint 檔案採 atomic write（先寫暫存檔、fsync
-    後 os.replace()），中途中斷不會留下損毀的半寫入檔案。news 額外用
-    (pubDate, 文件 ID) 當排序游標，文件 ID 是穩定 tie-breaker。
-  - `ai_jobs`/`ai_insights`：**刻意不支援** checkpoint 續傳，一律從頭
-    冪等重跑。這兩個集合本來就不是 Firestore 原生分頁查詢（是依 news
-    id 清單逐筆 get()），沒有自然的查詢游標可用；以目前的資料量，
-    中斷後直接重新完整執行一次遠比為了這種「依本地清單逐筆查」的存取
-    模式另外發明一套游標格式簡單可靠。
+  - `stocks`/`revenue`/`financials`/`dividends`/`material`/`daily`/`meta`
+    這幾個集合支援 --checkpoint-file：記錄每個集合「最後成功寫入的
+    Firestore 排序游標值」（不是文件 ID 比對——即使該筆之後在來源端被
+    刪除或不再符合條件，游標值本身仍然可以正確定位分頁位置，不會因為
+    「找不到那個文件」就整個集合的後續資料都被誤判成已處理而略過）。
+    這幾個集合的排序游標都是純文件 ID 字串，天生可以安全序列化成 JSON。
+    checkpoint 綁定這次執行的來源/目的專案、cutoff、集合清單、頁面
+    大小與格式版本（fingerprint）；只要其中任何一項對不上（例如換了
+    專案、跨月導致 cutoff 改變、集合清單不同），或檔案損毀/不完整，
+    一律視為不可用、記錄警告、該次執行對所有集合從頭開始（絕不靜默
+    沿用一個對不上的舊 checkpoint、也絕不因為 cursor 無法確認就跳過
+    整個集合）。checkpoint 檔案採 atomic write（先寫暫存檔、fsync 後
+    os.replace()），中途中斷不會留下損毀的半寫入檔案。
+  - `news`/`ai_jobs`/`ai_insights`：**刻意不支援** checkpoint 續傳，一律
+    從頭冪等重跑。news 分頁排序用 (pubDate, 文件 ID)——pubDate 是
+    `datetime`，不是純字串，無法安全寫進 JSON checkpoint 檔案（曾經
+    嘗試支援過，結果是 commit 明明成功、卻在寫 checkpoint 時序列化
+    datetime 失敗而被誤判成批次寫入失敗；與其為了 news 另外設計一套
+    有型別、可逆的 Timestamp 序列化格式，不如直接比照 ai_jobs/
+    ai_insights：不留持久化進度，中斷後整個重新執行一次，冪等寫入確保
+    最終結果正確）。ai_jobs/ai_insights 這兩個集合則是本來就不是
+    Firestore 原生分頁查詢（是依 news id 清單逐筆 get()），沒有自然的
+    查詢游標可用；以目前的資料量，中斷後直接重新完整執行一次遠比為了
+    這種「依本地清單逐筆查」的存取模式另外發明一套游標格式簡單可靠。
 
 資料範圍：
   - stocks / revenue / financials / dividends / material / daily：
@@ -164,7 +170,10 @@ META_PRESERVE_IDS = META_NEWS_INDEX_SHARD_IDS | META_DIGEST_CHECKPOINT_IDS | MET
 ALL_KNOWN_COLLECTIONS = FULL_COPY_COLLECTIONS + ('news',) + NEWS_RELATED_COLLECTIONS + ('meta',)
 
 # 支援 checkpoint 續傳的集合（見模組 docstring「安全中斷後重跑」）。
-CHECKPOINTABLE_COLLECTIONS = FULL_COPY_COLLECTIONS + ('news', 'meta')
+# news 刻意不在這裡：它的排序游標含 datetime，無法安全序列化進 JSON
+# checkpoint 檔案（見上方 docstring 說明），一律比照 ai_jobs/ai_insights
+# 從頭冪等重跑。
+CHECKPOINTABLE_COLLECTIONS = FULL_COPY_COLLECTIONS + ('meta',)
 
 
 def classify_meta_doc_id(doc_id):
@@ -345,6 +354,7 @@ def _new_collection_report():
         'failed_ids': [],       # 只放文件 ID，不放內容
         'unclassified_ids': [], # 只有 meta 集合會用到
         'halted': False,        # 這個集合這次執行是否因為批次寫入失敗而提前中止
+        'checkpoint_error': None,  # batch commit 成功、但 checkpoint 進度檔寫入失敗時的錯誤描述
     }
 
 
@@ -352,13 +362,22 @@ def _new_collection_report():
 # 子集合安全檢查：本工具不支援搬移子集合，發現了就必須明確列出並擋下 --copy
 # ══════════════════════════════════════════════════════════════
 
-def _check_subcollections(snap, coll_name, findings):
+def _check_subcollections(snap, coll_name, findings, scan_errors):
+    """
+    findings：確認「有」子集合的文件。scan_errors：檢查本身失敗、
+    「無法確認」有沒有子集合的文件——這兩者不能混為一談：「無法確認」
+    絕不能被當成「確認沒有」，否則 --copy 會在看不清楚的情況下放行。
+    """
     ref = getattr(snap, 'reference', None)
     if ref is None or not hasattr(ref, 'collections'):
+        scan_errors.append({'collection': coll_name, 'doc_id': snap.id,
+                             'reason': '文件快照沒有可檢查子集合的 reference'})
         return
     try:
         subs = [c.id for c in ref.collections()]
     except Exception as e:  # noqa: BLE001 - 檢查本身失敗不應該讓整個 dry-run 掛掉
+        scan_errors.append({'collection': coll_name, 'doc_id': snap.id,
+                             'reason': f'{type(e).__name__}: {e}'})
         logger.warning('檢查 %s/%s 是否有子集合時發生錯誤（%s: %s），視為無法確認',
                         coll_name, snap.id, type(e).__name__, e)
         return
@@ -374,16 +393,22 @@ def dry_run_report(source_db, now, page_size, order_by_id_fn, order_by_pubdate_f
                     collections=ALL_KNOWN_COLLECTIONS):
     """
     回傳 {collection_name: report_dict, '_unrecognized_collections': [...],
-    '_subcollections_found': [...]}。只呼叫 source_db 的讀取方法，不會
-    呼叫任何 write/set/delete/batch。
+    '_subcollections_found': [...], '_subcollection_scan_errors': [...]}。
+    只呼叫 source_db 的讀取方法，不會呼叫任何 write/set/delete/batch。
+
+    `_subcollections_found` 是「確認有」子集合的文件；
+    `_subcollection_scan_errors` 是「檢查本身失敗、無法確認」的文件——
+    兩者都會擋下 --copy（見 _blocking_issues），因為「無法確認」不等於
+    「確認沒有」。
     """
     cutoff = retention_cutoff(now)
     reports = {}
     subcollection_findings = []
+    subcollection_scan_errors = []
 
     if 'news' in collections:
         reports['news'] = _dry_run_news(source_db, cutoff, page_size, order_by_pubdate_fn,
-                                         subcollection_findings)
+                                         subcollection_findings, subcollection_scan_errors)
         eligible_news_ids = reports['news'].pop('_eligible_ids')
     else:
         eligible_news_ids = set()
@@ -391,42 +416,47 @@ def dry_run_report(source_db, now, page_size, order_by_id_fn, order_by_pubdate_f
     for coll in FULL_COPY_COLLECTIONS:
         if coll in collections:
             reports[coll] = _dry_run_full_copy(source_db, coll, page_size, order_by_id_fn,
-                                                subcollection_findings)
+                                                subcollection_findings, subcollection_scan_errors)
 
     for coll in NEWS_RELATED_COLLECTIONS:
         if coll in collections:
             reports[coll] = _dry_run_related(source_db, coll, page_size, order_by_id_fn,
-                                              eligible_news_ids, subcollection_findings)
+                                              eligible_news_ids, subcollection_findings,
+                                              subcollection_scan_errors)
 
     if 'meta' in collections:
-        reports['meta'] = _dry_run_meta(source_db, page_size, order_by_id_fn, subcollection_findings)
+        reports['meta'] = _dry_run_meta(source_db, page_size, order_by_id_fn, subcollection_findings,
+                                         subcollection_scan_errors)
 
     # 安全網：實際列出來源端所有頂層集合，任何不在 ALL_KNOWN_COLLECTIONS
     # 的集合都要浮上來，不能被漏掉或被誤以為「反正 README 沒提到就沒事」。
     reports['_unrecognized_collections'] = _list_unrecognized_collections(source_db, collections)
     reports['_subcollections_found'] = subcollection_findings
+    reports['_subcollection_scan_errors'] = subcollection_scan_errors
 
     return reports
 
 
-def _dry_run_full_copy(source_db, coll_name, page_size, order_by_id_fn, subcollection_findings):
+def _dry_run_full_copy(source_db, coll_name, page_size, order_by_id_fn, subcollection_findings,
+                        subcollection_scan_errors):
     report = _new_collection_report()
     for page in _paginate_by_document_id(source_db.collection(coll_name), page_size, order_by_id_fn):
         report['total_in_source'] += len(page)
         report['eligible'] += len(page)
         for snap in page:
-            _check_subcollections(snap, coll_name, subcollection_findings)
+            _check_subcollections(snap, coll_name, subcollection_findings, subcollection_scan_errors)
     return report
 
 
-def _dry_run_news(source_db, cutoff, page_size, order_by_pubdate_fn, subcollection_findings):
+def _dry_run_news(source_db, cutoff, page_size, order_by_pubdate_fn, subcollection_findings,
+                   subcollection_scan_errors):
     report = _new_collection_report()
     eligible_ids = set()
     for page in _paginate_news_in_window(source_db, cutoff, page_size, order_by_pubdate_fn):
         for snap in page:
             report['eligible'] += 1
             eligible_ids.add(snap.id)
-            _check_subcollections(snap, 'news', subcollection_findings)
+            _check_subcollections(snap, 'news', subcollection_findings, subcollection_scan_errors)
     # total_in_source：news 集合的總量不在本工具的搬移範圍內，也沒有必要
     # 為了統計而讀整個集合（可能是數千篇）；dry-run 只需要知道「這次會
     # 搬幾篇」，不需要「來源總共有幾篇」。刻意留白，避免誤導成
@@ -437,7 +467,7 @@ def _dry_run_news(source_db, cutoff, page_size, order_by_pubdate_fn, subcollecti
 
 
 def _dry_run_related(source_db, coll_name, page_size, order_by_id_fn, eligible_news_ids,
-                      subcollection_findings):
+                      subcollection_findings, subcollection_scan_errors):
     report = _new_collection_report()
     report['total_in_source'] = None  # 理由同 news：不需要讀整個集合來統計
     coll_ref = source_db.collection(coll_name)
@@ -445,13 +475,14 @@ def _dry_run_related(source_db, coll_name, page_size, order_by_id_fn, eligible_n
         snap = coll_ref.document(doc_id).get()
         if getattr(snap, 'exists', False):
             report['eligible'] += 1
-            _check_subcollections(snap, coll_name, subcollection_findings)
+            _check_subcollections(snap, coll_name, subcollection_findings, subcollection_scan_errors)
         else:
             report['excluded'] += 1
     return report
 
 
-def _dry_run_meta(source_db, page_size, order_by_id_fn, subcollection_findings):
+def _dry_run_meta(source_db, page_size, order_by_id_fn, subcollection_findings,
+                   subcollection_scan_errors):
     report = _new_collection_report()
     for page in _paginate_by_document_id(source_db.collection('meta'), page_size, order_by_id_fn):
         for snap in page:
@@ -459,7 +490,7 @@ def _dry_run_meta(source_db, page_size, order_by_id_fn, subcollection_findings):
             cls = classify_meta_doc_id(snap.id)
             if cls == 'preserve':
                 report['eligible'] += 1
-                _check_subcollections(snap, 'meta', subcollection_findings)
+                _check_subcollections(snap, 'meta', subcollection_findings, subcollection_scan_errors)
             elif cls == 'exclude_lock':
                 report['excluded'] += 1
             else:
@@ -499,6 +530,10 @@ def _blocking_issues(reports):
     subcols = reports.get('_subcollections_found')
     if subcols:
         issues.append(f'發現 {len(subcols)} 個文件底下有子集合，本工具不支援搬移子集合內容：{subcols}')
+    scan_errors = reports.get('_subcollection_scan_errors')
+    if scan_errors:
+        issues.append(f'{len(scan_errors)} 個文件的子集合檢查失敗，無法確認是否有子集合'
+                       f'（無法確認不等於確認沒有，基於 fail-closed 原則拒絕 --copy）：{scan_errors}')
     for coll, r in reports.items():
         if coll.startswith('_'):
             continue
@@ -537,12 +572,10 @@ def _copy_pages(dest_db, coll_name, pages, batch_size, report, checkpoint=None, 
     def flush():
         if not pending:
             return False
+        # 階段 A：batch commit。這一步失敗代表文件確定沒有寫入目的端，
+        # 全部計入 failed。
         try:
             _commit_batch(dest_db, pending, batch_size)
-            report['success'] += len(pending)
-            if checkpointable and checkpoint is not None:
-                checkpoint.mark(coll_name, pending[-1][3])
-            return False
         except Exception as e:  # noqa: BLE001 - 記錄後停止這個集合本次的後續處理
             report['failed'] += len(pending)
             report['failed_ids'].extend(pid for _c, pid, _d, _cur in pending)
@@ -551,6 +584,28 @@ def _copy_pages(dest_db, coll_name, pages, batch_size, report, checkpoint=None, 
                 '下次重跑會從上一個成功的 checkpoint 繼續（不會跳過這批失敗的文件）：%s: %s',
                 coll_name, len(pending), type(e).__name__, e)
             return True
+
+        # commit 已經確定成功：這些文件已經寫入目的端，不論階段 B 是否
+        # 成功都不能改變這個事實，success 計數在這裡就要定案。
+        report['success'] += len(pending)
+
+        # 階段 B：checkpoint 進度持久化，跟階段 A 分開處理。如果這裡失敗，
+        # 文件仍然算 success（已經真的寫入了），但無法安全記錄「已經寫到
+        # 哪裡」，所以仍然要中止這個集合本次的後續處理（避免下一批的
+        # checkpoint 覆蓋掉這一批其實沒寫成功的進度紀錄），並回報
+        # checkpoint_error 讓 CLI 能以非 0 結束碼提醒使用者。
+        if checkpointable and checkpoint is not None:
+            try:
+                checkpoint.mark(coll_name, pending[-1][3])
+            except Exception as e:  # noqa: BLE001
+                report['checkpoint_error'] = f'{type(e).__name__}: {e}'
+                logger.error(
+                    '%s 的這批文件（%d 筆）已經成功寫入目的端，但 checkpoint 進度檔寫入'
+                    '失敗，停止本次對這個集合的後續處理（已寫入的文件仍計入 success，'
+                    '不會被誤計為 failed）：%s: %s',
+                    coll_name, len(pending), type(e).__name__, e)
+                return True
+        return False
 
     # 手動控制迭代（不是直接 for page in pages），確保一旦 halted，絕不
     # 再向 pages 產生器多要一頁，避免報告數字跟實際處理進度對不上。
@@ -606,18 +661,18 @@ def copy_all(source_db, dest_db, now, page_size, batch_size, order_by_id_fn, ord
         report = _new_collection_report()
         report['total_in_source'] = None
 
-        def news_pages(start_cursor=None):
-            for page in _paginate_news_in_window(source_db, cutoff, page_size, order_by_pubdate_fn,
-                                                  start_cursor=start_cursor):
+        def news_pages():
+            for page in _paginate_news_in_window(source_db, cutoff, page_size, order_by_pubdate_fn):
                 items = []
                 for snap in page:
                     eligible_news_ids.add(snap.id)
                     items.append((snap.id, snap.to_dict(), _pubdate_cursor(snap)))
                 yield items
 
-        start_cursor = checkpoint.cursor_for('news')
-        _copy_pages(dest_db, 'news', news_pages(start_cursor), batch_size, report,
-                    checkpoint=checkpoint, checkpointable=True)
+        # news 刻意不使用 checkpoint 續傳（見模組 docstring「安全中斷後
+        # 重跑」）：它的排序游標含 datetime，無法安全序列化進 JSON
+        # checkpoint 檔案，一律從頭冪等重跑。
+        _copy_pages(dest_db, 'news', news_pages(), batch_size, report, checkpointable=False)
         report['eligible'] = report['success'] + report['skipped'] + report['failed']
         reports['news'] = report
     else:
@@ -699,6 +754,21 @@ def copy_all(source_db, dest_db, now, page_size, batch_size, order_by_id_fn, ord
     return reports
 
 
+def copy_has_failures(reports):
+    """
+    True 代表這次 --copy 有任何集合出現批次寫入失敗、提前中止、或
+    checkpoint 進度寫入失敗——CLI 據此決定結束碼是否非 0，避免「看起來
+    跑完了」但其實有文件沒寫成功、或進度沒能安全記錄下來，卻被誤判成
+    完全成功（結束碼 0）。
+    """
+    for coll, r in reports.items():
+        if coll.startswith('_'):
+            continue
+        if r.get('failed', 0) > 0 or r.get('halted') or r.get('checkpoint_error'):
+            return True
+    return False
+
+
 # ══════════════════════════════════════════════════════════════
 # verify：比較來源與目的端，不寫入任何一端
 # ══════════════════════════════════════════════════════════════
@@ -775,13 +845,12 @@ def verify_all(source_db, dest_db, now, page_size, order_by_id_fn, order_by_pubd
         dest_meta_ids = _dest_doc_ids(dest_db, 'meta', page_size, order_by_id_fn)
         report['source_total'] = len(expected_ids)
         report['dest_total'] = len(dest_meta_ids)
-        # meta 的「extra」只看白名單範圍：lock_*／unclassified 本來就不會
-        # 被搬到目的端，不該被誤判成「多出來的」；目的端如果自己另外有
-        # 這些 ID（例如 Functions 已經切換過去、排程已經在目的端跑出新的
-        # lock_*），也不是本工具的搬移範圍需要處理的問題——只把「看起來
-        # 像白名單命名規則、但不在這次來源預期集合裡」的 ID 視為 extra。
-        preserve_like_dest_ids = {i for i in dest_meta_ids if classify_meta_doc_id(i) == 'preserve'}
-        report['extra_in_dest'] = sorted(preserve_like_dest_ids - expected_ids)
+        # 正式切換前，目的端本來就不該有任何排程寫入的資料，所以任何不在
+        # 這次來源預期範圍內的目的端 meta 文件都要算 extra——包含看起來
+        # 像 lock_* 或未分類命名的 ID，不能因為「不像白名單命名規則」就
+        # 特別放行，否則 final verify 可能在目的端其實已經有非預期資料
+        # 的情況下仍然回報「沒問題」。
+        report['extra_in_dest'] = sorted(dest_meta_ids - expected_ids)
         reports['meta'] = report
 
     reports['_unrecognized_dest_collections'] = _list_unrecognized_collections(dest_db, collections)
@@ -910,8 +979,10 @@ def build_arg_parser():
                     help='每個 WriteBatch 的筆數上限（預設 400，必須 > 0，硬性上限 500）。')
     p.add_argument('--checkpoint-file', default=None,
                     help='--copy 模式的進度紀錄檔路徑（只存排序游標值，不存內容）；只對'
-                         'stocks/revenue/financials/dividends/material/daily/news/meta 有效，'
-                         'ai_jobs/ai_insights 一律從頭冪等重跑。不指定則不使用 checkpoint。')
+                         'stocks/revenue/financials/dividends/material/daily/meta 有效，'
+                         'news/ai_jobs/ai_insights 一律從頭冪等重跑（news 的排序游標含'
+                         'datetime，無法安全序列化進 JSON checkpoint）。不指定則不使用'
+                         ' checkpoint。')
     p.add_argument('--now', default=None,
                     help='覆寫「現在時間」（ISO 8601，例如 2026-08-03T00:00:00+00:00）；'
                          '不指定則用系統目前時間（UTC）。長時間執行的搬移建議固定這個值，'
@@ -944,6 +1015,7 @@ def _print_dry_run_report(reports):
     print('\n=== DRY-RUN 報告（不含任何文件內容） ===')
     unrecognized = reports.get('_unrecognized_collections')
     subcols = reports.get('_subcollections_found') or []
+    scan_errors = reports.get('_subcollection_scan_errors') or []
     for coll, r in sorted(reports.items()):
         if coll.startswith('_'):
             continue
@@ -960,7 +1032,12 @@ def _print_dry_run_report(reports):
     if subcols:
         print(f'  ⚠ 發現 {len(subcols)} 個文件底下有子集合（本工具不支援搬移子集合內容）：{subcols}')
     else:
-        print('  ✅ 沒有發現任何子集合。')
+        print('  ✅ 沒有發現任何子集合（就已成功檢查的文件而言，見下方是否有未確認項目）。')
+    if scan_errors:
+        print(f'  ⚠ {len(scan_errors)} 個文件無法確認是否有子集合（檢查本身失敗，'
+              f'不代表「確認沒有」）：{scan_errors}')
+    else:
+        print('  ✅ 所有文件的子集合檢查皆已成功執行，沒有無法確認的項目。')
 
 
 def _print_copy_report(reports):
@@ -973,6 +1050,9 @@ def _print_copy_report(reports):
               f'failed={r["failed"]}{halted_note}')
         if r['failed_ids']:
             print(f'    failed ids: {r["failed_ids"]}')
+        if r.get('checkpoint_error'):
+            print(f'    ⚠ checkpoint 進度檔寫入失敗（已成功寫入的文件仍計入 success）：'
+                  f'{r["checkpoint_error"]}')
 
 
 def _print_verify_report(reports):
@@ -1055,7 +1135,7 @@ def main(argv=None):
                         checkpoint=checkpoint, collections=collections,
                         source_project=args.source_project, dest_project=args.dest_project)
     _print_copy_report(reports)
-    return 0
+    return 1 if copy_has_failures(reports) else 0
 
 
 if __name__ == '__main__':

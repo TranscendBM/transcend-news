@@ -384,17 +384,43 @@ split-brain（見第 9 節 rollback 的說明，這也是切換後 rollback 不�
   Scheduler jobs 恢復即可——monitor 端恢復接受寫入，因為 Functions/前端
   都還沒切換到 tbm，沒有任何一方誤寫，資料不會遺失。
 - **步驟 I/J 之後（Functions/Hosting 已經切到 tbm、tbm 已經有新寫入）
-  想退回**：**不能只是把設定改回去**，必須：
-  1. 先暫停 tbm 端的 Scheduler jobs（此時的 writer）。
-  2. 決定資料方向：把切換後 tbm 新增/變更的資料同步回
-     `transcend-news-monitor`（用 `tools/migrate_firestore.py` 反過來
-     跑一次，`--source-project transcend-news-tbm --dest-project transcend-news-monitor`），
-     或明確決定「以 tbm 的資料為準，放棄 monitor 切換後這段期間錯過的
-     任何外部變化」——兩者只能選一個，不能都不選就切回去。
-  3. `--verify` 確認同步後兩端（或至少 monitor 端）資料一致，才能把
-     Functions/Hosting 設定改回指向 `transcend-news-monitor` 並部署。
-  4. 確認 monitor 端運作正常後，才恢復 Scheduler jobs——同一時間只能有
-     一個專案在接受寫入。
+  想退回**：**不能只是把設定改回去**，而且**絕對不能把
+  `tools/migrate_firestore.py` 的 `--source-project`/`--dest-project`
+  對調直接反過來跑一次當作 rollback 手段**——這個工具是針對「monitor
+  （全程唯讀）→ tbm（一開始是空的）」這個單一方向設計、驗證過的一次性
+  搬移工具，反過來用完全是不同的問題，理由：
+  1. `transcend-news-monitor` 目前只規劃、也只驗證過
+     `roles/datastore.viewer`（唯讀）；反向把 tbm 的資料寫回 monitor
+     需要 `roles/datastore.user`，這個角色從未被授予、也從未驗證過能
+     正常寫入 monitor，不能假設它可用。
+  2. `transcend-news-monitor` 可能仍保留搬移範圍（本月＋上個月）以外
+     的舊新聞資料——這些資料從未被本工具讀取或比對過。如果直接對調
+     方向執行 `--verify`，這些範圍外的舊資料會被大量列為
+     `extra_in_dest`/`missing_in_dest`，產生跟實際問題無關的雜訊，
+     反而讓真正需要處理的差異被淹沒。
+  3. 本工具從未作為「rollback／增量同步」流程被設計或測試過：它假設
+     目的端一開始是空的、只做單向、整批覆寫式的冪等寫入，並不處理
+     「monitor 和 tbm 兩邊在切換後可能各自累積了新資料，需要合併或
+     取捨」這種雙向同步情境。
+
+  正確做法：
+  1. **立即先暫停 tbm 端的 Scheduler jobs（此時唯一的 writer）**，停止
+     任何一端繼續寫入——這是切換後一旦發現問題應該做的第一步，不需要
+     等資料方向想清楚了才做。
+  2. Rollback 需要一個**獨立規劃、審查並測試過的增量同步工具**（目前
+     尚未實作），設計上必須同時處理「tbm 切換後新增/變更的資料」與
+     「monitor 端是否存在搬移範圍外、需要排除的既有資料」，而不是把
+     現有的單向搬移工具參數對調了事。
+  3. 建置並使用這個增量同步工具之前，需要先向
+     `transcend-news-monitor` 申請並驗證足夠的寫入權限
+     （`roles/datastore.user`，目前只有唯讀）。
+  4. 在增量同步工具存在並通過測試之前，**如果切換後發現資料問題，
+     正確且唯一該做的第一個動作是停止 writer（步驟 1），不得自行反向
+     執行目前這個（單向）搬移工具**，也不建議臨時放寬 monitor 端的
+     IAM 權限來湊合著跑。
+  5. 增量同步工具就緒、驗證資料一致後，才把 Functions/Hosting 設定
+     改回指向 `transcend-news-monitor` 並部署，接著才恢復 Scheduler
+     jobs——同一時間只能有一個專案在接受寫入。
 - **Rules/Indexes**：`transcend-news-monitor` 的 Rules/Indexes 在整個
   流程中都沒有被更動過，rollback 不需要對它做任何事；
   `transcend-news-tbm` 上部署的 Rules/Indexes 即使切回 monitor 也不需要
