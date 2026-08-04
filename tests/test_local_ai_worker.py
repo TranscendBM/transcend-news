@@ -214,6 +214,88 @@ class TestInitDbCredentialSelection(unittest.TestCase):
         init_args = self.mock_firebase_admin.initialize_app.call_args[0]
         self.assertEqual(init_args[1]['projectId'], 'transcend-news-tbm')
 
+    def test_legacy_monitor_credential_with_explicit_tbm_project_is_fail_closed(self):
+        """只設定舊的 MONITOR_SERVICE_ACCOUNT（project_id 是舊專案），但
+        FIREBASE_PROJECT_ID 明確指定了 tbm：這代表使用者已經打算切換，
+        卻忘了把舊憑證從執行環境移除——絕不能讓憑證裡的舊 project_id
+        靜默贏過使用者明確指定的專案，必須直接拒絕啟動，且完全不能呼叫
+        initialize_app()（不能半途連上任何一個專案）。"""
+        os.environ['MONITOR_SERVICE_ACCOUNT'] = json.dumps({
+            'project_id': 'transcend-news-monitor',
+            'private_key': '-----BEGIN PRIVATE KEY-----\nnotarealkey\n-----END PRIVATE KEY-----',
+        })
+        os.environ['FIREBASE_PROJECT_ID'] = 'transcend-news-tbm'
+
+        with self.assertRaises(RuntimeError) as ctx:
+            worker.init_db()
+
+        message = str(ctx.exception)
+        self.assertIn('transcend-news-tbm', message)
+        self.assertIn('FIREBASE_PROJECT_ID', message)
+        self.mock_firebase_admin.initialize_app.assert_not_called()
+
+    def test_no_credential_env_with_explicit_tbm_project_uses_adc(self):
+        os.environ['FIREBASE_PROJECT_ID'] = 'transcend-news-tbm'
+
+        worker.init_db()
+
+        self.mock_firebase_admin.credentials.ApplicationDefault.assert_called_once_with()
+        self.mock_firebase_admin.credentials.Certificate.assert_not_called()
+        init_args = self.mock_firebase_admin.initialize_app.call_args[0]
+        self.assertEqual(init_args[1]['projectId'], 'transcend-news-tbm')
+
+    def test_new_tbm_credential_with_explicit_tbm_project_succeeds(self):
+        os.environ['FIREBASE_SERVICE_ACCOUNT'] = json.dumps({'project_id': 'transcend-news-tbm'})
+        os.environ['FIREBASE_PROJECT_ID'] = 'transcend-news-tbm'
+
+        worker.init_db()
+
+        init_args = self.mock_firebase_admin.initialize_app.call_args[0]
+        self.assertEqual(init_args[1]['projectId'], 'transcend-news-tbm')
+
+    def test_only_legacy_monitor_credential_is_backward_compatible(self):
+        """只設定 MONITOR_SERVICE_ACCOUNT、沒有 FIREBASE_PROJECT_ID：
+        維持改動前的向下相容行為，繼續連到憑證裡的 project_id。"""
+        os.environ['MONITOR_SERVICE_ACCOUNT'] = json.dumps({'project_id': 'transcend-news-monitor'})
+
+        worker.init_db()
+
+        init_args = self.mock_firebase_admin.initialize_app.call_args[0]
+        self.assertEqual(init_args[1]['projectId'], 'transcend-news-monitor')
+
+    def test_both_credential_vars_present_new_var_wins_and_matches_explicit_project(self):
+        os.environ['FIREBASE_SERVICE_ACCOUNT'] = json.dumps({'project_id': 'transcend-news-tbm'})
+        os.environ['MONITOR_SERVICE_ACCOUNT'] = json.dumps({'project_id': 'transcend-news-monitor'})
+        os.environ['FIREBASE_PROJECT_ID'] = 'transcend-news-tbm'
+
+        worker.init_db()
+
+        cert_arg = self.mock_firebase_admin.credentials.Certificate.call_args[0][0]
+        self.assertEqual(cert_arg['project_id'], 'transcend-news-tbm')
+        init_args = self.mock_firebase_admin.initialize_app.call_args[0]
+        self.assertEqual(init_args[1]['projectId'], 'transcend-news-tbm')
+
+    def test_error_messages_never_leak_credential_content(self):
+        """所有錯誤路徑（project mismatch、JSON 解析失敗）都不能洩漏
+        private_key 或憑證 JSON 的其他內容。"""
+        secret_marker = 'THIS-IS-A-FAKE-PRIVATE-KEY-MARKER'
+        os.environ['MONITOR_SERVICE_ACCOUNT'] = json.dumps({
+            'project_id': 'transcend-news-monitor',
+            'private_key': secret_marker,
+        })
+        os.environ['FIREBASE_PROJECT_ID'] = 'transcend-news-tbm'
+        with self.assertRaises(RuntimeError) as ctx:
+            worker.init_db()
+        message = str(ctx.exception)
+        self.assertNotIn(secret_marker, message)
+        self.assertNotIn('private_key', message)
+
+        os.environ.clear()
+        os.environ['MONITOR_SERVICE_ACCOUNT'] = 'not valid json {{{'
+        with self.assertRaises(RuntimeError) as ctx2:
+            worker.init_db()
+        self.assertNotIn('not valid json', str(ctx2.exception))
+
 
 if __name__ == '__main__':
     unittest.main()

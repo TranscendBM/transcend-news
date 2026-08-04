@@ -294,16 +294,30 @@ Cloud Scheduler 不會影響它**——它跟 Scheduler 完全獨立，切換流
 2. **final copy／final verify 期間必須保持停止**：這段期間不應該有
    任何 worker 程序在跑，否則 final copy 讀到的 `ai_jobs`/`ai_insights`
    會跟實際狀態對不上。
-3. **切換後改連 `transcend-news-tbm`**：把執行 worker 的環境變數
-   `FIREBASE_PROJECT_ID` 改成 `transcend-news-tbm`。憑證優先使用
-   Application Default Credentials（`gcloud auth application-default
-   login`，這台電腦本身的登入身分，不需要任何檔案）；如果一定要用
-   service account，只給 `roles/datastore.user` 這種最小權限，而且
-   **絕對不能把 service account JSON 寫進這個 repo**（見第 7 節 IAM
-   表格）。舊的 `MONITOR_SERVICE_ACCOUNT` 環境變數暫時保留、不用
-   立刻改名——`init_db()` 已經支援新名稱 `FIREBASE_SERVICE_ACCOUNT`
-   並向下相容舊名稱（見 `tools/local_ai_worker.py`），這個 PR 不移除
-   舊名稱的相容性。
+3. **切換後改連 `transcend-news-tbm`——從 worker 的執行環境移除舊憑證，
+   不是只加新設定**：`init_db()` 現在是 fail-closed 的（見
+   `tools/local_ai_worker.py`）：如果明確設定了
+   `FIREBASE_PROJECT_ID=transcend-news-tbm`，但執行環境裡還留著舊的
+   `MONITOR_SERVICE_ACCOUNT`（憑證內容指向 `transcend-news-monitor`），
+   worker 會直接拒絕啟動並丟出錯誤，**不會**用其中一個專案悄悄啟動——
+   憑證裡的 project_id 絕不能贏過使用者明確指定的專案。因此切換這台
+   機器時，必須照這個順序做：
+   1. 從 worker 的執行環境（shell profile、systemd unit、cron 環境變數
+      等，不是 repo 裡的檔案）**取消設定** `FIREBASE_SERVICE_ACCOUNT`
+      與 `MONITOR_SERVICE_ACCOUNT` 這兩個變數。
+   2. 設定 `FIREBASE_PROJECT_ID=transcend-news-tbm`。
+   3. 憑證優先使用 Application Default Credentials（`gcloud auth
+      application-default login`，這台電腦本身的登入身分，不需要任何
+      檔案）；如果一定要用 service account，改設定屬於
+      `transcend-news-tbm` 的新 `FIREBASE_SERVICE_ACCOUNT`，只給
+      `roles/datastore.user` 這種最小權限，而且**絕對不能把 service
+      account JSON 寫進這個 repo**（見第 7 節 IAM 表格）。
+
+   「舊憑證暫時保留」指的是**先不要刪除 Secret Manager 裡的
+   `MONITOR_SERVICE_ACCOUNT`、或它在別處的備份**，作為觀察期內如果
+   真的需要退回舊設定時的備援——**不是讓這個環境變數繼續留在 worker
+   的 active 執行環境裡**；兩者留在同一台機器上就是這個修正要擋下來的
+   情境。
 4. **驗證後才恢復執行**：改完環境變數後，先手動執行一次
    `python3 tools/local_ai_worker.py --once --rules-only`（或非
    `--rules-only`，如果 Ollama 也已經備妥），確認能從 `transcend-news-tbm`
