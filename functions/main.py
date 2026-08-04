@@ -1,8 +1,9 @@
 """
 創見新聞監控 — Cloud Functions 排程進入點
-部署於 Firebase 專案 transcend-news-tbm（asia-east1），
-透過 Secret Manager 的 MONITOR_SERVICE_ACCOUNT 跨專案寫入
-舊專案 transcend-news-monitor 的 Firestore。
+部署於 Firebase 專案 transcend-news-tbm（asia-east1），Firestore 資料庫
+現在也在同一個專案（transcend-news-tbm）——get_db() 使用 Cloud Functions
+執行環境本身的 Application Default Credentials（見 db_same_project.py），
+不再需要 Secret Manager 的 MONITOR_SERVICE_ACCOUNT 跨專案憑證。
 
 排程總覽（皆為台灣時間 Asia/Taipei）：
   stocks_job     交易日 09:00–13:35 每 1 分鐘   即時股價
@@ -21,59 +22,19 @@
 """
 
 import datetime
-import json
 
-import firebase_admin
-from firebase_admin import credentials, firestore
 from firebase_functions import scheduler_fn
 from firebase_functions.options import MemoryOption
 from firebase_functions.params import SecretParam
 
+from db_same_project import get_db
 import fetch_news
 import digest
 import news_cleanup
 
 TZ = 'Asia/Taipei'
 REGION = 'asia-east1'
-MONITOR_SERVICE_ACCOUNT = SecretParam('MONITOR_SERVICE_ACCOUNT')
 MAIL2000_SMTP_PASSWORD = SecretParam('MAIL2000_SMTP_PASSWORD')
-
-# 跨專案寫入專用的 named app 名稱。不用 default app：若執行環境已存在
-# 指向本專案（tbm）的 default app，firestore.client() 會連錯專案。
-MONITOR_APP_NAME = 'monitor-writer'
-
-_db = None
-
-
-def get_db():
-    """以 Secret 中的 service account 初始化（跨專案指向 transcend-news-monitor）"""
-    global _db
-    if _db is None:
-        raw = (MONITOR_SERVICE_ACCOUNT.value or '').strip()
-        if not raw:
-            raise RuntimeError(
-                'Secret MONITOR_SERVICE_ACCOUNT 為空或不存在，'
-                '請以 firebase functions:secrets:set MONITOR_SERVICE_ACCOUNT 設定')
-        try:
-            sa_dict = json.loads(raw)
-        except json.JSONDecodeError as e:
-            # 不印出 secret 內容，只回報格式錯誤位置
-            raise RuntimeError(f'Secret MONITOR_SERVICE_ACCOUNT 不是有效 JSON（行 {e.lineno} 欄 {e.colno}）') from None
-        project_id = sa_dict.get('project_id')
-        if not project_id:
-            raise RuntimeError('Secret MONITOR_SERVICE_ACCOUNT 缺少 project_id 欄位')
-        # 固定名稱的 named app + 明確 projectId + 明確傳入 firestore.client：
-        # 三者缺一都可能在「已存在 default app」的環境連到錯誤專案
-        # （Cloud Functions 的 FIREBASE_CONFIG 預設專案是 tbm）。
-        try:
-            app = firebase_admin.get_app(MONITOR_APP_NAME)
-        except ValueError:
-            cred = credentials.Certificate(sa_dict)
-            app = firebase_admin.initialize_app(
-                cred, {'projectId': project_id}, name=MONITOR_APP_NAME)
-        _db = firestore.client(app=app)
-        print(f"✅ Firestore 已連線（專案 {project_id}）")
-    return _db
 
 
 def _tw_now():
@@ -102,8 +63,7 @@ def _run_locked(lock_name, work_fn, ttl_minutes):
 # ─── 即時股價：交易日 09:00–13:59 每分鐘觸發，13:35 後自動略過 ───
 @scheduler_fn.on_schedule(
     schedule='* 9-13 * * 1-5', timezone=TZ, region=REGION,
-    memory=MemoryOption.MB_256, timeout_sec=120, max_instances=1,
-    secrets=[MONITOR_SERVICE_ACCOUNT])
+    memory=MemoryOption.MB_256, timeout_sec=120, max_instances=1)
 def stocks_job(event: scheduler_fn.ScheduledEvent) -> None:
     now = _tw_now().replace(tzinfo=None)
     if not fetch_news.is_tw_market_open(now):
@@ -115,8 +75,7 @@ def stocks_job(event: scheduler_fn.ScheduledEvent) -> None:
 # ─── RSS 新聞：每 15 分鐘 ───
 @scheduler_fn.on_schedule(
     schedule='*/15 * * * *', timezone=TZ, region=REGION,
-    memory=MemoryOption.MB_512, timeout_sec=540, max_instances=1,
-    secrets=[MONITOR_SERVICE_ACCOUNT])
+    memory=MemoryOption.MB_512, timeout_sec=540, max_instances=1)
 def news_job(event: scheduler_fn.ScheduledEvent) -> None:
     _run_locked('news', lambda db: fetch_news.fetch_and_save_news(db, mode='all'),
                 ttl_minutes=12)
@@ -127,8 +86,7 @@ def news_job(event: scheduler_fn.ScheduledEvent) -> None:
 # ─── 每日交易資料（開收盤 + 三大法人）：收盤後與法人公布後各一次 ───
 @scheduler_fn.on_schedule(
     schedule='40 13,17 * * 1-5', timezone=TZ, region=REGION,
-    memory=MemoryOption.MB_256, timeout_sec=300, max_instances=1,
-    secrets=[MONITOR_SERVICE_ACCOUNT])
+    memory=MemoryOption.MB_256, timeout_sec=300, max_instances=1)
 def trading_job(event: scheduler_fn.ScheduledEvent) -> None:
     def work(db):
         fetch_news.fetch_stock_prices(db)   # 收盤價一併校正
@@ -140,8 +98,7 @@ def trading_job(event: scheduler_fn.ScheduledEvent) -> None:
 # 與 finance_early_month_job 共用同一把鎖，兩排程不會互相重疊
 @scheduler_fn.on_schedule(
     schedule='30 17 * * *', timezone=TZ, region=REGION,
-    memory=MemoryOption.MB_512, timeout_sec=540, max_instances=1,
-    secrets=[MONITOR_SERVICE_ACCOUNT])
+    memory=MemoryOption.MB_512, timeout_sec=540, max_instances=1)
 def finance_job(event: scheduler_fn.ScheduledEvent) -> None:
     _run_locked('finance', lambda db: fetch_news.fetch_all_financials(db),
                 ttl_minutes=12)
@@ -150,8 +107,7 @@ def finance_job(event: scheduler_fn.ScheduledEvent) -> None:
 # ─── 財務類加密頻：每月 1–10 日（月營收申報期）09–18 時每小時 ───
 @scheduler_fn.on_schedule(
     schedule='15 9-18 1-10 * *', timezone=TZ, region=REGION,
-    memory=MemoryOption.MB_512, timeout_sec=540, max_instances=1,
-    secrets=[MONITOR_SERVICE_ACCOUNT])
+    memory=MemoryOption.MB_512, timeout_sec=540, max_instances=1)
 def finance_early_month_job(event: scheduler_fn.ScheduledEvent) -> None:
     _run_locked('finance', lambda db: fetch_news.fetch_all_financials(db),
                 ttl_minutes=12)
@@ -164,7 +120,7 @@ def finance_early_month_job(event: scheduler_fn.ScheduledEvent) -> None:
 @scheduler_fn.on_schedule(
     schedule='0 8 * * 1-5', timezone=TZ, region=REGION,
     memory=MemoryOption.MB_256, timeout_sec=120, max_instances=1,
-    secrets=[MONITOR_SERVICE_ACCOUNT, MAIL2000_SMTP_PASSWORD])
+    secrets=[MAIL2000_SMTP_PASSWORD])
 def tw_dram_digest_job(event: scheduler_fn.ScheduledEvent) -> None:
     def work(db):
         result = digest.run_digest(db, 'tw', MAIL2000_SMTP_PASSWORD.value)
@@ -175,7 +131,7 @@ def tw_dram_digest_job(event: scheduler_fn.ScheduledEvent) -> None:
 @scheduler_fn.on_schedule(
     schedule='30 16 * * 1-5', timezone=TZ, region=REGION,
     memory=MemoryOption.MB_256, timeout_sec=120, max_instances=1,
-    secrets=[MONITOR_SERVICE_ACCOUNT, MAIL2000_SMTP_PASSWORD])
+    secrets=[MAIL2000_SMTP_PASSWORD])
 def us_dram_digest_job(event: scheduler_fn.ScheduledEvent) -> None:
     def work(db):
         result = digest.run_digest(db, 'us', MAIL2000_SMTP_PASSWORD.value)
@@ -190,8 +146,7 @@ def us_dram_digest_job(event: scheduler_fn.ScheduledEvent) -> None:
 # 重新查詢過期範圍再試一次——不需要額外的失敗重試邏輯。
 @scheduler_fn.on_schedule(
     schedule='30 2 * * *', timezone=TZ, region=REGION,
-    memory=MemoryOption.MB_256, timeout_sec=540, max_instances=1,
-    secrets=[MONITOR_SERVICE_ACCOUNT])
+    memory=MemoryOption.MB_256, timeout_sec=540, max_instances=1)
 def news_cleanup_job(event: scheduler_fn.ScheduledEvent) -> None:
     def work(db):
         result = news_cleanup.cleanup_expired_news(db, dry_run=False)
