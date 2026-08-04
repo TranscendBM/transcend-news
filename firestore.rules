@@ -7,11 +7,17 @@ rules_version = '2';
 // 專案的 functions/main.py），GitHub Actions 僅保留手動備援觸發。
 // Admin SDK 繞過規則，因此 write: false 只擋客戶端，不影響排程。
 //
-// 內部集合 meta/*（排程鎖 lock_*、去重索引分片 newsIndex_0..f）
+// 內部集合 meta/*（排程鎖 lock_*、去重索引分片 newsIndex_0..f）、
+// ai_jobs/*、ai_insights/* 一律不在下面明確列出的公開唯讀集合裡，
 // 由檔末的預設拒絕涵蓋：客戶端不可讀寫，僅 Admin SDK 存取。
 //
-// 部署位置：這份規則屬於「資料庫專案 transcend-news-monitor」（舊 Google 帳號），
-// 不是 Hosting 專案 transcend-news-tbm。部署方式見 README「Firestore Rules 部署」。
+// 部署位置：Firestore 資料庫目前正從 transcend-news-monitor（舊
+// Google 帳號）搬遷到 transcend-news-tbm（見
+// docs/firestore-migration/README.md）。這份規則檔案本身不含專案
+// ID，同一份規則邏輯直接套用到 transcend-news-tbm；firebase.json 的
+// "firestore" 區塊已指向這個檔案。經審查後，應在 initial copy 前先將
+// Rules 與 Indexes 部署到 transcend-news-tbm，並等待複合索引狀態變成
+// Enabled；本 PR 只準備部署設定，不執行部署。
 // ─────────────────────────────────────────────────────────────
 service cloud.firestore {
   match /databases/{database}/documents {
