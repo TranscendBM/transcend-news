@@ -8,7 +8,6 @@ firebase_functions / firebase_admin 皆以 stub 取代：
 """
 
 import datetime
-import json
 import sys
 import types
 import unittest
@@ -68,82 +67,17 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent / 'functions'))
 
 import fetch_news  # noqa: E402
 import main        # noqa: E402
-
-VALID_SA = json.dumps({
-    'type': 'service_account',
-    'project_id': 'transcend-news-monitor',
-    'client_email': 'test@test.iam.gserviceaccount.com',
-})
+import db_same_project  # noqa: E402
 
 
-class GetDbTestBase(unittest.TestCase):
-    def setUp(self):
-        main._db = None
-        # get_app 預設：named app 尚不存在 → 拋 ValueError（firebase_admin 行為）
-        main.firebase_admin.get_app = MagicMock(side_effect=ValueError('no app'))
-        main.firebase_admin.initialize_app = MagicMock(return_value='APP')
-        main.credentials.Certificate = MagicMock(return_value='CERT')
-        main.firestore.client = MagicMock(return_value='DB')
-
-    def _set_secret(self, value):
-        main.MONITOR_SERVICE_ACCOUNT = types.SimpleNamespace(value=value)
-
-
-class TestGetDb(GetDbTestBase):
-    def test_initializes_named_app_with_explicit_project_id(self):
-        """跨專案關鍵：固定名稱 named app + 明確 projectId，
-        且 firestore.client 必須明確傳入該 app——避免環境已有指向
-        本專案（tbm）的 default app 時連錯專案"""
-        self._set_secret(VALID_SA)
-        db = main.get_db()
-        self.assertEqual(db, 'DB')
-        main.firebase_admin.initialize_app.assert_called_once_with(
-            'CERT', {'projectId': 'transcend-news-monitor'},
-            name=main.MONITOR_APP_NAME)
-        main.firestore.client.assert_called_once_with(app='APP')
-
-    def test_reuses_existing_named_app(self):
-        """named app 已存在（暖啟動）時直接取用，不重複 initialize"""
-        self._set_secret(VALID_SA)
-        main.firebase_admin.get_app = MagicMock(return_value='EXISTING_APP')
-        main.get_db()
-        main.firebase_admin.initialize_app.assert_not_called()
-        main.firestore.client.assert_called_once_with(app='EXISTING_APP')
-
-    def test_default_app_presence_does_not_affect_target_project(self):
-        """即使環境已有 default app（例如其他程式初始化過 tbm），
-        get_db 仍必須走 named app 路徑，不受影響"""
-        self._set_secret(VALID_SA)
-        main.firebase_admin._apps = {'[DEFAULT]': 'tbm-default-app'}   # 模擬已存在 default app
-        main.get_db()
-        main.firestore.client.assert_called_once_with(app='APP')
-
-    def test_db_cached_after_first_call(self):
-        self._set_secret(VALID_SA)
-        main.get_db()
-        main.get_db()
-        main.firebase_admin.initialize_app.assert_called_once()
-
-    def test_empty_secret_raises_clear_error(self):
-        self._set_secret('')
-        with self.assertRaises(RuntimeError) as ctx:
-            main.get_db()
-        self.assertIn('MONITOR_SERVICE_ACCOUNT', str(ctx.exception))
-        self.assertIsNone(main._db, '失敗後不得留下半初始化狀態')
-
-    def test_invalid_json_secret_raises_without_leaking_content(self):
-        self._set_secret('{這不是合法JSON')
-        with self.assertRaises(RuntimeError) as ctx:
-            main.get_db()
-        msg = str(ctx.exception)
-        self.assertIn('JSON', msg)
-        self.assertNotIn('這不是合法JSON', msg, '錯誤訊息不得洩漏 secret 內容')
-
-    def test_missing_project_id_raises(self):
-        self._set_secret(json.dumps({'type': 'service_account'}))
-        with self.assertRaises(RuntimeError) as ctx:
-            main.get_db()
-        self.assertIn('project_id', str(ctx.exception))
+class TestGetDb(unittest.TestCase):
+    def test_main_get_db_is_db_same_project_get_db(self):
+        """main.py 已經切換成同專案 Application Default Credentials：
+        不再自己定義跨專案的 get_db()，而是直接沿用
+        db_same_project.get_db()（同一個函式物件，不是重新包一層）——
+        該函式本身的 get_app()-優先/新建/singleton 行為已經在
+        tests/test_db_same_project.py 完整測試過，這裡不重複測。"""
+        self.assertIs(main.get_db, db_same_project.get_db)
 
 
 class TestRunLocked(unittest.TestCase):
@@ -259,12 +193,10 @@ class TestScheduledEntrypoints(unittest.TestCase):
         self.assertEqual(opts['timezone'], main.TZ)
         self.assertEqual(opts['region'], main.REGION)
         self.assertEqual(opts['max_instances'], 1)
-        # 只需要跨專案寫入權限，不需要寄信密碼；不直接比對 main.MONITOR_SERVICE_ACCOUNT
-        # 物件本身──GetDbTestBase 會在其他測試中重新賦值該全域變數，比對物件
-        # identity 會受測試執行順序影響（既有的 TestGetDb 就是這樣重新賦值的）。
-        self.assertEqual(len(opts['secrets']), 1)
-        self.assertNotIn(main.MAIL2000_SMTP_PASSWORD, opts['secrets'],
-                         '清理只需要跨專案寫入權限，不需要寄信密碼')
+        # 同專案 ADC 不需要任何 Secret；只有寄信的兩個 digest job 才需要
+        # MAIL2000_SMTP_PASSWORD，清理本身完全不用帶 secrets。
+        self.assertNotIn('secrets', opts,
+                         '清理只需要同專案 ADC 寫入權限，不需要任何 Secret')
 
     def test_news_cleanup_job_calls_cleanup_with_dry_run_false(self):
         db = MagicMock(name='db')
