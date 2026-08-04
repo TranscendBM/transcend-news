@@ -21,12 +21,13 @@ import {
 // apiKey，安全性由 Firestore Rules 把關（前端唯讀、寫入只允許 Admin
 // SDK），不是需要保密的 Service Account 金鑰，本來就會隨網頁公開。
 export const FIREBASE_CONFIG = {
-  apiKey: 'AIzaSyD9uEf6a0Q8qDeyfPDa5JsgrR0GO0XLmNw',
-  authDomain: 'transcend-news-monitor.firebaseapp.com',
-  projectId: 'transcend-news-monitor',
-  storageBucket: 'transcend-news-monitor.firebasestorage.app',
-  messagingSenderId: '724058805854',
-  appId: '1:724058805854:web:ec0afc075f51f093be86cf',
+  apiKey: 'AIzaSyB_hN5AXyXPZluHBebs5FmMRYlxL_sBboA',
+  authDomain: 'transcend-news-tbm.firebaseapp.com',
+  projectId: 'transcend-news-tbm',
+  storageBucket: 'transcend-news-tbm.firebasestorage.app',
+  messagingSenderId: '143056933857',
+  appId: '1:143056933857:web:e8863ff4aeb64e0e9fb8a0',
+  measurementId: 'G-X6P7E7J2JF',
 };
 
 let dbInstance = null;
