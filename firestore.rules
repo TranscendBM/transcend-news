@@ -15,9 +15,9 @@ rules_version = '2';
 // Google 帳號）搬遷到 transcend-news-tbm（見
 // docs/firestore-migration/README.md）。這份規則檔案本身不含專案
 // ID，同一份規則邏輯直接套用到 transcend-news-tbm；firebase.json 的
-// "firestore" 區塊已指向這個檔案，但實際 `firebase deploy --only
-// firestore:rules` 要等資料搬遷完成並經審查後才執行——這個 PR 只準備
-// 部署設定，不執行部署。
+// "firestore" 區塊已指向這個檔案。經審查後，應在 initial copy 前先將
+// Rules 與 Indexes 部署到 transcend-news-tbm，並等待複合索引狀態變成
+// Enabled；本 PR 只準備部署設定，不執行部署。
 // ─────────────────────────────────────────────────────────────
 service cloud.firestore {
   match /databases/{database}/documents {
