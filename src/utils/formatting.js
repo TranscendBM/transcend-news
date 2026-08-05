@@ -1,8 +1,11 @@
-import * as XLSX from 'xlsx';
 import { getSentiment, SENT_CFG } from './news.js';
 
-export function exportNewsExcel(articles, sheetName, filenamePrefix) {
+// xlsx 只在真的要匯出時才動態載入——它是目前 bundle 裡最大的相依套件
+// 之一，大多數使用者從頭到尾不會按「匯出 Excel」，沒必要讓每個人的
+// 第一次載入都背這個成本。
+export async function exportNewsExcel(articles, sheetName, filenamePrefix) {
   if (!articles || articles.length === 0) return;
+  const XLSX = await import('xlsx');
   const rows = articles.map(n => {
     const d = n.pubDate?.toDate ? n.pubDate.toDate() : new Date(n.pubDate || 0);
     return {

@@ -1,9 +1,5 @@
 import { useState, useEffect, useMemo, useRef } from 'react';
 import ReactDOM from 'react-dom';
-import {
-  PieChart, Pie, Cell, LineChart, Line,
-  XAxis, YAxis, Tooltip, Legend, ResponsiveContainer, CartesianGrid,
-} from 'recharts';
 
 import { getDb, doc, onSnapshot, getDoc } from './services/firebase.js';
 import Card from './components/Card.jsx';
@@ -57,25 +53,6 @@ const STOCK_META = {
 
 // 註：MOCK_COMMUNITY / SRC_COLOR（既有既存但目前無畫面引用）已隨模組搬移
 // 保留在 src/utils/news.js（避免在這裡宣告卻未使用而觸發 lint 錯誤）。
-
-// ═══════════════════════════════════════════════════════════
-// MOCK — 股價歷史走勢（示意，未來接每日收盤紀錄）
-// ═══════════════════════════════════════════════════════════
-const MOCK_STOCK_HISTORY = (() => {
-  const base = { '2451': 255, '3260': 84, '4973': 133, '5289': 190, '4967': 58, '8271': 72 };
-  const trend = { '2451': 1.5, '3260': 0.3, '4973': 0.5, '5289': 0.4, '4967': 0.2, '8271': 0.2 };
-  return Array.from({ length: 20 }, (_, i) => {
-    const d = new Date('2026-03-24'); d.setDate(d.getDate() + i);
-    const row = { date: `${d.getMonth() + 1}/${d.getDate()}` };
-    for (const [c, b] of Object.entries(base)) {
-      const n = Math.sin(i * 1.3 + parseInt(c) * 0.01) * 8 + Math.cos(i * 0.7) * 5;
-      row[c] = +(b + trend[c] * i + n).toFixed(1);
-    }
-    return row;
-  });
-})();
-
-const TT = { contentStyle: { background: '#ffffff', border: '1px solid #e5e7eb', borderRadius: 8, color: '#334155', fontSize: 12, boxShadow: '0 8px 24px rgba(15,23,42,.10)' } };
 
 // 上游市場自己的期間設定：只保留今天/本週/本月。故意不共用下面
 // CompetitorNews 用的 TIME_FILTERS（今天/本週/本月/本年/已載入資料）——
@@ -512,54 +489,6 @@ function StockCard({ code, data }) {
   );
 }
 
-// ═══════════════════════════════════════════════════════════
-// IR TAB — 情緒圓餅圖（既有既存但目前無畫面引用；隨模組搬移原樣保留）
-// ═══════════════════════════════════════════════════════════
-// eslint-disable-next-line no-unused-vars
-function SentimentPie({ news }) {
-  const data = useMemo(() => {
-    const items = news.filter(n => n.cat === 'transcend');
-    const cnt = { positive: 0, neutral: 0, negative: 0 };
-    items.forEach(n => { const s = n.sentiment || getSentiment(n.title, n.content); if (s in cnt) cnt[s]++; });
-    const total = items.length || 1;
-    return [
-      { name: '正面', value: Math.round(cnt.positive / total * 100), color: '#22c55e' },
-      { name: '中立', value: Math.round(cnt.neutral / total * 100), color: '#6b7280' },
-      { name: '負面', value: Math.round(cnt.negative / total * 100), color: '#ef4444' },
-    ];
-  }, [news]);
-
-  const total = news.filter(n => n.cat === 'transcend').length;
-
-  return (
-    <Card title="產業情緒分佈（創見相關報導）" icon="🧭">
-      <div className="flex items-center gap-2">
-        <ResponsiveContainer width="54%" height={170}>
-          <PieChart>
-            <Pie data={data} cx="50%" cy="50%" innerRadius={44} outerRadius={70}
-              paddingAngle={3} dataKey="value" startAngle={90} endAngle={-270}>
-              {data.map((d, i) => <Cell key={i} fill={d.color} stroke="transparent" />)}
-            </Pie>
-            <Tooltip {...TT} formatter={v => [`${v}%`]} />
-          </PieChart>
-        </ResponsiveContainer>
-        <div className="flex flex-col gap-3 flex-1">
-          {data.map(d => (
-            <div key={d.name} className="flex items-center justify-between">
-              <div className="flex items-center gap-2">
-                <div className="w-2.5 h-2.5 rounded-full shrink-0" style={{ background: d.color }} />
-                <span className="text-sm text-gray-300">{d.name}</span>
-              </div>
-              <span className="text-sm font-bold tabular-nums" style={{ color: d.color }}>{d.value}%</span>
-            </div>
-          ))}
-          <p className="text-xs text-gray-600 mt-1">共分析 {total} 篇報導</p>
-        </div>
-      </div>
-    </Card>
-  );
-}
-
 // 註：STOCK_CMONEY / STOCK_KW_MAP / detectStockCode（既有既存但目前無
 // 畫面引用）已隨模組搬移保留在 src/utils/news.js。
 
@@ -770,41 +699,6 @@ function RevenueChart({ revenue }) {
     </Card>
     )}
     </>
-  );
-}
-
-// ═══════════════════════════════════════════════════════════
-// IR TAB — 股價走勢折線圖（既有既存但目前無畫面引用；隨模組搬移原樣保留）
-// ═══════════════════════════════════════════════════════════
-// eslint-disable-next-line no-unused-vars
-function StockTrendChart() {
-  const LINES = [
-    { code: '2451', name: '創見', color: BRAND, w: 2.5 },
-    { code: '3260', name: '威剛', color: '#ef4444', w: 1.5 },
-    { code: '4973', name: '廣穎', color: '#3b82f6', w: 1.5 },
-    { code: '5289', name: '宜鼎', color: '#eab308', w: 1.5 },
-    { code: '4967', name: '十銓科技', color: '#a78bfa', w: 1.5 },
-    { code: '8271', name: '宇瞻', color: '#22c55e', w: 1.5 },
-  ];
-  return (
-    <Card title="競品股價走勢對比（近 20 個交易日）" icon="📉">
-      <ResponsiveContainer width="100%" height={230}>
-        <LineChart data={MOCK_STOCK_HISTORY} margin={{ top: 4, right: 12, left: 0, bottom: 0 }}>
-          <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
-          <XAxis dataKey="date" tick={{ fill: '#6b7280', fontSize: 10 }} axisLine={false} tickLine={false} />
-          <YAxis tick={{ fill: '#6b7280', fontSize: 10 }} width={38} axisLine={false} tickLine={false} />
-          <Tooltip {...TT} />
-          <Legend wrapperStyle={{ fontSize: 11, color: '#9ca3af', paddingTop: 8 }} />
-          {LINES.map(l => (
-            <Line key={l.code} type="monotone" dataKey={l.code} name={l.name}
-              stroke={l.color} strokeWidth={l.w} dot={false} />
-          ))}
-        </LineChart>
-      </ResponsiveContainer>
-      <p className="text-xs text-gray-700 text-center mt-2">
-        示意資料 · 每日收盤歷史追蹤功能開發中（需求 #1）
-      </p>
-    </Card>
   );
 }
 

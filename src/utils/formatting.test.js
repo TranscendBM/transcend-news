@@ -13,12 +13,12 @@ vi.mock('xlsx', async () => {
 describe('exportNewsExcel', () => {
   beforeEach(() => { vi.clearAllMocks(); });
 
-  it('does nothing when there are no articles', () => {
-    exportNewsExcel([], '創見最新報導', '創見最新報導');
+  it('does nothing when there are no articles', async () => {
+    await exportNewsExcel([], '創見最新報導', '創見最新報導');
     expect(XLSX.writeFile).not.toHaveBeenCalled();
   });
 
-  it('builds a sheet with the expected Chinese column headers and row values', () => {
+  it('builds a sheet with the expected Chinese column headers and row values', async () => {
     const articles = [{
       title: '創見資訊發布新品',
       mediaName: '經濟日報',
@@ -27,7 +27,7 @@ describe('exportNewsExcel', () => {
       link: 'https://example.com/a1',
     }];
 
-    exportNewsExcel(articles, '創見最新報導', '創見最新報導');
+    await exportNewsExcel(articles, '創見最新報導', '創見最新報導');
 
     expect(XLSX.writeFile).toHaveBeenCalledTimes(1);
     const [wb, filename] = XLSX.writeFile.mock.calls[0];
@@ -47,13 +47,13 @@ describe('exportNewsExcel', () => {
     expect(filename).toMatch(/^創見最新報導_\d{8}\.xlsx$/);
   });
 
-  it('falls back to a computed sentiment label when the article has none stored', () => {
+  it('falls back to a computed sentiment label when the article has none stored', async () => {
     const articles = [{
       title: '威剛虧損擴大',
       content: '威剛虧損擴大財報',
       pubDate: new Date('2026-07-20T03:00:00Z'),
     }];
-    exportNewsExcel(articles, '競品動態', '競品動態');
+    await exportNewsExcel(articles, '競品動態', '競品動態');
     const [wb] = XLSX.writeFile.mock.calls[0];
     const rows = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]]);
     expect(rows[0].情緒).toBe('負面');
