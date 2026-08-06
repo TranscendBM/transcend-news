@@ -476,7 +476,8 @@ function StockCard({ code, data }) {
         </div>
       </div>
       <p className="text-2xl font-bold text-ink">${data.price ?? '--'}</p>
-      <div className={`flex items-center gap-1 text-sm font-semibold mt-1 ${up ? 'text-green-400' : dn ? 'text-red-400' : 'text-gray-400'}`}>
+      {/* 台股慣例：上漲用紅色、下跌用綠色（跟美股相反） */}
+      <div className={`flex items-center gap-1 text-sm font-semibold mt-1 ${up ? 'text-red-400' : dn ? 'text-green-400' : 'text-gray-400'}`}>
         <span>{up ? '▲' : dn ? '▼' : '─'}</span>
         <span>{up ? '+' : ''}{data.changePct?.toFixed(2) ?? '--'}%</span>
       </div>
@@ -549,7 +550,8 @@ function AnnualRevSVG({ data }) {
         const c = d.yoy == null ? '#960014' : d.yoy >= 0 ? '#960014' : '#4b5563';
         return (<g key={i}>
           <rect x={x} y={y} width={bw} height={bh} fill={c} rx="2" opacity="0.85" />
-          {d.yoy != null && <text x={x + bw / 2} y={y - 5} textAnchor="middle" fill={d.yoy >= 0 ? '#4ade80' : '#f87171'} fontSize="8">{d.yoy > 0 ? '+' : ''}{d.yoy.toFixed(1)}%</text>}
+          {/* 台股慣例：上漲用紅色、下跌用綠色（跟美股相反） */}
+          {d.yoy != null && <text x={x + bw / 2} y={y - 5} textAnchor="middle" fill={d.yoy >= 0 ? '#f87171' : '#4ade80'} fontSize="8">{d.yoy > 0 ? '+' : ''}{d.yoy.toFixed(1)}%</text>}
         </g>);
       })}
       {data.map((d, i) => <text key={i} x={PL + i * step + step / 2} y={VH - PB + 14} textAnchor="middle" fill="#6b7280" fontSize="10">{d.year}</text>)}
@@ -644,7 +646,7 @@ function RevenueChart({ revenue }) {
                     <td className="text-right py-1.5 pr-3 text-gray-500 tabular-nums">
                       {r.prevYrCalc > 0 ? fmtRev(r.prevYrCalc) : '—'}
                     </td>
-                    <td className={`text-right py-1.5 font-bold tabular-nums ${r.yoyPctCalc == null ? 'text-gray-600' : r.yoyPctCalc > 0 ? 'text-green-400' : r.yoyPctCalc < 0 ? 'text-red-400' : 'text-gray-400'}`}>
+                    <td className={`text-right py-1.5 font-bold tabular-nums ${r.yoyPctCalc == null ? 'text-gray-600' : r.yoyPctCalc > 0 ? 'text-red-400' : r.yoyPctCalc < 0 ? 'text-green-400' : 'text-gray-400'}`}>
                       {r.yoyPctCalc == null ? '—' : (r.yoyPctCalc > 0 ? '+' : '') + r.yoyPctCalc + '%'}
                     </td>
                   </tr>
@@ -682,7 +684,7 @@ function RevenueChart({ revenue }) {
               <tr key={i} className="border-b border-gray-800/40 hover:bg-gray-800/20">
                 <td className="py-1.5 pr-3 text-gray-300 font-medium tabular-nums">{y.year}</td>
                 <td className="text-right py-1.5 pr-3 text-ink tabular-nums font-medium">{fmtRev(y.total)}</td>
-                <td className={`text-right py-1.5 pr-3 font-bold tabular-nums ${y.yoy == null ? 'text-gray-600' : y.yoy > 0 ? 'text-green-400' : y.yoy < 0 ? 'text-red-400' : 'text-gray-400'}`}>
+                <td className={`text-right py-1.5 pr-3 font-bold tabular-nums ${y.yoy == null ? 'text-gray-600' : y.yoy > 0 ? 'text-red-400' : y.yoy < 0 ? 'text-green-400' : 'text-gray-400'}`}>
                   {y.yoy == null ? '—' : (y.yoy > 0 ? '+' : '') + y.yoy + '%'}
                 </td>
                 <td className="text-right py-1.5 tabular-nums">
@@ -1136,7 +1138,8 @@ function DailyTrading({ daily }) {
     if (v == null) return '—';
     return (v > 0 ? '+' : '') + fmtK(v) + unit;
   };
-  const nc = v => v == null ? 'text-gray-400' : v > 0 ? 'text-green-400' : v < 0 ? 'text-red-400' : 'text-gray-400';
+  // 台股慣例：上漲/買超用紅色、下跌/賣超用綠色（跟美股相反）
+  const nc = v => v == null ? 'text-gray-400' : v > 0 ? 'text-red-400' : v < 0 ? 'text-green-400' : 'text-gray-400';
 
   if (!daily || (!daily.close && !daily.open)) return (
     <Card title="創見 2451 每日交易資訊" icon="📊">
@@ -1183,11 +1186,11 @@ function DailyTrading({ daily }) {
           <div className="space-y-1.5">
             <div className="flex justify-between text-sm">
               <span className="text-gray-500">買進</span>
-              <span className="text-green-400/80 tabular-nums">{daily.foreignBuy != null ? fmtK(daily.foreignBuy) : '—'}</span>
+              <span className="text-red-400/80 tabular-nums">{daily.foreignBuy != null ? fmtK(daily.foreignBuy) : '—'}</span>
             </div>
             <div className="flex justify-between text-sm">
               <span className="text-gray-500">賣出</span>
-              <span className="text-red-400/80 tabular-nums">{daily.foreignSell != null ? fmtK(daily.foreignSell) : '—'}</span>
+              <span className="text-green-400/80 tabular-nums">{daily.foreignSell != null ? fmtK(daily.foreignSell) : '—'}</span>
             </div>
           </div>
           {daily.foreignBuy == null && <p className="text-xs text-gray-600 mt-2">暫無法人資料</p>}
@@ -1202,11 +1205,11 @@ function DailyTrading({ daily }) {
           <div className="space-y-1.5">
             <div className="flex justify-between text-sm">
               <span className="text-gray-500">買進</span>
-              <span className="text-green-400/80 tabular-nums">{daily.trustBuy != null ? fmtK(daily.trustBuy) : '—'}</span>
+              <span className="text-red-400/80 tabular-nums">{daily.trustBuy != null ? fmtK(daily.trustBuy) : '—'}</span>
             </div>
             <div className="flex justify-between text-sm">
               <span className="text-gray-500">賣出</span>
-              <span className="text-red-400/80 tabular-nums">{daily.trustSell != null ? fmtK(daily.trustSell) : '—'}</span>
+              <span className="text-green-400/80 tabular-nums">{daily.trustSell != null ? fmtK(daily.trustSell) : '—'}</span>
             </div>
           </div>
           {daily.trustBuy == null && <p className="text-xs text-gray-600 mt-2">暫無法人資料</p>}
@@ -1667,7 +1670,7 @@ export default function App() {
           )}
           {self && (
             <span className="text-gray-500">
-              創見 <span className={`font-semibold ${self.changePct >= 0 ? 'text-green-400' : 'text-red-400'}`}>
+              創見 <span className={`font-semibold ${self.changePct >= 0 ? 'text-red-400' : 'text-green-400'}`}>
                 ${self.price} {self.changePct >= 0 ? '▲' : '▼'}{Math.abs(self.changePct ?? 0).toFixed(2)}%
               </span>
             </span>
@@ -1677,7 +1680,7 @@ export default function App() {
             const shortName = STOCK_META[c.stock]?.name || c.name;
             return (
               <span key={c.stock} className="text-gray-500">
-                {shortName} <span className={`font-semibold ${s.changePct >= 0 ? 'text-green-400' : 'text-red-400'}`}>
+                {shortName} <span className={`font-semibold ${s.changePct >= 0 ? 'text-red-400' : 'text-green-400'}`}>
                   ${s.price} {s.changePct >= 0 ? '▲' : '▼'}{Math.abs(s.changePct ?? 0).toFixed(2)}%
                 </span>
               </span>
