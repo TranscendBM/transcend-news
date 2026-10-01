@@ -293,3 +293,22 @@ describe('USMarketTab — 上月期間與 Excel 匯出', () => {
     expect(within(newsListCard()).getByText('⬇ 匯出 Excel').disabled).toBe(true);
   });
 });
+
+describe('USMarketTab — 顯示更多', () => {
+  it('先顯示 80 則，按「顯示更多」後顯示其餘的，切換期間會回到 80 則', () => {
+    vi.setSystemTime(NOW);
+    const many = Array.from({ length: 100 }, (_, i) =>
+      mkUpstream('n' + i, '上游新聞第' + i + '則', taipei(2026, 7, 20, 12, i % 60, 0)));
+    renderUSMarketTab({ upstreamArticles: many });
+    const card = newsListCard();
+    fireEvent.click(within(card).getByText('本月'));
+    expect(within(card).getAllByText(/^上游新聞第\d+則$/)).toHaveLength(80);
+
+    fireEvent.click(within(card).getByText('顯示更多（再 20 則）'));
+    expect(within(card).getAllByText(/^上游新聞第\d+則$/)).toHaveLength(100);
+    expect(within(card).queryByText(/顯示更多/)).toBeNull();
+
+    fireEvent.click(within(card).getByText('本週'));
+    expect(within(card).getAllByText(/^上游新聞第\d+則$/)).toHaveLength(80);
+  });
+});

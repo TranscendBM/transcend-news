@@ -2,6 +2,7 @@ import { useState, useMemo } from 'react';
 
 import Card from '../../components/Card.jsx';
 import TabBtn from '../../components/TabBtn.jsx';
+import ShowMoreButton, { useShowMore } from '../../components/ShowMore.jsx';
 import NewsFilterToolbar from '../../components/filters/NewsFilterToolbar.jsx';
 import NewsCard from '../news/NewsCard.jsx';
 import TodayBriefing from '../intelligence/TodayBriefing.jsx';
@@ -195,8 +196,9 @@ function CompetitorNews({ news }) {
         const d = n.pubDate?.toDate ? n.pubDate.toDate() : new Date(n.pubDate || 0);
         return d >= cutoff;
       })
-    )).slice(0, 80);
+    ));
   }, [news, active, timeFilter]);
+  const more = useShowMore(filtered, 80, [active, timeFilter]);
 
   return (
     <Card title="競品動態監測" icon="🔍" className="h-full">
@@ -222,7 +224,10 @@ function CompetitorNews({ news }) {
       </div>
 
       {filtered.length > 0
-        ? <div className="space-y-2">{filtered.map((n, i) => <NewsCard key={n.id || i} article={n} />)}</div>
+        ? <>
+            <div className="space-y-2">{more.shown.map((n, i) => <NewsCard key={n.id || i} article={n} />)}</div>
+            <ShowMoreButton remaining={more.remaining} step={80} onMore={more.showMore} onAll={more.showAll} />
+          </>
         : <p className="text-sm text-gray-600 text-center py-8">
             {active === 'all' ? '暫無競品報導' : `暫無 ${comp?.name} 相關報導`}
           </p>
@@ -295,9 +300,10 @@ export function PRTab({ news, prArticles, prStatus, refreshPRNews }) {
     return searchFiltered.filter(n => inPeriod(n, range));
   }, [searchFiltered, timeFilter, now]);
 
-  // 畫面清單只顯示前 50 篇（渲染效能考量，不是資料本身被裁切）；
+  // 畫面清單先顯示前 50 篇，可按「顯示更多」展開（渲染效能考量，不是資料本身被裁切）；
   // Excel 匯出用上面未截斷的 transcendFull，兩者不是同一份陣列。
-  const transcend = useMemo(() => transcendFull.slice(0, 50), [transcendFull]);
+  const more = useShowMore(transcendFull, 50, [timeFilter, prQuery, prMedia, prSentiment]);
+  const transcend = more.shown;
 
   return (
     <div className="space-y-4 fade-in">
@@ -344,7 +350,10 @@ export function PRTab({ news, prArticles, prStatus, refreshPRNews }) {
                 </button>
               </div>
             : transcend.length > 0
-            ? <div className="space-y-2">{transcend.map((n, i) => <NewsCard key={n.id || i} article={n} />)}</div>
+            ? <>
+                <div className="space-y-2">{transcend.map((n, i) => <NewsCard key={n.id || i} article={n} />)}</div>
+                <ShowMoreButton remaining={more.remaining} step={50} onMore={more.showMore} onAll={more.showAll} />
+              </>
             : <div className="h-32 flex items-center justify-center text-gray-600 text-sm">
                 {prStatus === 'ready' ? '此區間暫無符合報導' : '載入中…'}
               </div>

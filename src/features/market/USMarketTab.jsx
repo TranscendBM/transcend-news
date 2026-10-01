@@ -1,6 +1,7 @@
 import { useState, useMemo } from 'react';
 
 import TabBtn from '../../components/TabBtn.jsx';
+import ShowMoreButton, { useShowMore } from '../../components/ShowMore.jsx';
 import NewsFilterToolbar from '../../components/filters/NewsFilterToolbar.jsx';
 import USNewsCard from '../news/USNewsCard.jsx';
 import TodayBriefing from '../intelligence/TodayBriefing.jsx';
@@ -92,7 +93,8 @@ export function USMarketTab({ upstreamArticles, upstreamStatus, refreshUpstreamN
     () => brandFilter === 'all' ? searchFiltered : searchFiltered.filter(n => getUSBrand(n) === brandFilter),
     [searchFiltered, brandFilter]);
 
-  const shown = useMemo(() => final.slice(0, 80), [final]);
+  const more = useShowMore(final, 80, [timeFilter, brandFilter, usQuery, usMedia, usSentiment]);
+  const shown = more.shown;
 
   const pos = final.filter(n => (n.sentiment || getSentiment(n.title, n.content)) === 'positive').length;
   const neg = final.filter(n => (n.sentiment || getSentiment(n.title, n.content)) === 'negative').length;
@@ -200,7 +202,10 @@ export function USMarketTab({ upstreamArticles, upstreamStatus, refreshUpstreamN
               </button>
             </div>
           : shown.length > 0
-          ? <div className="space-y-2">{shown.map((n, i) => <USNewsCard key={n.id || i} article={n} />)}</div>
+          ? <>
+              <div className="space-y-2">{shown.map((n, i) => <USNewsCard key={n.id || i} article={n} />)}</div>
+              <ShowMoreButton remaining={more.remaining} step={80} onMore={more.showMore} onAll={more.showAll} />
+            </>
           : <div className="h-32 flex items-center justify-center text-gray-600 text-sm">
               {upstreamStatus === 'ready' ? '此區間暫無資料' : '載入中…'}
             </div>
