@@ -5,7 +5,8 @@ import NewsFilterToolbar from '../../components/filters/NewsFilterToolbar.jsx';
 import USNewsCard from '../news/USNewsCard.jsx';
 import TodayBriefing from '../intelligence/TodayBriefing.jsx';
 import { useNow } from '../../hooks/useNow.js';
-import { taipeiDayStart, taipeiWeekStart, taipeiMonthStart } from '../../utils/dates.js';
+import { taipeiPeriodRange, inPeriod } from '../../utils/dates.js';
+import { exportNewsExcel } from '../../utils/formatting.js';
 import {
   BRAND, getSentiment, dedupeArticlesByTitle, getUSBrand, US_BRAND_CFG, filterNewsList,
 } from '../../utils/news.js';
@@ -18,6 +19,7 @@ const UPSTREAM_TIME_FILTERS = [
   { id: 'today', label: '今天' },
   { id: 'week', label: '本週' },
   { id: 'month', label: '本月' },
+  { id: 'lastMonth', label: '上月' },
 ];
 
 // ═══════════════════════════════════════════════════════════
@@ -61,16 +63,8 @@ export function USMarketTab({ upstreamArticles, upstreamStatus, refreshUpstreamN
   // Asia/Taipei 日曆邊界，不用瀏覽器本地時區。
   const now = useNow();
   const periodFiltered = useMemo(() => {
-    const cutoffs = {
-      today: taipeiDayStart(now),
-      week: taipeiWeekStart(now),
-      month: taipeiMonthStart(now),
-    };
-    const cutoff = cutoffs[timeFilter];
-    return searchFiltered.filter(n => {
-      const d = n.pubDate?.toDate ? n.pubDate.toDate() : new Date(n.pubDate || 0);
-      return d >= cutoff;
-    });
+    const range = taipeiPeriodRange(timeFilter, now);
+    return searchFiltered.filter(n => inPeriod(n, range));
   }, [searchFiltered, timeFilter, now]);
 
   // 品牌 pill 按鈕上顯示的則數：用「期間篩選後、尚未套用品牌篩選」的
@@ -91,6 +85,12 @@ export function USMarketTab({ upstreamArticles, upstreamStatus, refreshUpstreamN
   const final = useMemo(
     () => brandFilter === 'all' ? periodFiltered : periodFiltered.filter(n => getUSBrand(n) === brandFilter),
     [periodFiltered, brandFilter]);
+
+  // 今日重要情報：套用搜尋/媒體/情緒＋品牌，但不套用期間篩選——選「上月」
+  // 時 final 不含今天，若直接用 final，今日情報會被清空、誤顯示「沒有重要情報」。
+  const briefingSource = useMemo(
+    () => brandFilter === 'all' ? searchFiltered : searchFiltered.filter(n => getUSBrand(n) === brandFilter),
+    [searchFiltered, brandFilter]);
 
   const shown = useMemo(() => final.slice(0, 80), [final]);
 
@@ -115,9 +115,9 @@ export function USMarketTab({ upstreamArticles, upstreamStatus, refreshUpstreamN
   return (
     <div className="space-y-4 fade-in">
       {/* 今天重要情報（沿用「今日情報快報」規則：風險／財務／機會／市場關鍵字 + 24 小時內加權）
-          用跟統計卡片／新聞清單同一份 final：不管目前選哪個期間分頁，
-          TodayBriefing 自己只挑「今天」的子集合，final 一定涵蓋今天。 */}
-      <TodayBriefing articles={final} title="上游市場今日重要情報" />
+          跟統計卡片／新聞清單套用相同的搜尋/媒體/情緒/品牌篩選，但不受期間
+          分頁影響（見上方 briefingSource），TodayBriefing 自己只挑「今天」。 */}
+      <TodayBriefing articles={briefingSource} title="上游市場今日重要情報" />
 
       <NewsFilterToolbar
         query={usQuery} setQuery={setUsQuery}
@@ -149,11 +149,22 @@ export function USMarketTab({ upstreamArticles, upstreamStatus, refreshUpstreamN
 
       {/* 主要新聞卡 */}
       <div className="bg-gray-900 rounded-2xl border border-gray-700/60 p-4">
-        <h3 className="text-base font-semibold text-gray-200 mb-3 flex items-center gap-2">
-          <span>🌐</span>上游供應鏈 ＆ DRAM / Flash 市場新聞
-        </h3>
+        <div className="flex items-center gap-2 mb-3">
+          <h3 className="text-base font-semibold text-gray-200 flex items-center gap-2 min-w-0">
+            <span>🌐</span>上游供應鏈 ＆ DRAM / Flash 市場新聞
+          </h3>
+          {/* 匯出目前畫面上的完整結果（final，未截斷成前 80 則）：期間＋品牌＋搜尋/媒體/情緒都已套用 */}
+          <button
+            onClick={() => exportNewsExcel(final, '上游市場新聞',
+              `上游市場新聞_${UPSTREAM_TIME_FILTERS.find(f => f.id === timeFilter)?.label}`,
+              { 品牌: getUSBrand })}
+            disabled={final.length === 0}
+            className="ml-auto text-xs px-2.5 py-1 rounded-lg border border-gray-700/60 text-gray-400 hover:text-gray-200 hover:bg-gray-800 transition disabled:opacity-40 disabled:cursor-not-allowed shrink-0">
+            ⬇ 匯出 Excel
+          </button>
+        </div>
 
-        {/* 時間篩選：只有今天/本週/本月，上游市場專用（見上方 UPSTREAM_TIME_FILTERS） */}
+        {/* 時間篩選：今天/本週/本月/上月，上游市場專用（見上方 UPSTREAM_TIME_FILTERS） */}
         <div className="flex flex-wrap gap-1.5 mb-3">
           {UPSTREAM_TIME_FILTERS.map(f => (
             <TabBtn key={f.id} active={timeFilter === f.id} onClick={() => setTimeFilter(f.id)}>{f.label}</TabBtn>

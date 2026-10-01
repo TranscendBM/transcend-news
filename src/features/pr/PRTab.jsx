@@ -7,7 +7,9 @@ import NewsCard from '../news/NewsCard.jsx';
 import TodayBriefing from '../intelligence/TodayBriefing.jsx';
 import { useNow } from '../../hooks/useNow.js';
 import { exportNewsExcel } from '../../utils/formatting.js';
-import { sortByDate, taipeiDayStart, taipeiWeekStart, taipeiMonthStart } from '../../utils/dates.js';
+import {
+  sortByDate, taipeiDayStart, taipeiWeekStart, taipeiMonthStart, taipeiPeriodRange, inPeriod,
+} from '../../utils/dates.js';
 import {
   BRAND, KEY_MEDIA, dedupeArticlesByTitle, isValidTranscendPR,
   isBriefingCandidate, filterNewsList,
@@ -40,18 +42,20 @@ export function PRStatsPanel({ articles, status = 'ready' }) {
     today: articles.filter(n => getD(n) >= todayStart).length,
     week: articles.filter(n => getD(n) >= weekStart).length,
     month: articles.filter(n => getD(n) >= monthStart).length,
+    lastMonth: articles.filter(n => inPeriod(n, taipeiPeriodRange('lastMonth', now))).length,
   };
 
   const PERIODS = [
     { label: '今天', val: counts.today, color: '#dc2626' },
     { label: '本週', val: counts.week, color: '#ea580c' },
     { label: '本月', val: counts.month, color: '#ca8a04' },
+    { label: '上月', val: counts.lastMonth, color: '#6b7280' },
   ];
 
   return (
     <div className="space-y-4">
       {/* 3 個統計卡片：查詢失敗時明確顯示錯誤，不悄悄顯示 0 */}
-      <div className="grid grid-cols-3 gap-3">
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
         {PERIODS.map(p => (
           <div key={p.label} className="bg-gray-900 border border-gray-700/60 rounded-2xl p-4 text-center">
             <p className="text-xs text-gray-500 mb-1">媒體曝光｜{p.label}</p>
@@ -88,17 +92,20 @@ export function KeyMediaPanel({ articles, status = 'ready' }) {
   // 只依賴 [articles] 的 memo 卡在舊邊界。
   const stats = (() => {
     const monthArticles = articles.filter(n => getD(n) >= monthStart);
+    const lastMonthArticles = articles.filter(n => inPeriod(n, taipeiPeriodRange('lastMonth', now)));
     const mTotal = monthArticles.length || 1;
+    const countFor = (list, km) => list.filter(n =>
+      (n.mediaName || n.sourceName || '').includes(km.name)).length;
 
     return KEY_MEDIA.map(km => {
-      const monthCount = monthArticles.filter(n =>
-        (n.mediaName || n.sourceName || '').includes(km.name)).length;
+      const monthCount = countFor(monthArticles, km);
       return {
         ...km,
         monthCount,
         monthPct: Math.round(monthCount / mTotal * 100),
+        lastMonthCount: countFor(lastMonthArticles, km),
       };
-    }).sort((a, b) => b.monthCount - a.monthCount);
+    }).sort((a, b) => b.monthCount - a.monthCount || b.lastMonthCount - a.lastMonthCount);
   })();
 
   const maxMonth = Math.max(...stats.map(s => s.monthCount), 1);
@@ -114,8 +121,9 @@ export function KeyMediaPanel({ articles, status = 'ready' }) {
   return (
     <Card title="重點媒體曝光監控" icon="🎯">
       <div className="flex items-center gap-4 mb-3 text-xs text-gray-500">
-        <span>本月累計曝光篇數（各媒體佔比）</span>
-        <span className="ml-auto w-12 text-right">本月</span>
+        <span>本月／上月累計曝光篇數</span>
+        <span className="ml-auto w-8 text-right">本月</span>
+        <span className="w-8 text-right">上月</span>
       </div>
       <div className="space-y-2.5">
         {stats.map((s, i) => (
@@ -135,12 +143,15 @@ export function KeyMediaPanel({ articles, status = 'ready' }) {
               <span className={`text-xs tabular-nums w-8 text-right font-bold ${s.monthCount > 0 ? 'text-ink' : 'text-gray-600'}`}>
                 {s.monthCount}
               </span>
+              <span className="text-xs tabular-nums w-8 text-right text-gray-500">
+                {s.lastMonthCount}
+              </span>
             </div>
           </div>
         ))}
       </div>
       <p className="text-xs text-gray-700 mt-3 text-right">
-        本月各媒體篇數{status === 'loading' ? '（載入中…）' : ''}
+        本月／上月各媒體篇數{status === 'loading' ? '（載入中…）' : ''}
       </p>
     </Card>
   );
@@ -228,6 +239,7 @@ const PR_LIST_TIME_FILTERS = [
   { id: 'today', label: '今天' },
   { id: 'week', label: '本週' },
   { id: 'month', label: '本月' },
+  { id: 'lastMonth', label: '上月' },
 ];
 
 // ═══════════════════════════════════════════════════════════
@@ -279,16 +291,8 @@ export function PRTab({ news, prArticles, prStatus, refreshPRNews }) {
   // 這裡只需要再依日期篩選）：統計用途（例如 Excel 匯出）需要跟畫面上
   // 「這個期間有幾篇」的實際定義完全一致，不能只看畫面上顯示的前 N 筆。
   const transcendFull = useMemo(() => {
-    const cutoffs = {
-      today: taipeiDayStart(now),
-      week: taipeiWeekStart(now),
-      month: taipeiMonthStart(now),
-    };
-    const cutoff = cutoffs[timeFilter];
-    return searchFiltered.filter(n => {
-      const d = n.pubDate?.toDate ? n.pubDate.toDate() : new Date(n.pubDate || 0);
-      return d >= cutoff;
-    });
+    const range = taipeiPeriodRange(timeFilter, now);
+    return searchFiltered.filter(n => inPeriod(n, range));
   }, [searchFiltered, timeFilter, now]);
 
   // 畫面清單只顯示前 50 篇（渲染效能考量，不是資料本身被裁切）；
@@ -300,7 +304,7 @@ export function PRTab({ news, prArticles, prStatus, refreshPRNews }) {
       <TodayBriefing articles={news.filter(isBriefingCandidate)} />
 
       {/* PR 專用篩選工具列：搜尋/媒體/情緒，resultCount／totalCount 一律
-          來自 usePRNews 的本月資料，不是受全站 2000 筆上限限制的 news。 */}
+          來自 usePRNews 的本月＋上月資料，不是受全站 2000 筆上限限制的 news。 */}
       <NewsFilterToolbar
         query={prQuery} setQuery={setPrQuery}
         media={prMedia} setMedia={setPrMedia}
@@ -323,7 +327,7 @@ export function PRTab({ news, prArticles, prStatus, refreshPRNews }) {
               ⬇ 匯出 Excel
             </button>
           }>
-          {/* 時間篩選：只有今天/本週/本月，PR 專用（見上方 PR_LIST_TIME_FILTERS） */}
+          {/* 時間篩選：今天/本週/本月/上月，PR 專用（見上方 PR_LIST_TIME_FILTERS） */}
           <div className="flex gap-1.5 mb-3">
             {PR_LIST_TIME_FILTERS.map(f => (
               <TabBtn key={f.id} active={timeFilter === f.id} onClick={() => setTimeFilter(f.id)}>

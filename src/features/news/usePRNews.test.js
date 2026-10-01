@@ -49,14 +49,14 @@ afterEach(() => {
   vi.useRealTimers();
 });
 
-describe('usePRNews — 查詢範圍固定為「本月」', () => {
-  it('queries cat == transcend AND pubDate >= this month start, ordered by pubDate desc', async () => {
+describe('usePRNews — 查詢範圍固定為「本月＋上個月」', () => {
+  it('queries cat == transcend AND pubDate >= last month start, ordered by pubDate desc', async () => {
     vi.setSystemTime(taipei(2026, 7, 20, 12, 0, 0));
     renderHook(() => usePRNews());
     await waitFor(() => expect(onSnapshot).toHaveBeenCalledTimes(1));
 
     expect(nthWhereValue(0, 'cat')).toBe('transcend');
-    expect(nthWhereValue(0, 'pubDate')).toEqual(taipei(2026, 7, 1, 0, 0, 0));
+    expect(nthWhereValue(0, 'pubDate')).toEqual(taipei(2026, 6, 1, 0, 0, 0));
 
     const [q] = callArgs(0);
     const whereConstraints = q.constraints.filter(c => c.__marker === 'where');
@@ -149,7 +149,7 @@ describe('usePRNews — 跨月後重新建立查詢', () => {
 
     renderHook(() => usePRNews());
     expect(onSnapshot).toHaveBeenCalledTimes(1);
-    expect(nthWhereValue(0, 'pubDate')).toEqual(taipei(2026, 7, 1, 0, 0, 0));
+    expect(nthWhereValue(0, 'pubDate')).toEqual(taipei(2026, 6, 1, 0, 0, 0));
 
     // 推進到 8/1 00:00（跨月）後，再推進到下一次 60 秒檢查點。
     await act(async () => {
@@ -158,7 +158,7 @@ describe('usePRNews — 跨月後重新建立查詢', () => {
 
     expect(unsubSpy).toHaveBeenCalledTimes(1); // 舊監聽器已取消
     expect(onSnapshot).toHaveBeenCalledTimes(2); // 用新月份重新訂閱
-    expect(nthWhereValue(1, 'pubDate')).toEqual(taipei(2026, 8, 1, 0, 0, 0));
+    expect(nthWhereValue(1, 'pubDate')).toEqual(taipei(2026, 7, 1, 0, 0, 0));
   });
 
   it('does not rebuild the query when still within the same Taipei month', async () => {

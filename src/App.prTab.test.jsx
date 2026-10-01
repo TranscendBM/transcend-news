@@ -127,7 +127,7 @@ describe('PRTab — 篩選工具列（搜尋／媒體／情緒）', () => {
     // 卡片內查找，避免跟媒體篩選下拉選單裡的同名選項搞混。
     const keyMediaCard = screen.getByText('重點媒體曝光監控').closest('.bg-gray-900');
     const row = within(keyMediaCard).getByText('電子時報').closest('.group');
-    expect(row.textContent).toBe('1電子時報Digitimes1');
+    expect(row.textContent).toBe('1電子時報Digitimes10'); // 本月 1、上月 0
   });
 
   it('sentiment filter affects the list and the stats count', () => {

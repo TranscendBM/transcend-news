@@ -58,4 +58,15 @@ describe('exportNewsExcel', () => {
     const rows = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]]);
     expect(rows[0].情緒).toBe('負面');
   });
+
+  it('adds extra columns between 情緒 and 連結', async () => {
+    const articles = [{ title: 'Micron 擴產', mediaName: 'Reuters', link: 'https://example.com/m', sentiment: 'neutral', pubDate: new Date('2026-09-10T03:00:00Z') }];
+    await exportNewsExcel(articles, '上游市場新聞', '上游市場新聞_上月', { 品牌: () => 'Micron' });
+    const [wb, filename] = XLSX.writeFile.mock.calls[0];
+    const sheet = wb.Sheets[wb.SheetNames[0]];
+    const header = XLSX.utils.sheet_to_json(sheet, { header: 1 })[0];
+    expect(header).toEqual(['標題', '媒體', '日期', '情緒', '品牌', '連結']);
+    expect(XLSX.utils.sheet_to_json(sheet)[0].品牌).toBe('Micron');
+    expect(filename).toMatch(/^上游市場新聞_上月_\d{8}\.xlsx$/);
+  });
 });

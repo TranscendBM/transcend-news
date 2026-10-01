@@ -122,6 +122,7 @@ describe('USMarketTab — 期間篩選只保留今天／本週／本月，台灣
     expect(within(card).getByText('今天')).toBeTruthy();
     expect(within(card).getByText('本週')).toBeTruthy();
     expect(within(card).getByText('本月')).toBeTruthy();
+    expect(within(card).getByText('上月')).toBeTruthy();
     expect(within(card).queryByText('本年')).toBeNull();
     expect(within(card).queryByText('已載入資料')).toBeNull();
   });
@@ -255,5 +256,40 @@ describe('USMarketTab — 今日重要情報反映正確的分類（風險/財�
     expect(within(briefing).getByText('風險')).toBeTruthy();
     expect(within(newsListCard()).getByText(title)).toBeTruthy();
     expect(within(statCard('本期新聞')).getByText('1')).toBeTruthy();
+  });
+});
+
+describe('USMarketTab — 上月期間與 Excel 匯出', () => {
+  afterEach(() => { vi.useRealTimers(); });
+
+  it('上月只顯示上個月的新聞，不含本月', () => {
+    vi.setSystemTime(NOW); // 2026-07-20
+    const thisMonth = mkUpstream('t1', '七月上游新聞', taipei(2026, 7, 10, 14, 0, 0));
+    const lastMonth = mkUpstream('l1', '六月上游新聞', taipei(2026, 6, 15, 14, 0, 0));
+    renderUSMarketTab({ upstreamArticles: [thisMonth, lastMonth] });
+
+    const card = newsListCard();
+    fireEvent.click(within(card).getByText('上月'));
+    expect(within(card).getByText('六月上游新聞')).toBeTruthy();
+    expect(within(card).queryByText('七月上游新聞')).toBeNull();
+
+    fireEvent.click(within(card).getByText('本月'));
+    expect(within(card).getByText('七月上游新聞')).toBeTruthy();
+    expect(within(card).queryByText('六月上游新聞')).toBeNull();
+  });
+
+  it('切到上月時，今日重要情報仍顯示今天的消息（不受期間分頁影響）', () => {
+    vi.setSystemTime(NOW);
+    const todayRisk = mkUpstream('r1', 'Micron 財報優於預期', taipei(2026, 7, 20, 14, 0, 0));
+    renderUSMarketTab({ upstreamArticles: [todayRisk] });
+    fireEvent.click(within(newsListCard()).getByText('上月'));
+    expect(within(briefingPanel()).getByText('Micron 財報優於預期')).toBeTruthy();
+    expect(within(newsListCard()).queryByText('Micron 財報優於預期')).toBeNull();
+  });
+
+  it('匯出按鈕在沒有資料時停用', () => {
+    vi.setSystemTime(NOW);
+    renderUSMarketTab({ upstreamArticles: [] });
+    expect(within(newsListCard()).getByText('⬇ 匯出 Excel').disabled).toBe(true);
   });
 });

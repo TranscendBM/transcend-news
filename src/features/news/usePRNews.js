@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   getDb, collection, query, where, orderBy, onSnapshot,
 } from '../../services/firebase.js';
-import { taipeiMonthStart } from '../../utils/dates.js';
+import { taipeiMonthStart, taipeiPrevMonthStart } from '../../utils/dates.js';
 
 // 每分鐘檢查一次是否已經跨入新的台灣月份，跟 useNow() 預設 interval 一致。
 const MONTH_CHECK_INTERVAL_MS = 60000;
@@ -15,7 +15,9 @@ const MONTH_CHECK_INTERVAL_MS = 60000;
  *
  * 查詢條件固定為：
  *   where('cat', '==', 'transcend')
- *   where('pubDate', '>=', taipeiMonthStart(now))
+ *   where('pubDate', '>=', taipeiPrevMonthStart(taipeiMonthStart(now)))
+ *   （2026-10 起改為「本月＋上個月」，讓頁面可以切換到「上月」檢視；
+ *   上個月 1 日正好是 news_cleanup.py 的保留截止點，不會讀到更舊的資料。）
  *   orderBy('pubDate', 'desc')
  * 只查「本月」而不是整個 transcend 分類，是因為正式資料庫目前雖然只
  * 保留「本月＋上個月」（見 functions/news_cleanup.py），但 transcend
@@ -60,7 +62,7 @@ export function usePRNews() {
     return query(
       collection(db, 'news'),
       where('cat', '==', 'transcend'),
-      where('pubDate', '>=', monthStart),
+      where('pubDate', '>=', taipeiPrevMonthStart(monthStart)),
       orderBy('pubDate', 'desc'),
     );
   }, []);
