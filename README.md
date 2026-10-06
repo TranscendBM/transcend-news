@@ -240,6 +240,46 @@ orderBy('pubDate', 'desc')
   仍可能重新計算/重新產生讀取——**不是**「開新分頁就保證 0 次讀取」
   或「一定只計異動文件」，只是實務上通常會比較省。
 
+## ✅ 人工確認媒體曝光（Excel 匯入）
+
+`tools/import_media_exposure.py` 將新聞稿發布後由同仁人工彙整的 Excel
+剪報整合進 PR 媒體戰情。人工確認曝光與 RSS 自動新聞是兩種不同資料：
+
+- `media_exposure`：已清理、可在網站顯示的公開唯讀資料。
+- `media_exposure_private`：來源檔名、工作表、列號與內部採訪備註；沒有
+  列入 Firestore Rules 的公開集合，由檔末預設拒絕規則保護。
+- 不寫入 `news`，因此不會被 `news_cleanup_job` 的「本月＋上個月」規則刪除。
+- 原始 Excel 永遠只讀，不會被工具修改。
+- URL 正規化後用固定雜湊 ID 寫入，重跑同一批檔案不會建立重複文件。
+- 同一網址重複出現在不同月份檔案時合併成一筆，私密來源紀錄仍保留每個
+  來源位置；媒體名稱會套用少量已確認的別名正規化。
+
+先安裝本機工具相依套件，再執行 dry-run：
+
+```bash
+python3 -m venv .venv-tools
+.venv-tools/bin/pip install -r tools/requirements.txt
+
+.venv-tools/bin/python tools/import_media_exposure.py \
+  "/path/to/Media exposure_07.xlsx" \
+  "/path/to/Media exposure_08.xlsx" \
+  "/path/to/Media exposure_09.xlsx"
+```
+
+未加 `--copy` 時只會輸出筆數、去重數、無效列位置及原因，不連線或寫入
+Firestore，也不在報告中輸出新聞標題、內部備註等內容。正式寫入必須同時：
+
+1. 明確指定／確認目標是 `transcend-news-tbm`。
+2. 加上 `--copy`。
+3. 加上 `--i-approve-writing-to-transcend-news-tbm`。
+4. 若 dry-run 有無效列，必須修正原始資料，或用
+   `--approve-skipping-invalid N` 精確核准略過的列數；數字不一致就拒絕寫入。
+
+前端 `src/features/pr/useMediaExposure.js` 最多讀取最新 1,000 筆公開資料，
+依 `exposureDate` 由新到舊排列。PR 頁面會另外顯示本月人工確認數、已載入
+總數、涵蓋媒體與最近紀錄，刻意不把人工確認數靜默加進自動新聞監測統計，
+避免同一曝光被誤算兩次。匯出功能也只使用公開欄位，不會包含內部備註。
+
 ## 🌐 上游市場新聞（`src/features/news/useUpstreamNews.js`）
 
 上游市場分頁（供應鏈＋ DRAM/Flash 市場）的統計卡片、品牌篩選、「創見最新
