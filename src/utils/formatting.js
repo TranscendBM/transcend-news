@@ -24,3 +24,30 @@ export async function exportNewsExcel(articles, sheetName, filenamePrefix) {
   const stamp = `${today.getFullYear()}${String(today.getMonth() + 1).padStart(2, '0')}${String(today.getDate()).padStart(2, '0')}`;
   XLSX.writeFile(wb, `${filenamePrefix}_${stamp}.xlsx`);
 }
+
+export async function exportMediaExposureExcel(records) {
+  if (!records || records.length === 0) return;
+  const XLSX = await import('xlsx');
+  const rows = records.map(record => {
+    const date = record.exposureDate?.toDate
+      ? record.exposureDate.toDate()
+      : new Date(record.exposureDate || 0);
+    return {
+      日期: isNaN(date.getTime()) ? '' : date.toLocaleDateString('zh-TW', { timeZone: 'Asia/Taipei' }),
+      媒體: record.mediaName || '',
+      記者: record.reporter || '',
+      新聞標題: record.title || '',
+      曝光類型: record.exposureType || '',
+      連結: record.link || '',
+    };
+  });
+  const sheet = XLSX.utils.json_to_sheet(rows);
+  sheet['!cols'] = [
+    { wch: 12 }, { wch: 16 }, { wch: 12 }, { wch: 54 }, { wch: 12 }, { wch: 64 },
+  ];
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, sheet, '人工確認曝光');
+  const today = new Date();
+  const stamp = `${today.getFullYear()}${String(today.getMonth() + 1).padStart(2, '0')}${String(today.getDate()).padStart(2, '0')}`;
+  XLSX.writeFile(wb, `人工確認曝光_${stamp}.xlsx`);
+}

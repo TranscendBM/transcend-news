@@ -7,6 +7,7 @@ import TranscendMark from './components/logos/TranscendMark.jsx';
 import { useNewsFeed } from './features/news/useNewsFeed.js';
 import { usePRNews } from './features/news/usePRNews.js';
 import { useUpstreamNews } from './features/news/useUpstreamNews.js';
+import { useMediaExposure } from './features/pr/useMediaExposure.js';
 import { sortByDate, isStockStale, fmtStockUpdated } from './utils/dates.js';
 import { COMPETITORS, STOCK_META } from './config/competitors.js';
 
@@ -37,6 +38,11 @@ export default function App() {
     onFirstPublish: () => setLoading(false),
   });
   const { articles: prArticles, status: prStatus, refresh: refreshPRNews } = usePRNews();
+  const {
+    records: mediaExposure,
+    status: mediaExposureStatus,
+    refresh: refreshMediaExposure,
+  } = useMediaExposure({ enabled: tab === 'pr' });
   // enabled: tab === 'us' ——使用者停留在 PR 或 IR 分頁時不建立上游市場
   // 查詢，切到「上游市場」分頁才開始訂閱，離開時立即取消監聽器。
   const { articles: upstreamArticles, status: upstreamStatus, refresh: refreshUpstreamNews } =
@@ -89,6 +95,7 @@ export default function App() {
       tasks.push(refreshNews());
       refreshPRNews();
       refreshUpstreamNews();
+      refreshMediaExposure();
     }
     await Promise.all(tasks);
     setLoading(false);
@@ -251,7 +258,15 @@ export default function App() {
             高度感，避免畫面跳動。 */}
         <Suspense fallback={<div className="h-32 flex items-center justify-center text-gray-500 text-sm">載入中…</div>}>
           {tab === 'pr' ? (
-            <PRTab news={news} prArticles={prArticles} prStatus={prStatus} refreshPRNews={refreshPRNews} />
+            <PRTab
+              news={news}
+              prArticles={prArticles}
+              prStatus={prStatus}
+              refreshPRNews={refreshPRNews}
+              mediaExposure={mediaExposure}
+              mediaExposureStatus={mediaExposureStatus}
+              refreshMediaExposure={refreshMediaExposure}
+            />
           ) : tab === 'us' ? (
             <USMarketTab
               upstreamArticles={upstreamArticles}

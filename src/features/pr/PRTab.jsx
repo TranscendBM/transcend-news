@@ -6,7 +6,7 @@ import NewsFilterToolbar from '../../components/filters/NewsFilterToolbar.jsx';
 import NewsCard from '../news/NewsCard.jsx';
 import TodayBriefing from '../intelligence/TodayBriefing.jsx';
 import { useNow } from '../../hooks/useNow.js';
-import { exportNewsExcel } from '../../utils/formatting.js';
+import { exportNewsExcel, exportMediaExposureExcel } from '../../utils/formatting.js';
 import { sortByDate, taipeiDayStart, taipeiWeekStart, taipeiMonthStart } from '../../utils/dates.js';
 import {
   BRAND, KEY_MEDIA, dedupeArticlesByTitle, isValidTranscendPR,
@@ -147,6 +147,98 @@ export function KeyMediaPanel({ articles, status = 'ready' }) {
 }
 
 // ═══════════════════════════════════════════════════════════
+// PR TAB — 人工確認曝光（與自動新聞監測分開計算）
+// ═══════════════════════════════════════════════════════════
+function exposureDate(record) {
+  return record.exposureDate?.toDate
+    ? record.exposureDate.toDate()
+    : new Date(record.exposureDate || 0);
+}
+
+export function ManualExposurePanel({ records = [], status = 'idle', onRetry = () => {} }) {
+  const now = useNow();
+  const monthStart = taipeiMonthStart(now);
+  const monthRecords = records.filter(record => exposureDate(record) >= monthStart);
+  const uniqueMedia = new Set(records.map(record => record.mediaName).filter(Boolean)).size;
+  const latest = records.slice(0, 12);
+
+  return (
+    <Card title="人工確認曝光" icon="✓"
+      actions={
+        <button onClick={() => exportMediaExposureExcel(records)}
+          disabled={records.length === 0}
+          className="text-xs px-2.5 py-1 rounded-lg border border-gray-700/60 text-gray-400 hover:text-gray-200 hover:bg-gray-800 transition disabled:opacity-40 disabled:cursor-not-allowed shrink-0">
+          ⬇ 匯出 Excel
+        </button>
+      }>
+      <p className="text-xs text-gray-500 mb-4">
+        新聞稿發布後由同仁人工核對的實際曝光。此區與自動新聞監測分開統計，內部備註不會顯示在網站。
+      </p>
+
+      {status === 'error' ? (
+        <div className="py-8 text-center text-sm text-red-400">
+          <p>⚠ 人工曝光載入失敗</p>
+          <button onClick={onRetry}
+            className="mt-2 text-xs px-3 py-1 rounded-lg border border-red-700/60 text-red-300 hover:bg-red-900/30 transition">
+            重試
+          </button>
+        </div>
+      ) : (
+        <>
+          <div className="grid grid-cols-3 gap-3 mb-4">
+            {[
+              ['本月人工確認', monthRecords.length],
+              ['已載入曝光', records.length],
+              ['涵蓋媒體', uniqueMedia],
+            ].map(([label, value]) => (
+              <div key={label} className="rounded-xl border border-gray-700/60 bg-gray-900 p-3 text-center">
+                <p className="text-xs text-gray-500">{label}</p>
+                <p className="text-2xl font-bold text-ink mt-1 tabular-nums">
+                  {status === 'loading' ? '…' : value}
+                </p>
+              </div>
+            ))}
+          </div>
+
+          {latest.length > 0 ? (
+            <div className="divide-y divide-gray-800/70">
+              {latest.map(record => {
+                const date = exposureDate(record);
+                return (
+                  <div key={record.id} className="py-2.5 flex gap-3 items-start">
+                    <span className="text-xs px-2 py-0.5 rounded-full bg-green-900/30 text-green-500 shrink-0">
+                      人工確認
+                    </span>
+                    <div className="min-w-0 flex-1">
+                      <a href={record.link} target="_blank" rel="noopener noreferrer"
+                        className="text-sm text-ink hover:text-red-500 leading-snug line-clamp-2">
+                        {record.title}
+                      </a>
+                      <p className="text-xs text-gray-500 mt-1">
+                        {record.mediaName || '未知媒體'}
+                        {record.reporter ? `｜${record.reporter}` : ''}
+                        {!isNaN(date.getTime())
+                          ? `｜${date.toLocaleDateString('zh-TW', { timeZone: 'Asia/Taipei' })}`
+                          : ''}
+                      </p>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          ) : status === 'ready' ? (
+            <div className="py-8 text-center text-sm text-gray-600">尚未匯入人工確認曝光</div>
+          ) : null}
+          {records.length > latest.length && (
+            <p className="text-xs text-gray-600 text-right mt-3">顯示最新 {latest.length} 筆，共 {records.length} 筆</p>
+          )}
+        </>
+      )}
+    </Card>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════
 // PR TAB — 競品動態
 // ═══════════════════════════════════════════════════════════
 const TIME_FILTERS = [
@@ -237,7 +329,15 @@ const PR_LIST_TIME_FILTERS = [
 // （不在這裡直接呼叫 hook）：頁面上方「重新整理」按鈕會呼叫 App() 的
 // fetchAll()，需要能一併觸發 PR 查詢的 refresh，放在 App() 層級才能
 // 跟其他資料來源（股價/財報/新聞…）用同一個按鈕統一觸發。
-export function PRTab({ news, prArticles, prStatus, refreshPRNews }) {
+export function PRTab({
+  news,
+  prArticles,
+  prStatus,
+  refreshPRNews,
+  mediaExposure = [],
+  mediaExposureStatus = 'idle',
+  refreshMediaExposure = () => {},
+}) {
   const [timeFilter, setTimeFilter] = useState('month');
   const [prQuery, setPrQuery] = useState('');
   const [prMedia, setPrMedia] = useState('all');
@@ -313,6 +413,12 @@ export function PRTab({ news, prArticles, prStatus, refreshPRNews }) {
       {/* 統計卡片 + 各媒體篇數圖：套用搜尋/媒體/情緒篩選（searchFiltered），
           但不套用今天/本週/本月的期間篩選——三個期間的數字本來就要同時顯示。 */}
       <PRStatsPanel articles={searchFiltered} status={prStatus} />
+
+      <ManualExposurePanel
+        records={mediaExposure}
+        status={mediaExposureStatus}
+        onRetry={refreshMediaExposure}
+      />
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
         <Card title="創見最新報導" icon="📰" className="h-full"
