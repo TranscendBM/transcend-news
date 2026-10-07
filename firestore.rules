@@ -72,6 +72,14 @@ service cloud.firestore {
       allow write: if false;
     }
 
+    // 人工確認媒體曝光：僅公開去除內部備註後的資料。
+    // 原始檔名、來源列號與採訪備註放在 media_exposure_private，未在此
+    // 明確開放，會由下方預設規則拒絕所有客戶端讀寫。
+    match /media_exposure/{exposureId} {
+      allow read: if true;
+      allow write: if false;
+    }
+
     // 其他未列出的集合一律拒絕（讀＋寫）
     match /{document=**} {
       allow read, write: if false;

@@ -2,8 +2,10 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, fireEvent, within } from '@testing-library/react';
 
 const exportNewsExcel = vi.fn();
+const exportMediaExposureExcel = vi.fn();
 vi.mock('./utils/formatting.js', () => ({
   exportNewsExcel: (...args) => exportNewsExcel(...args),
+  exportMediaExposureExcel: (...args) => exportMediaExposureExcel(...args),
 }));
 
 import { PRTab } from './features/pr/PRTab.jsx';
@@ -21,12 +23,24 @@ function mkTranscend(id, title, pubDate, extra = {}) {
   };
 }
 
-function renderPRTab({ prArticles = [], prStatus = 'ready', refreshPRNews = vi.fn(), news = [] } = {}) {
-  return render(<PRTab news={news} prArticles={prArticles} prStatus={prStatus} refreshPRNews={refreshPRNews} />);
+function renderPRTab({
+  prArticles = [], prStatus = 'ready', refreshPRNews = vi.fn(), news = [],
+  mediaExposure = [], mediaExposureStatus = 'idle', refreshMediaExposure = vi.fn(),
+} = {}) {
+  return render(<PRTab
+    news={news}
+    prArticles={prArticles}
+    prStatus={prStatus}
+    refreshPRNews={refreshPRNews}
+    mediaExposure={mediaExposure}
+    mediaExposureStatus={mediaExposureStatus}
+    refreshMediaExposure={refreshMediaExposure}
+  />);
 }
 
 beforeEach(() => {
   exportNewsExcel.mockClear();
+  exportMediaExposureExcel.mockClear();
 });
 
 afterEach(() => {
@@ -181,5 +195,52 @@ describe('PRTab — Excel 匯出符合目前搜尋條件、媒體、情緒與期
     expect(exportNewsExcel).toHaveBeenCalledTimes(1);
     const [exported] = exportNewsExcel.mock.calls[0];
     expect(exported.map(a => a.id)).toEqual(['today1']);
+  });
+});
+
+describe('PRTab — 人工確認曝光與自動新聞分開呈現', () => {
+  it('shows manual exposure totals without adding them to automated PR stats', () => {
+    vi.setSystemTime(taipei(2026, 8, 20, 12, 0, 0));
+    const automated = mkTranscend('auto', '系統監測新聞', taipei(2026, 8, 15));
+    const manual = {
+      id: 'exp_1',
+      title: '人工確認新聞',
+      mediaName: '經濟日報',
+      reporter: '王記者',
+      link: 'https://example.com/manual',
+      exposureDate: taipei(2026, 8, 16),
+      verified: true,
+    };
+    renderPRTab({ prArticles: [automated], mediaExposure: [manual], mediaExposureStatus: 'ready' });
+
+    expect(screen.getByText('媒體曝光｜本月').parentElement.textContent).toContain('1');
+    expect(screen.getByText('本月人工確認').parentElement.textContent).toContain('1');
+    expect(screen.getByText('人工確認新聞')).toBeTruthy();
+    expect(screen.getByText('人工確認')).toBeTruthy();
+  });
+
+  it('does not render internal-note fields even if an unsafe caller supplies one', () => {
+    vi.setSystemTime(taipei(2026, 8, 20, 12, 0, 0));
+    renderPRTab({
+      mediaExposure: [{
+        id: 'exp_1', title: '人工確認新聞', mediaName: '經濟日報',
+        link: 'https://example.com/manual', exposureDate: taipei(2026, 8, 16),
+        noteInternal: '電訪Paul，不可公開',
+      }],
+      mediaExposureStatus: 'ready',
+    });
+    expect(screen.queryByText(/電訪Paul/)).toBeNull();
+  });
+
+  it('exports only the sanitized manual records supplied by the public hook', () => {
+    vi.setSystemTime(taipei(2026, 8, 20, 12, 0, 0));
+    const manual = {
+      id: 'exp_1', title: '人工確認新聞', mediaName: '經濟日報',
+      link: 'https://example.com/manual', exposureDate: taipei(2026, 8, 16),
+    };
+    renderPRTab({ mediaExposure: [manual], mediaExposureStatus: 'ready' });
+    const card = screen.getByText('人工確認曝光').closest('.bg-gray-900');
+    fireEvent.click(within(card).getByText('⬇ 匯出 Excel'));
+    expect(exportMediaExposureExcel).toHaveBeenCalledWith([manual]);
   });
 });

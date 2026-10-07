@@ -38,6 +38,10 @@ vi.mock('./features/news/useUpstreamNews.js', () => ({
   useUpstreamNews: () => ({ articles: usUpstreamArticles, status: 'ready', refresh: vi.fn() }),
 }));
 
+vi.mock('./features/pr/useMediaExposure.js', () => ({
+  useMediaExposure: () => ({ records: [], status: 'ready', refresh: vi.fn() }),
+}));
+
 import App from './App.jsx';
 
 beforeEach(() => {
