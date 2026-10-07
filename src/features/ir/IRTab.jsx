@@ -463,6 +463,16 @@ function DividendHistory({ dividends }) {
 // ═══════════════════════════════════════════════════════════
 // IR TAB — 競品重大訊息
 // ═══════════════════════════════════════════════════════════
+// 公開資訊觀測站（MOPS）各公司頁面，顯示在「創見與競品 IR 新訊」下方
+const MOPS_LINKS = [
+  { code: '3260', name: '威剛' },
+  { code: '4973', name: '廣穎' },
+  { code: '5289', name: '宜鼎' },
+  { code: '4967', name: '十銓' },
+  { code: '8271', name: '宇瞻' },
+];
+const mopsUrl = code => `https://mops.twse.com.tw/mops/#/web/t146sb05?companyId=${code}`;
+
 function CompetitorMaterial({ material }) {
   const COMP_META = {
     '2451': { name: '創見資訊', color: BRAND },
@@ -552,6 +562,17 @@ function CompetitorMaterial({ material }) {
         <span className="text-purple-400/70"> 股東會</span>
         <span className="text-blue-400/70"> 法人說明會</span> 特別標注
       </p>
+
+      {/* 公開資訊觀測站連結 */}
+      <div className="flex flex-wrap items-center gap-1.5 mt-3 pt-3 border-t border-gray-800/60">
+        <span className="text-xs text-gray-500 mr-1">公開資訊觀測站</span>
+        {MOPS_LINKS.map(l => (
+          <a key={l.code} href={mopsUrl(l.code)} target="_blank" rel="noopener noreferrer"
+            className="text-xs px-2.5 py-1 rounded-lg border border-gray-700/60 text-gray-400 hover:text-gray-200 hover:bg-gray-800 transition">
+            {l.name} {l.code} ↗
+          </a>
+        ))}
+      </div>
     </Card>
   );
 }
@@ -666,19 +687,24 @@ const COMP_REV_META = {
 };
 
 function CompetitorRevenueChart({ revenue, compRev }) {
-  const allSeries = useMemo(() => {
+  // series 用完整歷史建立（不只近 24 個月），表格的年增率才找得到
+  // 最早那幾個月的「去年同月」。
+  const { allSeries, byKey } = useMemo(() => {
     const series = {};
     const addSeries = (code, records) => {
       if (!records || !records.length) return;
       records.forEach(r => {
         const key = `${r.year}-${String(r.month).padStart(2, '0')}`;
-        if (!series[key]) series[key] = { label: key };
+        if (!series[key]) series[key] = { key, label: `${String(r.year).slice(2)}/${r.month}`, year: r.year, month: r.month };
         series[key][code] = r.revenue;
       });
     };
     addSeries('2451', revenue || []);
     Object.entries(compRev || {}).forEach(([code, recs]) => addSeries(code, recs));
-    return Object.values(series).sort((a, b) => a.label < b.label ? -1 : 1).slice(-24);
+    return {
+      allSeries: Object.values(series).sort((a, b) => a.key < b.key ? -1 : 1).slice(-24),
+      byKey: series,
+    };
   }, [revenue, compRev]);
 
   const compKeys = new Set(Object.keys(compRev || {}));
@@ -707,8 +733,14 @@ function CompetitorRevenueChart({ revenue, compRev }) {
   const fmtB = v => v >= 1e8 ? `${(v / 1e8).toFixed(1)}億` : v >= 1e4 ? `${(v / 1e4).toFixed(0)}萬` : String(v);
   const yTicks = [0, 0.25, 0.5, 0.75, 1].map(r => ({ r, v: maxVal * r }));
 
-  // Show every 3rd label
-  const labelStep = Math.ceil(allSeries.length / 8);
+  // 年增率：跟去年同月比，找不到去年同月或去年為 0 時回傳 null
+  const yoy = (d, code) => {
+    const prev = byKey[`${d.year - 1}-${String(d.month).padStart(2, '0')}`]?.[code];
+    const cur = d[code];
+    return cur != null && prev > 0 ? +((cur - prev) / prev * 100).toFixed(1) : null;
+  };
+  const fmtM = v => v == null ? '—' : Math.round(v / 1e6).toLocaleString(); // 百萬元
+  const yoyCls = v => v == null ? 'text-gray-600' : v > 0 ? 'text-red-400' : v < 0 ? 'text-green-400' : 'text-gray-400';
 
   return (
     <Card title="創見 vs 競品月營收比較（近 24 個月）" icon="📊">
@@ -737,14 +769,54 @@ function CompetitorRevenueChart({ revenue, compRev }) {
           <path key={c} d={line(c)} fill="none" stroke={COMP_REV_META[c].color} strokeWidth="1.8"
                 strokeLinejoin="round" strokeLinecap="round" />
         ))}
-        {/* X labels */}
-        {allSeries.map((d, i) => i % labelStep === 0 && (
-          <text key={i} x={PL + i * step} y={H - PB + 12} textAnchor="middle" fill="#6b7280" fontSize="7">
-            {d.label.slice(2)}
+        {/* X labels：每個月都顯示 */}
+        {allSeries.map((d, i) => (
+          <text key={d.key} x={PL + i * step} y={H - PB + 12} textAnchor="middle" fill="#6b7280" fontSize="8">
+            {d.label}
           </text>
         ))}
       </svg>
       <p className="text-xs text-gray-700 mt-1">* 資料來源：FinMind，單位：新台幣元</p>
+
+      {/* 各公司月營收＋年增率明細（新到舊） */}
+      <p className="text-xs text-gray-600 sm:hidden mt-3 mb-1">← 左右滑動可看其他公司 →</p>
+      <div className="mt-3 overflow-x-auto">
+        <table className="w-full text-sm">
+          <thead>
+            <tr className="text-gray-500">
+              <th rowSpan={2} className="sticky left-0 bg-gray-900 text-left pb-1.5 pr-3 font-medium whitespace-nowrap align-bottom border-b border-gray-700/60">年月</th>
+              {hasCodes.map(c => (
+                <th key={c} colSpan={2} className="text-center px-2 pb-1 font-medium whitespace-nowrap" style={{ color: COMP_REV_META[c].color }}>
+                  {COMP_REV_META[c].name}
+                </th>
+              ))}
+            </tr>
+            <tr className="border-b border-gray-700/60 text-gray-500 text-xs">
+              {hasCodes.map(c => [
+                <th key={c + 'r'} className="text-right pl-3 pb-1.5 font-medium whitespace-nowrap">營收</th>,
+                <th key={c + 'y'} className="text-right pl-2 pr-2 pb-1.5 font-medium whitespace-nowrap">年增率</th>,
+              ])}
+            </tr>
+          </thead>
+          <tbody>
+            {[...allSeries].reverse().map(d => (
+              <tr key={d.key} className="border-b border-gray-800/40 hover:bg-gray-800/20">
+                <td className="sticky left-0 bg-gray-900 py-1.5 pr-3 text-gray-300 tabular-nums whitespace-nowrap">{d.label}</td>
+                {hasCodes.map(c => {
+                  const y = yoy(d, c);
+                  return [
+                    <td key={c + 'r'} className="text-right py-1.5 pl-3 text-ink tabular-nums">{fmtM(d[c])}</td>,
+                    <td key={c + 'y'} className={`text-right py-1.5 pl-2 pr-2 tabular-nums font-medium ${yoyCls(y)}`}>
+                      {y == null ? '—' : (y > 0 ? '+' : '') + y + '%'}
+                    </td>,
+                  ];
+                })}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      <p className="text-xs text-gray-700 mt-1">* 表格營收單位：百萬元；年增率與去年同月比較</p>
     </Card>
   );
 }

@@ -216,3 +216,63 @@ describe('IRTab — 歷年股利配息', () => {
     expect(screen.getByText('$7.59')).toBeTruthy(); // 合計
   });
 });
+
+describe('IRTab — 競品月營收比較：每月橫軸與明細表', () => {
+  // 創見＋威剛各 26 個月（2024/6–2026/7），營收固定好算：創見每月 100 百萬、
+  // 去年同月 80 百萬 → 年增 +25%；威剛每月 50 百萬（年增 0%）。
+  const months = [];
+  for (let y = 2024, m = 6; y < 2026 || m <= 7; m++) {
+    if (m > 12) { m = 1; y++; }
+    months.push({ year: y, month: m });
+  }
+  const mk = fn => months.map(({ year, month }) => ({ year, month, revenue: fn(year) }));
+  const revenue = mk(y => (y === 2024 || (y === 2025) ? 80_000_000 : 100_000_000));
+  const compRev = { '3260': mk(() => 50_000_000) };
+
+  function chartCard() {
+    return screen.getByText('創見 vs 競品月營收比較（近 24 個月）').closest('div.bg-gray-900');
+  }
+
+  it('X 軸每個月都有標籤（24 個，不是每三個月一個）', () => {
+    renderIR({ revenue, compRev });
+    const labels = [...chartCard().querySelectorAll('svg text')].filter(t => /^\d{2}\/\d{1,2}$/.test(t.textContent));
+    expect(labels).toHaveLength(24);
+  });
+
+  it('表格列出每個公司的營收（百萬元）與年增率，最新月份在最上面', () => {
+    renderIR({ revenue, compRev });
+    const rows = chartCard().querySelectorAll('tbody tr');
+    expect(rows).toHaveLength(24);
+    const first = [...rows[0].querySelectorAll('td')].map(td => td.textContent);
+    // 年月、創見營收、創見年增、威剛營收、威剛年增
+    expect(first[0]).toBe('26/7');
+    expect(first[1]).toBe('100');
+    expect(first[2]).toBe('+25%');   // 2026/7 vs 2025/7：100 vs 80
+    expect(first[3]).toBe('50');
+    expect(first[4]).toBe('0%');      // 威剛去年同月也是 50 → 持平
+  });
+
+  it('近 24 個月最早的那幾個月，年增率仍能對到 24 個月以前的去年同月', () => {
+    renderIR({ revenue, compRev });
+    const rows = chartCard().querySelectorAll('tbody tr');
+    const last = [...rows[rows.length - 1].querySelectorAll('td')].map(td => td.textContent);
+    expect(last[0]).toBe('24/8');
+    expect(last[2]).toBe('—'); // 2023/8 沒資料
+  });
+});
+
+describe('IRTab — 公開資訊觀測站連結', () => {
+  it('在「創見與競品 IR 新訊」下方列出五家競品的 MOPS 連結', () => {
+    renderIR();
+    const card = screen.getByText('創見與競品 IR 新訊').closest('div.bg-gray-900');
+    const expected = {
+      '威剛': '3260', '廣穎': '4973', '宜鼎': '5289', '十銓': '4967', '宇瞻': '8271',
+    };
+    Object.entries(expected).forEach(([name, code]) => {
+      const a = within(card).getByText(new RegExp('^' + name + ' ' + code)).closest('a');
+      expect(a.getAttribute('href')).toBe('https://mops.twse.com.tw/mops/#/web/t146sb05?companyId=' + code);
+      expect(a.getAttribute('target')).toBe('_blank');
+      expect(a.getAttribute('rel')).toContain('noopener');
+    });
+  });
+});
