@@ -1,3 +1,4 @@
+/* global Node */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, fireEvent, within } from '@testing-library/react';
 
@@ -242,5 +243,24 @@ describe('PRTab — 人工確認曝光與自動新聞分開呈現', () => {
     const card = screen.getByText('人工確認曝光').closest('.bg-gray-900');
     fireEvent.click(within(card).getByText('⬇ 匯出 Excel'));
     expect(exportMediaExposureExcel).toHaveBeenCalledWith([manual]);
+  });
+});
+
+describe('PRTab — 人工確認曝光放在頁面最下方並提供上傳', () => {
+  it('人工確認曝光是頁面上最後一張卡片，在重點媒體曝光監控之後', () => {
+    renderPRTab({ prArticles: [], mediaExposureStatus: 'ready' });
+    const media = screen.getByText('重點媒體曝光監控').closest('.bg-gray-900');
+    const manual = screen.getByText('人工確認曝光').closest('.bg-gray-900');
+    expect(media.compareDocumentPosition(manual) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(manual.parentElement.lastElementChild).toBe(manual);
+  });
+
+  it('預設不顯示上傳區，按「上傳 Excel」才展開，再按一次收合', () => {
+    renderPRTab({ mediaExposureStatus: 'ready' });
+    expect(screen.queryByLabelText('上傳通行碼')).toBeNull();
+    fireEvent.click(screen.getByText('⬆ 上傳 Excel'));
+    expect(screen.getByLabelText('上傳通行碼')).toBeTruthy();
+    fireEvent.click(screen.getByText('收合上傳'));
+    expect(screen.queryByLabelText('上傳通行碼')).toBeNull();
   });
 });

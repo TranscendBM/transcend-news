@@ -6,6 +6,7 @@ import ShowMoreButton, { useShowMore } from '../../components/ShowMore.jsx';
 import NewsFilterToolbar from '../../components/filters/NewsFilterToolbar.jsx';
 import NewsCard from '../news/NewsCard.jsx';
 import TodayBriefing from '../intelligence/TodayBriefing.jsx';
+import MediaExposureUpload from './MediaExposureUpload.jsx';
 import { useNow } from '../../hooks/useNow.js';
 import { exportNewsExcel, exportMediaExposureExcel } from '../../utils/formatting.js';
 import {
@@ -167,7 +168,8 @@ function exposureDate(record) {
     : new Date(record.exposureDate || 0);
 }
 
-export function ManualExposurePanel({ records = [], status = 'idle', onRetry = () => {} }) {
+export function ManualExposurePanel({ records = [], status = 'idle', onRetry = () => {}, onImported = () => {} }) {
+  const [uploadOpen, setUploadOpen] = useState(false);
   const now = useNow();
   const monthStart = taipeiMonthStart(now);
   const monthRecords = records.filter(record => exposureDate(record) >= monthStart);
@@ -177,15 +179,23 @@ export function ManualExposurePanel({ records = [], status = 'idle', onRetry = (
   return (
     <Card title="人工確認曝光" icon="✓"
       actions={
-        <button onClick={() => exportMediaExposureExcel(records)}
-          disabled={records.length === 0}
-          className="text-xs px-2.5 py-1 rounded-lg border border-gray-700/60 text-gray-400 hover:text-gray-200 hover:bg-gray-800 transition disabled:opacity-40 disabled:cursor-not-allowed shrink-0">
-          ⬇ 匯出 Excel
-        </button>
+        <div className="flex gap-1.5 shrink-0">
+          <button onClick={() => setUploadOpen(open => !open)} aria-expanded={uploadOpen}
+            className="text-xs px-2.5 py-1 rounded-lg border border-gray-700/60 text-gray-400 hover:text-gray-200 hover:bg-gray-800 transition">
+            {uploadOpen ? '收合上傳' : '⬆ 上傳 Excel'}
+          </button>
+          <button onClick={() => exportMediaExposureExcel(records)}
+            disabled={records.length === 0}
+            className="text-xs px-2.5 py-1 rounded-lg border border-gray-700/60 text-gray-400 hover:text-gray-200 hover:bg-gray-800 transition disabled:opacity-40 disabled:cursor-not-allowed">
+            ⬇ 匯出 Excel
+          </button>
+        </div>
       }>
       <p className="text-xs text-gray-500 mb-4">
         新聞稿發布後由同仁人工核對的實際曝光。此區與自動新聞監測分開統計，內部備註不會顯示在網站。
       </p>
+
+      {uploadOpen && <MediaExposureUpload onImported={onImported} />}
 
       {status === 'error' ? (
         <div className="py-8 text-center text-sm text-red-400">
@@ -424,12 +434,6 @@ export function PRTab({
           但不套用今天/本週/本月的期間篩選——三個期間的數字本來就要同時顯示。 */}
       <PRStatsPanel articles={searchFiltered} status={prStatus} />
 
-      <ManualExposurePanel
-        records={mediaExposure}
-        status={mediaExposureStatus}
-        onRetry={refreshMediaExposure}
-      />
-
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
         <Card title="創見最新報導" icon="📰" className="h-full"
           actions={
@@ -471,8 +475,16 @@ export function PRTab({
         <CompetitorNews news={news} />
       </div>
 
-      {/* 重點媒體曝光監控：移至最下方，同樣套用搜尋/媒體/情緒篩選 */}
+      {/* 重點媒體曝光監控：同樣套用搜尋/媒體/情緒篩選 */}
       <KeyMediaPanel articles={searchFiltered} status={prStatus} />
+
+      {/* 人工確認曝光：放在頁面最下方（含 Excel 上傳）；跟自動新聞監測分開統計 */}
+      <ManualExposurePanel
+        records={mediaExposure}
+        status={mediaExposureStatus}
+        onRetry={refreshMediaExposure}
+        onImported={refreshMediaExposure}
+      />
     </div>
   );
 }

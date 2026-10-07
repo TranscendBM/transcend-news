@@ -34,6 +34,25 @@ def _on_schedule(**opts):
 _sched.on_schedule = _on_schedule
 _sched.ScheduledEvent = object
 
+_https = types.ModuleType('firebase_functions.https_fn')
+
+
+def _on_request(**opts):
+    def deco(fn):
+        fn._request_opts = opts
+        return fn
+    return deco
+
+
+class _Response:
+    def __init__(self, body, status=200, mimetype=None):
+        self.body, self.status, self.mimetype = body, status, mimetype
+
+
+_https.on_request = _on_request
+_https.Request = object
+_https.Response = _Response
+
 _opts = types.ModuleType('firebase_functions.options')
 
 
@@ -43,6 +62,7 @@ class _MemoryOption:
 
 
 _opts.MemoryOption = _MemoryOption
+_opts.CorsOptions = lambda **kw: kw
 
 _params = types.ModuleType('firebase_functions.params')
 
@@ -56,10 +76,12 @@ class _SecretParam:
 _params.SecretParam = _SecretParam
 
 _ff.scheduler_fn = _sched
+_ff.https_fn = _https
 _ff.options = _opts
 _ff.params = _params
 sys.modules.setdefault('firebase_functions', _ff)
 sys.modules.setdefault('firebase_functions.scheduler_fn', _sched)
+sys.modules.setdefault('firebase_functions.https_fn', _https)
 sys.modules.setdefault('firebase_functions.options', _opts)
 sys.modules.setdefault('firebase_functions.params', _params)
 
