@@ -474,6 +474,7 @@ function DividendHistory({ dividends }) {
 // ═══════════════════════════════════════════════════════════
 // 公開資訊觀測站（MOPS）各公司頁面，顯示在「創見與競品 IR 新訊」下方
 const MOPS_LINKS = [
+  { code: '2451', name: '創見' },
   { code: '3260', name: '威剛' },
   { code: '4973', name: '廣穎' },
   { code: '5289', name: '宜鼎' },
@@ -858,6 +859,22 @@ function AnnualRevenueChart({ revenue, compRev }) {
       .slice(-10);
   }, [revenue, compRev]);
 
+  // 表格用：stat[年][公司] = { total, byMonth }。未滿 12 個月的年度（例如
+  // 今年還沒結束，或某家公司少了一個月）不能直接拿去跟去年全年比，年增率
+  // 改成「同樣這幾個月」對「去年同期」，不然今年一定看起來大幅衰退。
+  const stat = useMemo(() => {
+    const out = {};
+    const add = (code, records) => (records || []).forEach(r => {
+      const y = out[r.year] || (out[r.year] = {});
+      const c = y[code] || (y[code] = { total: 0, byMonth: {} });
+      c.total += r.revenue;
+      c.byMonth[r.month] = r.revenue;
+    });
+    add('2451', revenue);
+    Object.entries(compRev || {}).forEach(([code, recs]) => add(code, recs));
+    return out;
+  }, [revenue, compRev]);
+
   const compKeys = new Set(Object.keys(compRev || {}));
   const hasCodes = ['2451', ...COMPETITOR_ORDER.filter(c => compKeys.has(c))].filter(c => COMP_REV_META[c]);
 
@@ -883,6 +900,22 @@ function AnnualRevenueChart({ revenue, compRev }) {
 
   const fmtB = v => v >= 1e9 ? `${(v / 1e9).toFixed(1)}B` : v >= 1e8 ? `${(v / 1e8).toFixed(0)}億` : v >= 1e4 ? `${(v / 1e4).toFixed(0)}萬` : String(v);
   const yTicks = [0, 0.25, 0.5, 0.75, 1].map(r => ({ r, v: maxVal * r }));
+
+  const fmtM = v => v == null ? '—' : Math.round(v / 1e6).toLocaleString(); // 百萬元
+  const cellOf = (year, code) => {
+    const cur = stat[year]?.[code];
+    if (!cur) return { total: null, partial: false, yoy: null };
+    const months = Object.keys(cur.byMonth);
+    const partial = months.length < 12;
+    const prev = stat[year - 1]?.[code];
+    let yoy = null;
+    if (prev && months.every(m => prev.byMonth[m] != null)) {
+      const prevSum = months.reduce((sum, m) => sum + prev.byMonth[m], 0);
+      if (prevSum > 0) yoy = +((cur.total - prevSum) / prevSum * 100).toFixed(1);
+    }
+    return { total: cur.total, partial, yoy };
+  };
+  const yoyCls = v => v == null ? 'text-gray-600' : v > 0 ? 'text-red-400' : v < 0 ? 'text-green-400' : 'text-gray-400';
 
   return (
     <Card title="年度營收趨勢（近 10 年）" icon="📈"
@@ -931,6 +964,50 @@ function AnnualRevenueChart({ revenue, compRev }) {
       </svg>
       </div>
       <p className="text-xs text-gray-700 mt-1">* 資料來源：FinMind，各年度月營收合計，單位：新台幣元</p>
+
+      {/* 各公司年度營收＋年增率明細（新到舊） */}
+      <p className="text-xs text-gray-600 sm:hidden mt-3 mb-1">← 左右滑動可看其他公司 →</p>
+      <div className="mt-3 overflow-x-auto">
+        <table className="ir-table w-full text-sm">
+          <thead>
+            <tr className="text-gray-500">
+              <th rowSpan={2} className="sticky left-0 bg-gray-900 text-left pb-1.5 pr-3 font-medium whitespace-nowrap align-bottom">年度</th>
+              {hasCodes.map(c => (
+                <th key={c} colSpan={2} className="text-center px-2 pb-1 font-medium whitespace-nowrap" style={{ color: COMP_REV_META[c].color }}>
+                  {COMP_REV_META[c].name}
+                </th>
+              ))}
+            </tr>
+            <tr className="text-gray-500 text-xs">
+              {hasCodes.map(c => [
+                <th key={c + 'r'} className="text-right pl-3 pb-1.5 font-medium whitespace-nowrap">營收</th>,
+                <th key={c + 'y'} className="text-right pl-2 pr-2 pb-1.5 font-medium whitespace-nowrap">年增率</th>,
+              ])}
+            </tr>
+          </thead>
+          <tbody>
+            {[...allYears].reverse().map(d => (
+              <tr key={d.label} className="hover:bg-gray-800/20">
+                <td className="sticky left-0 bg-gray-900 py-1.5 pr-3 text-gray-300 font-medium tabular-nums">{d.label}</td>
+                {hasCodes.map(c => {
+                  const { total, partial, yoy } = cellOf(Number(d.label), c);
+                  return [
+                    <td key={c + 'r'} className="text-right py-1.5 pl-3 text-ink tabular-nums">
+                      {fmtM(total)}{partial && <span className="text-yellow-500">*</span>}
+                    </td>,
+                    <td key={c + 'y'} className={`text-right py-1.5 pl-2 pr-2 tabular-nums font-medium ${yoyCls(yoy)}`}>
+                      {yoy == null ? '—' : (yoy > 0 ? '+' : '') + yoy + '%'}
+                    </td>,
+                  ];
+                })}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      <p className="text-xs text-gray-700 mt-1">
+        * 表格營收單位：百萬元；<span className="text-yellow-500">*</span> 為未滿 12 個月（統計中），年增率以去年同期相同月份比較
+      </p>
     </Card>
   );
 }

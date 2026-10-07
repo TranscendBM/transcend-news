@@ -335,11 +335,15 @@ describe('IRTab — 表格淺灰橫線', () => {
 });
 
 describe('IRTab — 公開資訊觀測站連結', () => {
-  it('在「創見與競品 IR 新訊」下方列出五家競品的 MOPS 連結', () => {
+  it('在「創見與競品 IR 新訊」下方列出創見＋五家競品的 MOPS 連結，創見排第一', () => {
     renderIR();
     const card = screen.getByText('創見與競品 IR 新訊').closest('div.bg-gray-900');
+    const links = [...card.querySelectorAll('a[href*="mops.twse.com.tw"]')];
+    expect(links.map(a => a.textContent)).toEqual([
+      '創見 2451 ↗', '威剛 3260 ↗', '廣穎 4973 ↗', '宜鼎 5289 ↗', '十銓 4967 ↗', '宇瞻 8271 ↗',
+    ]);
     const expected = {
-      '威剛': '3260', '廣穎': '4973', '宜鼎': '5289', '十銓': '4967', '宇瞻': '8271',
+      '創見': '2451', '威剛': '3260', '廣穎': '4973', '宜鼎': '5289', '十銓': '4967', '宇瞻': '8271',
     };
     Object.entries(expected).forEach(([name, code]) => {
       const a = within(card).getByText(new RegExp('^' + name + ' ' + code)).closest('a');
@@ -347,5 +351,46 @@ describe('IRTab — 公開資訊觀測站連結', () => {
       expect(a.getAttribute('target')).toBe('_blank');
       expect(a.getAttribute('rel')).toContain('noopener');
     });
+  });
+});
+
+describe('IRTab — 年度營收趨勢（近 10 年）下方的年營收與年增率表格', () => {
+  // 創見：2023 全年每月 10 百萬、2024 每月 20、2025 每月 30、2026 只有 1–7 月每月 40。
+  // 威剛：只有 2025（每月 5）與 2026 的 1–7 月（每月 6）。
+  const year = (y, months, v) => months.map(month => ({ year: y, month, revenue: v * 1e6 }));
+  const all12 = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12];
+  const jan7 = [1, 2, 3, 4, 5, 6, 7];
+  const revenue = [...year(2023, all12, 10), ...year(2024, all12, 20), ...year(2025, all12, 30), ...year(2026, jan7, 40)];
+  const compRev = { '3260': [...year(2025, all12, 5), ...year(2026, jan7, 6)] };
+
+  function annualCard() {
+    return screen.getByText('年度營收趨勢（近 10 年）').closest('div.bg-gray-900');
+  }
+  const cells = tr => [...tr.querySelectorAll('td')].map(td => td.textContent);
+
+  it('表頭每家公司都有「營收」「年增率」，新到舊排列', () => {
+    renderIR({ revenue, compRev });
+    const card = annualCard();
+    const heads = [...card.querySelectorAll('thead th')].map(t => t.textContent);
+    expect(heads).toEqual(['年度', '創見', 'ADATA 威剛', '營收', '年增率', '營收', '年增率']);
+    const years = [...card.querySelectorAll('tbody tr')].map(tr => cells(tr)[0]);
+    expect(years).toEqual(['2026', '2025', '2024', '2023']);
+  });
+
+  it('完整年度：營收（百萬元）與跟前一年全年比的年增率；沒有前一年資料顯示「—」', () => {
+    renderIR({ revenue, compRev });
+    const rows = [...annualCard().querySelectorAll('tbody tr')];
+    // 2025：創見 360（vs 2024 的 240 → +50%）；威剛 60，2024 沒資料 → —
+    expect(cells(rows[1])).toEqual(['2025', '360', '+50%', '60', '—']);
+    expect(cells(rows[2]).slice(0, 3)).toEqual(['2024', '240', '+100%']);
+    expect(cells(rows[3]).slice(0, 3)).toEqual(['2023', '120', '—']);
+  });
+
+  it('未滿 12 個月的年度標 *，年增率用去年同期相同月份比較（不是跟去年全年比）', () => {
+    renderIR({ revenue, compRev });
+    const rows = [...annualCard().querySelectorAll('tbody tr')];
+    // 2026：創見 1–7 月 = 280，去年同期 1–7 月 = 210 → +33.3%（若誤跟全年 360 比會是 -22%）
+    // 威剛 1–7 月 = 42，去年同期 = 35 → +20%
+    expect(cells(rows[0])).toEqual(['2026', '280*', '+33.3%', '42*', '+20%']);
   });
 });
