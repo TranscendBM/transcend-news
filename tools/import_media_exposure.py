@@ -188,7 +188,10 @@ def _find_header(ws) -> tuple[int, dict[int, str], list[int]] | None:
             # 歷史檔案的內部備註欄可能沒有欄名（2026/08 的第 F 欄就是
             # 這種情況）。所有未映射欄位都視為私密備註候選；實際每列只
             # 收集非空值，因此空白格式欄不會產生內容。
-            unknown = [index for index in range(ws.max_column) if index not in mapped]
+            # read_only 模式下，部分工具產生的 xlsx 沒有 dimension 資訊，
+            # ws.max_column 會是 None；退回用表頭列實際長度，避免整個匯入崩潰。
+            width = max(ws.max_column or 0, len(row))
+            unknown = [index for index in range(width) if index not in mapped]
             return row_number, mapped, unknown
     return None
 
