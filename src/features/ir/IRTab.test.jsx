@@ -2,6 +2,11 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, fireEvent, within } from '@testing-library/react';
 
 import { IRTab } from './IRTab.jsx';
+import { copyChartImage } from '../../utils/copyChart.js';
+
+// jsdom 沒有 canvas／ClipboardItem，圖片產生與寫入剪貼簿的細節改在瀏覽器實測；
+// 這裡只驗證按鈕有把正確的 <svg>、標題、圖例交給複製函式。
+vi.mock('../../utils/copyChart.js', () => ({ copyChartImage: vi.fn() }));
 
 function taipei(year, month, day, hour = 0, minute = 0, second = 0) {
   return new Date(Date.UTC(year, month - 1, day, hour, minute, second) - 8 * 60 * 60 * 1000);
@@ -217,21 +222,24 @@ describe('IRTab — 歷年股利配息', () => {
   });
 });
 
-describe('IRTab — 競品月營收比較：每月橫軸與明細表', () => {
-  // 創見＋威剛各 26 個月（2024/6–2026/7），營收固定好算：創見每月 100 百萬、
-  // 去年同月 80 百萬 → 年增 +25%；威剛每月 50 百萬（年增 0%）。
+describe('IRTab — 競品月營收比較：每月橫軸與月增率表格', () => {
+  // 創見＋威剛各 26 個月（2024/6–2026/7）。創見營收每月固定 +10 百萬
+  // （100、110、…、350）；威剛固定 50 百萬；廣穎只有最新一個月的資料。
   const months = [];
   for (let y = 2024, m = 6; y < 2026 || m <= 7; m++) {
     if (m > 12) { m = 1; y++; }
     months.push({ year: y, month: m });
   }
-  const mk = fn => months.map(({ year, month }) => ({ year, month, revenue: fn(year) }));
-  const revenue = mk(y => (y === 2024 || (y === 2025) ? 80_000_000 : 100_000_000));
-  const compRev = { '3260': mk(() => 50_000_000) };
+  const revenue = months.map(({ year, month }, i) => ({ year, month, revenue: (100 + i * 10) * 1e6 }));
+  const compRev = {
+    '3260': months.map(({ year, month }) => ({ year, month, revenue: 50e6 })),
+    '4973': [{ year: 2026, month: 7, revenue: 20e6 }],
+  };
 
   function chartCard() {
     return screen.getByText('創見 vs 競品月營收比較（近 24 個月）').closest('div.bg-gray-900');
   }
+  const cells = tr => [...tr.querySelectorAll('td')].map(td => td.textContent);
 
   it('X 軸每個月都有標籤（24 個，不是每三個月一個）', () => {
     renderIR({ revenue, compRev });
@@ -239,25 +247,90 @@ describe('IRTab — 競品月營收比較：每月橫軸與明細表', () => {
     expect(labels).toHaveLength(24);
   });
 
-  it('表格列出每個公司的營收（百萬元）與年增率，最新月份在最上面', () => {
+  it('表頭是「月增率」，不再有「年增率」', () => {
+    renderIR({ revenue, compRev });
+    const heads = [...chartCard().querySelectorAll('thead th')].map(t => t.textContent);
+    expect(heads.filter(h => h === '月增率')).toHaveLength(3);
+    expect(heads).not.toContain('年增率');
+  });
+
+  it('表格列出每個公司的營收（百萬元）與月增率，最新月份在最上面', () => {
     renderIR({ revenue, compRev });
     const rows = chartCard().querySelectorAll('tbody tr');
     expect(rows).toHaveLength(24);
-    const first = [...rows[0].querySelectorAll('td')].map(td => td.textContent);
-    // 年月、創見營收、創見年增、威剛營收、威剛年增
-    expect(first[0]).toBe('26/7');
-    expect(first[1]).toBe('100');
-    expect(first[2]).toBe('+25%');   // 2026/7 vs 2025/7：100 vs 80
-    expect(first[3]).toBe('50');
-    expect(first[4]).toBe('0%');      // 威剛去年同月也是 50 → 持平
+    // 年月、創見營收、創見月增、威剛營收、威剛月增、廣穎營收、廣穎月增
+    expect(cells(rows[0])).toEqual(['26/7', '350', '+2.9%', '50', '0%', '20', '—']);
   });
 
-  it('近 24 個月最早的那幾個月，年增率仍能對到 24 個月以前的去年同月', () => {
+  it('1 月的月增率對的是前一年 12 月', () => {
+    renderIR({ revenue, compRev });
+    const row = [...chartCard().querySelectorAll('tbody tr')].find(tr => cells(tr)[0] === '26/1');
+    expect(cells(row).slice(0, 3)).toEqual(['26/1', '290', '+3.6%']); // 2025/12 = 280
+  });
+
+  it('近 24 個月最早的那個月，月增率仍能對到視窗之外的上個月', () => {
     renderIR({ revenue, compRev });
     const rows = chartCard().querySelectorAll('tbody tr');
-    const last = [...rows[rows.length - 1].querySelectorAll('td')].map(td => td.textContent);
-    expect(last[0]).toBe('24/8');
-    expect(last[2]).toBe('—'); // 2023/8 沒資料
+    expect(cells(rows[rows.length - 1]).slice(0, 3)).toEqual(['24/8', '120', '+9.1%']); // 2024/7 = 110
+  });
+});
+
+describe('IRTab — 圖表複製按鈕', () => {
+  const revenue = [];
+  for (let y = 2024, m = 6; y < 2026 || m <= 7; m++) {
+    if (m > 12) { m = 1; y++; }
+    revenue.push({ year: y, month: m, revenue: 100e6 });
+  }
+  const compRev = { '3260': revenue.map(r => ({ ...r, revenue: 50e6 })) };
+
+  beforeEach(() => { copyChartImage.mockClear(); copyChartImage.mockResolvedValue('copied'); });
+
+  it('四張圖表（創見月營收、創見年度、競品月營收、競品年度）各有一個複製按鈕', () => {
+    renderIR({ revenue, compRev });
+    expect(screen.getAllByText('📋 複製圖表')).toHaveLength(4);
+  });
+
+  it('按下後把該卡片的 <svg> 連同標題、圖例、說明傳給複製函式，並顯示已複製', async () => {
+    renderIR({ revenue, compRev });
+    const card = screen.getByText('創見 vs 競品月營收比較（近 24 個月）').closest('div.bg-gray-900');
+    fireEvent.click(within(card).getByText('📋 複製圖表'));
+
+    expect(copyChartImage).toHaveBeenCalledTimes(1);
+    const [svg, opts] = copyChartImage.mock.calls[0];
+    expect(svg.tagName.toLowerCase()).toBe('svg');
+    expect(card.contains(svg)).toBe(true);
+    expect(opts.title).toBe('創見 vs 競品月營收比較（近 24 個月）');
+    expect(opts.legend.map(l => l.name)).toEqual(['創見（2451）', 'ADATA 威剛（3260）']);
+    expect(opts.note).toContain('FinMind');
+    expect(await within(card).findByText(/已複製/)).toBeTruthy();
+  });
+
+  it('複製失敗時顯示失敗訊息', async () => {
+    copyChartImage.mockRejectedValue(new Error('boom'));
+    const spy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    renderIR({ revenue, compRev });
+    const card = screen.getByText('創見月營收（近 24 個月）').closest('div.bg-gray-900');
+    fireEvent.click(within(card).getByText('📋 複製圖表'));
+    expect(await within(card).findByText('⚠ 複製失敗')).toBeTruthy();
+    spy.mockRestore();
+  });
+
+  it('沒有資料時不顯示複製按鈕', () => {
+    renderIR({ revenue: [], compRev: {} });
+    expect(screen.queryByText('📋 複製圖表')).toBeNull();
+  });
+});
+
+describe('IRTab — 表格淺灰橫線', () => {
+  it('IR 頁面所有表格都套用 ir-table（樣式在 base.css）', () => {
+    const revenue = [{ year: 2026, month: 6, revenue: 900_000 }, { year: 2025, month: 6, revenue: 1_100_000 }];
+    renderIR({
+      revenue,
+      dividends: [{ year: 2025, cashDividend: 6.09, stockDividend: 1.5, totalDividend: 7.59 }],
+    });
+    const tables = document.querySelectorAll('table');
+    expect(tables.length).toBeGreaterThanOrEqual(2);
+    tables.forEach(t => expect(t.classList.contains('ir-table')).toBe(true));
   });
 });
 

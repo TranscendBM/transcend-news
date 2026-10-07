@@ -101,3 +101,11 @@ body { font-family: 'Segoe UI', system-ui, -apple-system, sans-serif; background
 .light-theme .bg-cyan-900\/60 { background:#ecfeff !important; }
 .light-theme .text-cyan-300 { color:#0e7490 !important; }
 .light-theme .border-cyan-700\/50 { border-color:#a5f3fc !important; }
+
+/* IR 投資情報的表格：每列加淺灰橫線（#e5e5e5，介於 #eee~#ddd）。上面的
+   灰色框線規則會把 border-gray-* 設成透明，這裡改在 th/td 上畫線，
+   specificity 較高且同樣用 !important，所以不受影響；畫在儲存格而非
+   <tr> 上，橫向捲動時固定欄（sticky）的線也不會消失。 */
+.light-theme .ir-table th,
+.light-theme .ir-table td { border-bottom:1px solid #e5e5e5 !important; }
+.light-theme .ir-table tbody tr:last-child td { border-bottom-color:#e5e5e5 !important; }
