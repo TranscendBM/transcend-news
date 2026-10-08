@@ -5,6 +5,8 @@ import Card from '../../components/Card.jsx';
 import TabBtn from '../../components/TabBtn.jsx';
 import CopyChartButton from '../../components/CopyChartButton.jsx';
 import HistoryToggle from '../../components/HistoryToggle.jsx';
+import Icon from '../../components/Icon.jsx';
+import { useElementWidth } from '../../hooks/useElementWidth.js';
 import CompanyLogo from '../../components/logos/CompanyLogo.jsx';
 import { isStockStale, fmtStockUpdated } from '../../utils/dates.js';
 import { BRAND } from '../../utils/news.js';
@@ -54,9 +56,9 @@ function StockCard({ code, data }) {
 // ═══════════════════════════════════════════════════════════
 // IR TAB — 月營收 SVG 圖表（純 SVG，無外部依賴，viewBox 自動縮放）
 // ═══════════════════════════════════════════════════════════
-function MonthRevSVG({ data }) {
+function MonthRevSVG({ data, width }) {
   if (!data || !data.length) return null;
-  const PL = 60, PR = 52, PT = 10, PB = 36, VW = 800, VH = 210, CW = VW - PL - PR, CH = VH - PT - PB;
+  const PL = 60, PR = 52, PT = 10, PB = 36, VW = width || 800, VH = 210, CW = VW - PL - PR, CH = VH - PT - PB;
   const maxR = Math.max(...data.map(d => Math.max(d.rev || 0, d.prevYr || 0)), 1);
   const yv = data.map(d => d.yoyPct).filter(v => v != null);
   const minY = yv.length ? Math.min(...yv, 0) : -10, maxY = yv.length ? Math.max(...yv, 0) : 10;
@@ -92,9 +94,9 @@ function MonthRevSVG({ data }) {
 // ═══════════════════════════════════════════════════════════
 // IR TAB — 年度營收 SVG 圖表（純 SVG，無外部依賴）
 // ═══════════════════════════════════════════════════════════
-function AnnualRevSVG({ data }) {
+function AnnualRevSVG({ data, width }) {
   if (!data || !data.length) return null;
-  const PL = 68, PR = 8, PT = 22, PB = 28, VW = 800, VH = 200, CW = VW - PL - PR, CH = VH - PT - PB;
+  const PL = 68, PR = 8, PT = 22, PB = 28, VW = width || 800, VH = 200, CW = VW - PL - PR, CH = VH - PT - PB;
   const maxR = Math.max(...data.map(d => d.total || 0), 1);
   const step = CW / data.length, bw = step * 0.65;
   const toH = v => ((v || 0) / maxR) * CH;
@@ -124,6 +126,9 @@ function AnnualRevSVG({ data }) {
 function RevenueChart({ revenue }) {
   const monthChartRef = useRef(null);
   const annualChartRef = useRef(null);
+  // 圖表用容器實際寬度繪製，才會填滿卡片（寫死寬度時寬螢幕兩側會留白）
+  const monthChartWidth = useElementWidth(monthChartRef);
+  const annualChartWidth = useElementWidth(annualChartRef);
   const [showAll, setShowAll] = useState(false);
   const [showAllAnnual, setShowAllAnnual] = useState(false);
   const fmtRev = v => Number(v).toLocaleString(); // 千分位，單位：元
@@ -189,7 +194,7 @@ function RevenueChart({ revenue }) {
 
   return (
     <>
-    <Card title={monthTitle} icon="💰"
+    <Card title={monthTitle} icon="coins"
       actions={hasData && (
         <div className="flex gap-1.5 flex-wrap justify-end">
           <HistoryToggle expanded={showAll} onToggle={() => setShowAll(v => !v)}
@@ -200,7 +205,7 @@ function RevenueChart({ revenue }) {
       )}>
       {hasData ? (
         <>
-          <div ref={monthChartRef}><MonthRevSVG data={data} /></div>
+          <div ref={monthChartRef}><MonthRevSVG data={data} width={monthChartWidth} /></div>
 
           {/* 近 12 個月明細表 */}
           {/* 手機寬度下表格會超出可視範圍，靠橫向捲動看到其餘欄位（含
@@ -245,7 +250,7 @@ function RevenueChart({ revenue }) {
 
     {/* 近 10 年年度營收趨勢 */}
     {annualData.length > 0 && (
-    <Card title={annualTitle} icon="📊"
+    <Card title={annualTitle} icon="chart"
       actions={
         <div className="flex gap-1.5 flex-wrap justify-end">
           <HistoryToggle expanded={showAllAnnual} onToggle={() => setShowAllAnnual(v => !v)}
@@ -255,7 +260,7 @@ function RevenueChart({ revenue }) {
         </div>
       }>
       {/* 折線圖 */}
-      <div ref={annualChartRef}><AnnualRevSVG data={annualData} /></div>
+      <div ref={annualChartRef}><AnnualRevSVG data={annualData} width={annualChartWidth} /></div>
 
       {/* 明細表 */}
       <p className="text-xs text-gray-600 sm:hidden mb-1">← 左右滑動可看更多欄位 →</p>
@@ -363,7 +368,7 @@ function QuarterlyPnL({ financials }) {
   };
 
   return (
-    <Card title={showAll ? '季度損益摘要（全部歷史）' : '季度損益摘要（近 8 季）'} icon="📋"
+    <Card title={showAll ? '季度損益摘要（全部歷史）' : '季度損益摘要（近 8 季）'} icon="table"
       actions={
         <HistoryToggle expanded={showAll} onToggle={() => setShowAll(v => !v)}
           total={financials ? financials.length : 0} defaultCount={8} unit="季" />
@@ -434,7 +439,7 @@ function DividendHistory({ dividends }) {
   const divTipMap = Object.fromEntries(DIV_TIPS.map(d => [d.label, d.tip]));
 
   return (
-    <Card title={showAll ? '歷年股利配息（全部歷史）' : '歷年股利配息（近 10 年）'} icon="💵"
+    <Card title={showAll ? '歷年股利配息（全部歷史）' : '歷年股利配息（近 10 年）'} icon="coins"
       actions={
         <HistoryToggle expanded={showAll} onToggle={() => setShowAll(v => !v)}
           total={dividends ? dividends.length : 0} defaultCount={10} unit="年" />
@@ -544,7 +549,7 @@ function CompetitorMaterial({ material }) {
   );
 
   return (
-    <Card title="創見與競品 IR 新訊" icon="📢">
+    <Card title="創見與競品 IR 新訊" icon="bell">
       {/* 股票篩選 tabs */}
       <div className="flex flex-wrap gap-1.5 mb-3">
         <TabBtn active={filterCode === 'all'} onClick={() => setFilterCode('all')}>全部</TabBtn>
@@ -606,7 +611,7 @@ function CompetitorMaterial({ material }) {
         {MOPS_LINKS.map(l => (
           <a key={l.code} href={mopsUrl(l.code)} target="_blank" rel="noopener noreferrer"
             className="text-xs px-2.5 py-1 rounded-lg border border-gray-700/60 text-gray-400 hover:text-gray-200 hover:bg-gray-800 transition">
-            {l.name} {l.code} ↗
+            {l.name} {l.code} <Icon name="external" />
           </a>
         ))}
       </div>
@@ -632,7 +637,7 @@ function DailyTrading({ daily }) {
   const nc = v => v == null ? 'text-gray-400' : v > 0 ? 'text-red-400' : v < 0 ? 'text-green-400' : 'text-gray-400';
 
   if (!daily || (!daily.close && !daily.open)) return (
-    <Card title="創見 2451 每日交易資訊" icon="📊">
+    <Card title="創見 2451 每日交易資訊" icon="chart">
       <div className="h-20 flex items-center justify-center text-gray-600 text-sm">
         {daily === null ? '載入中…' : '尚無資料（Actions 跑完後自動更新）'}
       </div>
@@ -643,7 +648,7 @@ function DailyTrading({ daily }) {
     ? +(daily.close - daily.open).toFixed(2) : null;
 
   return (
-    <Card title="創見 2451 每日交易資訊" icon="📊">
+    <Card title="創見 2451 每日交易資訊" icon="chart">
       <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
         {/* 股價 */}
         <div className="bg-gray-800/40 rounded-xl p-3 border border-gray-700/40">
@@ -788,7 +793,7 @@ function CompetitorRevenueChart({ revenue, compRev }) {
   const momCls = v => v == null ? 'text-gray-600' : v > 0 ? 'text-red-400' : v < 0 ? 'text-green-400' : 'text-gray-400';
 
   return (
-    <Card title={chartTitle} icon="📊"
+    <Card title={chartTitle} icon="chart"
       actions={
         <div className="flex gap-1.5 flex-wrap justify-end">
           <HistoryToggle expanded={showAll} onToggle={() => setShowAll(v => !v)}
@@ -961,7 +966,7 @@ function AnnualRevenueChart({ revenue, compRev }) {
   const yoyCls = v => v == null ? 'text-gray-600' : v > 0 ? 'text-red-400' : v < 0 ? 'text-green-400' : 'text-gray-400';
 
   return (
-    <Card title={chartTitle} icon="📈"
+    <Card title={chartTitle} icon="trend"
       actions={
         <div className="flex gap-1.5 flex-wrap justify-end">
           <HistoryToggle expanded={showAll} onToggle={() => setShowAll(v => !v)}
@@ -1081,7 +1086,7 @@ export function IRTab({ news, stocks, community, revenue, financials, dividends,
       </div>
       {Object.keys(stocks).length === 0 && (
         <div className="text-xs text-yellow-600/70 bg-yellow-900/10 border border-yellow-800/30 rounded-xl px-4 py-3">
-          ⚠ 尚未取得股價 — 請先在 GitHub Actions 手動執行一次 fetch-news workflow，確認 Firebase stocks/latest 文件已建立。
+          <Icon name="alert" /> 尚未取得股價 — 請先在 GitHub Actions 手動執行一次 fetch-news workflow，確認 Firebase stocks/latest 文件已建立。
         </div>
       )}
       <DailyTrading daily={daily} />

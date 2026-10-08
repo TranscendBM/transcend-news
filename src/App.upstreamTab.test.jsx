@@ -96,7 +96,7 @@ describe('USMarketTab — 查詢失敗顯示明確錯誤，可重試', () => {
     const refreshUpstreamNews = vi.fn();
     renderUSMarketTab({ upstreamArticles: [], upstreamStatus: 'error', refreshUpstreamNews });
 
-    expect(screen.getByText('⚠ 上游新聞載入失敗')).toBeTruthy();
+    expect(screen.getByText('上游新聞載入失敗')).toBeTruthy();
     fireEvent.click(screen.getByText('重試'));
     expect(refreshUpstreamNews).toHaveBeenCalledTimes(1);
   });
@@ -111,7 +111,7 @@ describe('USMarketTab — 查詢失敗顯示明確錯誤，可重試', () => {
     rerender(<USMarketTab upstreamArticles={[]} upstreamStatus="error" refreshUpstreamNews={vi.fn()} />);
     const cardAfter = statCard('本期新聞');
     expect(within(cardAfter).queryByText('0')).toBeNull();
-    expect(within(cardAfter).getByText('⚠ 載入失敗')).toBeTruthy();
+    expect(within(cardAfter).getByText('載入失敗')).toBeTruthy();
   });
 });
 
@@ -290,7 +290,7 @@ describe('USMarketTab — 上月期間與 Excel 匯出', () => {
   it('匯出按鈕在沒有資料時停用', () => {
     vi.setSystemTime(NOW);
     renderUSMarketTab({ upstreamArticles: [] });
-    expect(within(newsListCard()).getByText('⬇ 匯出 Excel').disabled).toBe(true);
+    expect(within(newsListCard()).getByText('匯出 Excel').disabled).toBe(true);
   });
 });
 

@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 
+import Icon from './Icon.jsx';
 import { copyChartImage } from '../utils/copyChart.js';
 
 // 放在圖表卡片右上角：把 containerRef 裡的 <svg> 轉成圖片複製到剪貼簿，
@@ -24,11 +25,11 @@ export default function CopyChartButton({ containerRef, title, legend, note }) {
   };
 
   const label = {
-    idle: '📋 複製圖表',
+    idle: <><Icon name="copy" /> 複製圖表</>,
     busy: '處理中…',
     copied: '✓ 已複製，可貼到簡報／Word',
-    downloaded: '⬇ 已下載圖片',
-    error: '⚠ 複製失敗',
+    downloaded: <><Icon name="download" /> 已下載圖片</>,
+    error: <><Icon name="alert" /> 複製失敗</>,
   }[state];
 
   return (

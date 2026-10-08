@@ -1,3 +1,4 @@
+import Icon from '../../components/Icon.jsx';
 import SentBadge from '../../components/badges/SentBadge.jsx';
 import { getSentiment, getUSBrand, US_BRAND_CFG } from '../../utils/news.js';
 import { fmtDate } from '../../utils/dates.js';
@@ -24,7 +25,7 @@ export default function USNewsCard({ article }) {
           {bullets.length > 0 && (
             <span className="text-xs px-1.5 py-0.5 rounded-md font-medium"
               style={{ background: '#eff6ff', color: '#1d4ed8', border: '1px solid #bfdbfe' }}>
-              🤖 AI摘要
+              <Icon name="bot" /> AI摘要
             </span>
           )}
         </div>

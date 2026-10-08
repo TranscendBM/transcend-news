@@ -38,9 +38,9 @@ describe('ExposureInsightsPage', () => {
     renderPage({ onBack });
     expect(screen.getByText('人工確認曝光分析')).toBeTruthy();
     expect(screen.getByText(/共 10 篇・5 家媒體・5 位記者/)).toBeTruthy();
-    fireEvent.click(screen.getByText('← 返回 PR 媒體戰情'));
+    fireEvent.click(screen.getByText('返回 PR 媒體戰情'));
     expect(onBack).toHaveBeenCalledTimes(1);
-    fireEvent.click(screen.getByText('⬇ 匯出分析 Excel'));
+    fireEvent.click(screen.getByText('匯出分析 Excel'));
     expect(exportExposureInsightsExcel).toHaveBeenCalledTimes(1);
     expect(exportExposureInsightsExcel.mock.calls[0][0].total).toBe(10);
   });
@@ -54,7 +54,7 @@ describe('ExposureInsightsPage', () => {
     expect(rows[0].slice(0, 2)).toEqual(['2026-09', '3']);
     expect(rows[1].slice(0, 3)).toEqual(['2026-08', '3', '-25%']);
     expect(rows[2].slice(0, 2)).toEqual(['2026-07', '4']);
-    expect(screen.getByText('📋 複製圖表')).toBeTruthy();
+    expect(screen.getByText('複製圖表')).toBeTruthy();
   });
 
   it('媒體分頁：每月熱度表與合計、佔比、主力記者', () => {
@@ -119,6 +119,6 @@ describe('ExposureInsightsPage', () => {
   it('沒有資料時顯示空狀態，匯出按鈕停用', () => {
     renderPage({ records: [] });
     expect(screen.getByText('尚無資料')).toBeTruthy();
-    expect(screen.getByText('⬇ 匯出分析 Excel').disabled).toBe(true);
+    expect(screen.getByText('匯出分析 Excel').disabled).toBe(true);
   });
 });

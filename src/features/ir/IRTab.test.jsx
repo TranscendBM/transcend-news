@@ -287,13 +287,13 @@ describe('IRTab — 圖表複製按鈕', () => {
 
   it('四張圖表（創見月營收、創見年度、競品月營收、競品年度）各有一個複製按鈕', () => {
     renderIR({ revenue, compRev });
-    expect(screen.getAllByText('📋 複製圖表')).toHaveLength(4);
+    expect(screen.getAllByText('複製圖表')).toHaveLength(4);
   });
 
   it('按下後把該卡片的 <svg> 連同標題、圖例、說明傳給複製函式，並顯示已複製', async () => {
     renderIR({ revenue, compRev });
     const card = screen.getByText('創見 vs 競品月營收比較（近 24 個月）').closest('div.bg-gray-900');
-    fireEvent.click(within(card).getByText('📋 複製圖表'));
+    fireEvent.click(within(card).getByText('複製圖表'));
 
     expect(copyChartImage).toHaveBeenCalledTimes(1);
     const [svg, opts] = copyChartImage.mock.calls[0];
@@ -310,14 +310,14 @@ describe('IRTab — 圖表複製按鈕', () => {
     const spy = vi.spyOn(console, 'error').mockImplementation(() => {});
     renderIR({ revenue, compRev });
     const card = screen.getByText('創見月營收（近 24 個月）').closest('div.bg-gray-900');
-    fireEvent.click(within(card).getByText('📋 複製圖表'));
-    expect(await within(card).findByText('⚠ 複製失敗')).toBeTruthy();
+    fireEvent.click(within(card).getByText('複製圖表'));
+    expect(await within(card).findByText('複製失敗')).toBeTruthy();
     spy.mockRestore();
   });
 
   it('沒有資料時不顯示複製按鈕', () => {
     renderIR({ revenue: [], compRev: {} });
-    expect(screen.queryByText('📋 複製圖表')).toBeNull();
+    expect(screen.queryByText('複製圖表')).toBeNull();
   });
 });
 
@@ -339,8 +339,8 @@ describe('IRTab — 公開資訊觀測站連結', () => {
     renderIR();
     const card = screen.getByText('創見與競品 IR 新訊').closest('div.bg-gray-900');
     const links = [...card.querySelectorAll('a[href*="mops.twse.com.tw"]')];
-    expect(links.map(a => a.textContent)).toEqual([
-      '創見 2451 ↗', '威剛 3260 ↗', '廣穎 4973 ↗', '宜鼎 5289 ↗', '十銓 4967 ↗', '宇瞻 8271 ↗',
+    expect(links.map(a => a.textContent.trim())).toEqual([
+      '創見 2451', '威剛 3260', '廣穎 4973', '宜鼎 5289', '十銓 4967', '宇瞻 8271',
     ]);
     const expected = {
       '創見': '2451', '威剛': '3260', '廣穎': '4973', '宜鼎': '5289', '十銓': '4967', '宇瞻': '8271',
@@ -412,12 +412,12 @@ describe('IRTab — 各卡片「顯示全部歷史」按鈕', () => {
     renderIR({ revenue, compRev });
     let c = card('創見月營收（近 24 個月）');
     expect(rows(c)).toBe(12);
-    fireEvent.click(within(c).getByText('📜 顯示全部歷史（共 40 個月）'));
+    fireEvent.click(within(c).getByText('顯示全部歷史（共 40 個月）'));
 
     c = card('創見月營收（全部歷史，40 個月）');
     expect(rows(c)).toBe(40);
     expect(c.querySelector('.ir-scroll')).toBeTruthy();   // 長表格固定高度＋捲動
-    fireEvent.click(within(c).getByText('↩ 收合為預設範圍'));
+    fireEvent.click(within(c).getByText('收合為預設範圍'));
     c = card('創見月營收（近 24 個月）');
     expect(rows(c)).toBe(12);
     expect(c.querySelector('.ir-scroll')).toBeNull();
@@ -434,7 +434,7 @@ describe('IRTab — 各卡片「顯示全部歷史」按鈕', () => {
     renderIR({ revenue, compRev });
     let c = card('創見 vs 競品月營收比較（近 24 個月）');
     expect(rows(c)).toBe(24);
-    fireEvent.click(within(c).getByText('📜 顯示全部歷史（共 40 個月）'));
+    fireEvent.click(within(c).getByText('顯示全部歷史（共 40 個月）'));
     c = card('創見 vs 競品月營收比較（全部歷史）');
     expect(rows(c)).toBe(40);
     const labels = [...c.querySelectorAll('svg text')].filter(t => /^\d{2}\/\d{1,2}$/.test(t.textContent));
@@ -450,7 +450,7 @@ describe('IRTab — 各卡片「顯示全部歷史」按鈕', () => {
     const { unmount } = renderIR({ financials: quarters });
     let c = card('季度損益摘要（近 8 季）');
     expect(rows(c)).toBe(8);
-    fireEvent.click(within(c).getByText('📜 顯示全部歷史（共 10 季）'));
+    fireEvent.click(within(c).getByText('顯示全部歷史（共 10 季）'));
     c = card('季度損益摘要（全部歷史）');
     expect(rows(c)).toBe(10);
     unmount();
@@ -465,7 +465,7 @@ describe('IRTab — 各卡片「顯示全部歷史」按鈕', () => {
     renderIR({ dividends });
     let c = card('歷年股利配息（近 10 年）');
     expect(rows(c)).toBe(10);
-    fireEvent.click(within(c).getByText('📜 顯示全部歷史（共 12 年）'));
+    fireEvent.click(within(c).getByText('顯示全部歷史（共 12 年）'));
     c = card('歷年股利配息（全部歷史）');
     expect(rows(c)).toBe(12);
   });
@@ -476,7 +476,7 @@ describe('IRTab — 各卡片「顯示全部歷史」按鈕', () => {
     renderIR({ revenue: yearly(all), compRev: { '3260': yearly(all) } });
     let c = card('年度營收趨勢（近 10 年）');
     expect(rows(c)).toBe(10);
-    fireEvent.click(within(c).getByText('📜 顯示全部歷史（共 12 年）'));
+    fireEvent.click(within(c).getByText('顯示全部歷史（共 12 年）'));
     c = card('年度營收趨勢（全部歷史）');
     expect(rows(c)).toBe(12);
   });
@@ -484,7 +484,7 @@ describe('IRTab — 各卡片「顯示全部歷史」按鈕', () => {
   it('複製圖表按鈕的標題跟著目前顯示的範圍', () => {
     renderIR({ revenue, compRev });
     const c = card('創見月營收（近 24 個月）');
-    fireEvent.click(within(c).getByText('📜 顯示全部歷史（共 40 個月）'));
+    fireEvent.click(within(c).getByText('顯示全部歷史（共 40 個月）'));
     expect(card('創見月營收（全部歷史，40 個月）').querySelector('button[title^="複製圖表"]').title)
       .toBe('複製圖表：創見月營收（全部歷史，40 個月）');
   });

@@ -1,6 +1,8 @@
 /* global sessionStorage, FileReader */
 import { useRef, useState } from 'react';
 
+import Icon from '../../components/Icon.jsx';
+
 // 網站沒有登入機制，Firestore 也不允許客戶端寫入，所以上傳走後端 Cloud
 // Function（Hosting rewrite 到 /api/media-exposure），用「上傳通行碼」把關。
 // 流程跟 CLI 一樣分兩步：先「檢查」（只解析、不寫入），確認筆數與無效列後
@@ -142,7 +144,7 @@ export default function MediaExposureUpload({ onImported = () => {} }) {
         <p className="text-xs text-gray-500">已選擇 {files.length} 個檔案：{files.map(f => f.name).join('、')}</p>
       )}
 
-      {error && <p role="alert" className="text-sm text-red-400">⚠ {error}</p>}
+      {error && <p role="alert" className="text-sm text-red-400"><Icon name="alert" /> {error}</p>}
 
       {result && phase !== 'done' && (
         <div className="space-y-3">

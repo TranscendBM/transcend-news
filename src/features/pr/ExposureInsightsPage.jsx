@@ -1,6 +1,8 @@
 import { useMemo, useRef, useState } from 'react';
 
 import Card from '../../components/Card.jsx';
+import Icon from '../../components/Icon.jsx';
+import { TAG_TONES, tagClass } from '../../components/tagStyles.js';
 import TabBtn from '../../components/TabBtn.jsx';
 import CopyChartButton from '../../components/CopyChartButton.jsx';
 import { exportExposureInsightsExcel } from '../../utils/formatting.js';
@@ -55,18 +57,13 @@ function Bar({ value, max, color = `rgb(${BRAND})` }) {
 }
 
 function Chips({ title, names, tone = 'gray', empty = '—' }) {
-  const toneCls = {
-    green: 'bg-green-900/30 text-green-500',
-    red: 'bg-red-900/30 text-red-400',
-    blue: 'bg-blue-900/30 text-blue-400',
-    gray: 'bg-gray-800 text-gray-400',
-  }[tone];
+  const toneCls = TAG_TONES[tone] || TAG_TONES.gray;
   return (
     <div>
       <p className="text-xs text-gray-500 mb-1">{title}（{names.length}）</p>
       <div className="flex flex-wrap gap-1.5">
         {names.length
-          ? names.map(n => <span key={n} className={`text-xs px-2 py-0.5 rounded-full ${toneCls}`}>{n}</span>)
+          ? names.map(n => <span key={n} className={`text-xs px-2 py-0.5 rounded-full font-medium ${toneCls}`}>{n}</span>)
           : <span className="text-xs text-gray-600">{empty}</span>}
       </div>
     </div>
@@ -117,7 +114,7 @@ function Overview({ ins }) {
 
   return (
     <div className="space-y-4">
-      <Card title="重點發現" icon="💡">
+      <Card title="重點發現" icon="bulb">
         <ul className="space-y-2 text-sm text-gray-300 leading-relaxed">
           {ins.highlights.map((h, i) => <li key={i} className="flex gap-2"><span className="text-gray-600">•</span><span>{h}</span></li>)}
         </ul>
@@ -133,7 +130,7 @@ function Overview({ ins }) {
           hint={prev ? `${prev.count} → ${latest.count} 篇` : '只有一個月資料'} />
       </div>
 
-      <Card title="每月曝光篇數" icon="📊"
+      <Card title="每月曝光篇數" icon="chart"
         actions={<CopyChartButton containerRef={chartRef} title="人工確認曝光：每月篇數" note="資料來源：人工確認曝光" />}>
         <div ref={chartRef}><MonthlyChart monthly={ins.monthly} /></div>
         <div className="overflow-x-auto mt-3">
@@ -171,7 +168,7 @@ function Overview({ ins }) {
       </Card>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-        <Card title="媒體類型分布" icon="🗂️">
+        <Card title="媒體類型分布" icon="layers">
           <div className="space-y-2">
             {ins.categories.map(c => (
               <div key={c.name} className="flex items-center gap-2 text-sm">
@@ -183,7 +180,7 @@ function Overview({ ins }) {
           </div>
           <p className="text-xs text-gray-600 mt-3">分類是預設對照，可在 src/config/exposureTopics.js 調整。</p>
         </Card>
-        <Card title="曝光集中度與類型" icon="🎯">
+        <Card title="曝光集中度與類型" icon="target">
           <div className="grid grid-cols-3 gap-2 mb-3">
             <Kpi label="第 1 大媒體" value={pct(ins.concentration.top1)} />
             <Kpi label="前 3 大" value={pct(ins.concentration.top3)} />
@@ -207,7 +204,7 @@ function MediaSection({ ins }) {
   const max = Math.max(...ins.media.flatMap(m => Object.values(m.byMonth)), 1);
   const maxTotal = ins.media[0]?.total || 1;
   return (
-    <Card title="各媒體每月報導篇數" icon="📰">
+    <Card title="各媒體每月報導篇數" icon="news">
       <p className="text-xs text-gray-600 sm:hidden mb-1">← 左右滑動可看更多欄位 →</p>
       <div className="overflow-x-auto">
         <table className="ir-table w-full text-sm">
@@ -255,10 +252,10 @@ function MediaSection({ ins }) {
 
 // ═══════════════════════════════════════════════════════════
 const STATUS = {
-  stable: { label: '穩定', cls: 'bg-green-900/30 text-green-500' },
-  new: { label: '本月新增', cls: 'bg-blue-900/30 text-blue-400' },
-  lapsed: { label: '本月缺席', cls: 'bg-yellow-900/30 text-yellow-500' },
-  active: { label: '', cls: '' },
+  stable: { label: '穩定', tone: 'green' },
+  new: { label: '本月新增', tone: 'blue' },
+  lapsed: { label: '本月缺席', tone: 'amber' },
+  active: { label: '', tone: 'gray' },
 };
 const REPORTER_FILTERS = [
   { id: 'all', label: '全部' },
@@ -275,7 +272,7 @@ function ReporterSection({ ins }) {
   const max = Math.max(...ins.reporters.flatMap(r => Object.values(r.byMonth)), 1);
   return (
     <div className="space-y-4">
-      <Card title="各記者每月報導篇數" icon="✍️">
+      <Card title="各記者每月報導篇數" icon="pen">
         <div className="flex flex-wrap gap-1.5 mb-3">
           {REPORTER_FILTERS.map(f => (
             <TabBtn key={f.id} active={filter === f.id} onClick={() => setFilter(f.id)}>{f.label}</TabBtn>
@@ -306,7 +303,7 @@ function ReporterSection({ ins }) {
                   <td className="text-right py-1.5 pr-3 text-gray-500 tabular-nums whitespace-nowrap text-xs">{fmtDate(r.lastDate)}</td>
                   <td className="py-1.5">
                     {STATUS[r.status].label && (
-                      <span className={`text-xs px-2 py-0.5 rounded-full whitespace-nowrap ${STATUS[r.status].cls}`}>{STATUS[r.status].label}</span>
+                      <span className={tagClass(STATUS[r.status].tone)}>{STATUS[r.status].label}</span>
                     )}
                   </td>
                 </tr>
@@ -318,13 +315,13 @@ function ReporterSection({ ins }) {
         <p className="text-xs text-gray-600 mt-2">共同署名的報導，每位記者各算一篇，所以記者合計可能略多於曝光總篇數。</p>
       </Card>
 
-      <Card title="未署名報導" icon="🕶️">
+      <Card title="未署名報導" icon="eyeoff">
         <p className="text-sm text-gray-300">
           共 {ins.unsigned.count} 篇（{pct(ins.unsigned.share)}）沒有記者署名，通常是網站轉載、編譯稿或新聞稿原文。
         </p>
         <div className="flex flex-wrap gap-1.5 mt-2">
           {ins.unsigned.byMedia.slice(0, 10).map(m => (
-            <span key={m.name} className="text-xs px-2 py-0.5 rounded-full bg-gray-800 text-gray-400">{m.name} {m.total}</span>
+            <span key={m.name} className={tagClass('gray')}>{m.name} {m.total}</span>
           ))}
         </div>
       </Card>
@@ -338,7 +335,7 @@ function RelationSection({ ins }) {
   return (
     <div className="space-y-4">
       {c ? (
-        <Card title={`${fmtMonth(c.latestMonth)} 相較 ${fmtMonth(c.prevMonth)} 的變化`} icon="🔄">
+        <Card title={`${fmtMonth(c.latestMonth)} 相較 ${fmtMonth(c.prevMonth)} 的變化`} icon="refresh">
           <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
             <div className="space-y-3">
               <p className="text-sm font-semibold text-gray-300">媒體</p>
@@ -377,17 +374,17 @@ function RelationSection({ ins }) {
           </div>
         </Card>
       ) : (
-        <Card title="月份變化" icon="🔄"><p className="text-sm text-gray-600">需要至少兩個月的資料才能比較。</p></Card>
+        <Card title="月份變化" icon="refresh"><p className="text-sm text-gray-600">需要至少兩個月的資料才能比較。</p></Card>
       )}
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-        <Card title="穩定的關係" icon="🤝">
+        <Card title="穩定的關係" icon="users">
           <div className="space-y-3">
             <Chips title="每月都有報導的媒體" names={ins.stableMedia.map(m => m.name)} tone="green" empty="目前沒有（或資料不足兩個月）" />
             <Chips title="每月都有報導的記者" names={ins.stableReporters.map(r => `${r.name}（${r.total}）`)} tone="green" empty="目前沒有（或資料不足兩個月）" />
           </div>
         </Card>
-        <Card title="需要留意" icon="⚠️">
+        <Card title="需要留意" icon="alert">
           <div className="space-y-3">
             <Chips title="曾常報導（≥3 篇）但本月缺席的記者" tone="red"
               names={ins.coreLapsed.map(r => `${r.name}（${r.media[0].name}，最近 ${fmtDate(r.lastDate)}）`)} empty="沒有" />
@@ -397,7 +394,7 @@ function RelationSection({ ins }) {
         </Card>
       </div>
 
-      <Card title="跨媒體的記者" icon="🔀">
+      <Card title="跨媒體的記者" icon="shuffle">
         {ins.crossMediaReporters.length ? (
           <div className="flex flex-wrap gap-2">
             {ins.crossMediaReporters.map(r => (
@@ -418,7 +415,7 @@ function TopicSection({ ins }) {
   const max = Math.max(...ins.topics.flatMap(t => Object.values(t.byMonth)), 1);
   return (
     <div className="space-y-4">
-      <Card title="題材 × 月份" icon="🏷️">
+      <Card title="題材 × 月份" icon="tag">
         <p className="text-xs text-gray-500 mb-3">
           用標題關鍵字歸類（一則報導可以同時屬於多個題材），關鍵字在 src/config/exposureTopics.js 可調整。
         </p>
@@ -448,7 +445,7 @@ function TopicSection({ ins }) {
         </div>
       </Card>
 
-      <Card title="曝光高峰日" icon="📈">
+      <Card title="曝光高峰日" icon="trend">
         {ins.bursts.length ? (
           <div className="overflow-x-auto">
             <table className="ir-table w-full text-sm">
@@ -486,7 +483,7 @@ function CoverageSection({ ins }) {
   const cov = ins.coverage;
   if (!cov || !cov.manual) {
     return (
-      <Card title="自動監測比對" icon="🛰️">
+      <Card title="自動監測比對" icon="radar">
         <p className="text-sm text-gray-600">目前沒有可比對的資料（自動監測只保留本月與上個月，且需要這段期間內有人工確認的曝光）。</p>
       </Card>
     );
@@ -499,7 +496,7 @@ function CoverageSection({ ins }) {
         <Kpi label="自動監測漏掉" value={cov.missed.length} />
         <Kpi label="自動監測涵蓋率" value={pct(cov.rate)} hint={`自動監測共 ${cov.autoCount} 篇`} />
       </div>
-      <Card title="自動監測沒抓到的曝光" icon="🔍">
+      <Card title="自動監測沒抓到的曝光" icon="search">
         <p className="text-xs text-gray-500 mb-3">
           以「網址相同」或「標題相同」判斷。Google News 轉址的網址對不上時會被誤判為漏掉，數字僅供估計。
         </p>
@@ -513,7 +510,7 @@ function CoverageSection({ ins }) {
               </div>
             </div>
           ))}
-          {cov.missed.length === 0 && <p className="text-sm text-green-500 py-4 text-center">人工確認的曝光，自動監測都抓到了 🎉</p>}
+          {cov.missed.length === 0 && <p className="text-sm text-green-700 py-4 text-center"><Icon name="checkcircle" /> 人工確認的曝光，自動監測都抓到了</p>}
         </div>
       </Card>
     </div>
@@ -531,7 +528,7 @@ export default function ExposureInsightsPage({ records = [], autoArticles = [], 
       <div className="flex flex-wrap items-center gap-2">
         <button onClick={onBack}
           className="text-sm px-3 py-1.5 rounded-lg border border-gray-700/60 text-gray-300 hover:bg-gray-800 transition">
-          ← 返回 PR 媒體戰情
+          <Icon name="arrowleft" /> 返回 PR 媒體戰情
         </button>
         <div className="min-w-0">
           <h2 className="text-lg font-semibold text-gray-200">人工確認曝光分析</h2>
@@ -543,13 +540,13 @@ export default function ExposureInsightsPage({ records = [], autoArticles = [], 
         </div>
         <button onClick={() => exportExposureInsightsExcel(ins)} disabled={ins.empty}
           className="ml-auto text-sm px-3.5 py-1.5 rounded-lg border border-gray-700/60 text-gray-400 hover:text-gray-200 hover:bg-gray-800 transition disabled:opacity-40 disabled:cursor-not-allowed">
-          ⬇ 匯出分析 Excel
+          <Icon name="download" /> 匯出分析 Excel
         </button>
       </div>
 
       {ins.empty ? (
-        <Card title="尚無資料" icon="📭">
-          <p className="text-sm text-gray-600">還沒有人工確認曝光，先在上一頁用「⬆ 上傳 Excel」匯入。</p>
+        <Card title="尚無資料" icon="inbox">
+          <p className="text-sm text-gray-600">還沒有人工確認曝光，先在上一頁用「上傳 Excel」匯入。</p>
         </Card>
       ) : (
         <>

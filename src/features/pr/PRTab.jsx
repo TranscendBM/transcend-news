@@ -17,6 +17,8 @@ import {
   BRAND, KEY_MEDIA, dedupeArticlesByTitle, isValidTranscendPR,
   isBriefingCandidate, filterNewsList,
 } from '../../utils/news.js';
+import Icon from '../../components/Icon.jsx';
+import { tagClass } from '../../components/tagStyles.js';
 import { COMPETITORS } from '../../config/competitors.js';
 
 // ═══════════════════════════════════════════════════════════
@@ -63,7 +65,7 @@ export function PRStatsPanel({ articles, status = 'ready' }) {
           <div key={p.label} className="bg-gray-900 border border-gray-700/60 rounded-2xl p-4 text-center">
             <p className="text-xs text-gray-500 mb-1">媒體曝光｜{p.label}</p>
             {status === 'error' ? (
-              <p className="text-sm text-red-400 mt-1">⚠ 載入失敗</p>
+              <p className="text-sm text-red-400 mt-1"><Icon name="alert" /> 載入失敗</p>
             ) : status === 'loading' ? (
               <p className="text-sm text-gray-600 mt-1">載入中…</p>
             ) : (
@@ -115,14 +117,14 @@ export function KeyMediaPanel({ articles, status = 'ready' }) {
 
   if (status === 'error') {
     return (
-      <Card title="重點媒體曝光監控" icon="🎯">
-        <div className="text-sm text-red-400 text-center py-6">⚠ 資料載入失敗，請稍後重新整理</div>
+      <Card title="重點媒體曝光監控" icon="target">
+        <div className="text-sm text-red-400 text-center py-6"><Icon name="alert" /> 資料載入失敗，請稍後重新整理</div>
       </Card>
     );
   }
 
   return (
-    <Card title="重點媒體曝光監控" icon="🎯">
+    <Card title="重點媒體曝光監控" icon="target">
       <div className="flex items-center gap-4 mb-3 text-xs text-gray-500">
         <span>本月／上月累計曝光篇數</span>
         <span className="ml-auto w-8 text-right">本月</span>
@@ -180,21 +182,21 @@ export function ManualExposurePanel({
   const latest = records.slice(0, 12);
 
   return (
-    <Card title="人工確認曝光" icon="✓"
+    <Card title="人工確認曝光" icon="checkcircle"
       actions={
         <div className="flex gap-1.5 shrink-0 flex-wrap justify-end">
           <button onClick={onOpenInsights} disabled={records.length === 0}
             className="text-sm px-3.5 py-1.5 rounded-lg border border-red-700/50 text-red-400 hover:bg-red-900/20 transition disabled:opacity-40 disabled:cursor-not-allowed">
-            📊 曝光分析 ›
+            <Icon name="chart" /> 曝光分析 <Icon name="chevronright" />
           </button>
           <button onClick={() => setUploadOpen(open => !open)} aria-expanded={uploadOpen}
             className="text-sm px-3.5 py-1.5 rounded-lg border border-gray-700/60 text-gray-400 hover:text-gray-200 hover:bg-gray-800 transition">
-            {uploadOpen ? '收合上傳' : '⬆ 上傳 Excel'}
+            {uploadOpen ? '收合上傳' : <><Icon name="upload" /> 上傳 Excel</>}
           </button>
           <button onClick={() => exportMediaExposureExcel(records)}
             disabled={records.length === 0}
             className="text-sm px-3.5 py-1.5 rounded-lg border border-gray-700/60 text-gray-400 hover:text-gray-200 hover:bg-gray-800 transition disabled:opacity-40 disabled:cursor-not-allowed">
-            ⬇ 匯出 Excel
+            <Icon name="download" /> 匯出 Excel
           </button>
         </div>
       }>
@@ -206,7 +208,7 @@ export function ManualExposurePanel({
 
       {status === 'error' ? (
         <div className="py-8 text-center text-sm text-red-400">
-          <p>⚠ 人工曝光載入失敗</p>
+          <p><Icon name="alert" /> 人工曝光載入失敗</p>
           <button onClick={onRetry}
             className="mt-2 text-xs px-3 py-1 rounded-lg border border-red-700/60 text-red-300 hover:bg-red-900/30 transition">
             重試
@@ -235,7 +237,7 @@ export function ManualExposurePanel({
                 const date = exposureDate(record);
                 return (
                   <div key={record.id} className="py-2.5 flex gap-3 items-start">
-                    <span className="text-xs px-2 py-0.5 rounded-full bg-green-900/30 text-green-500 shrink-0">
+                    <span className={tagClass('green', 'shrink-0')}>
                       人工確認
                     </span>
                     <div className="min-w-0 flex-1">
@@ -310,7 +312,7 @@ function CompetitorNews({ news }) {
   const more = useShowMore(filtered, 80, [active, timeFilter]);
 
   return (
-    <Card title="競品動態監測" icon="🔍" className="h-full">
+    <Card title="競品動態監測" icon="search" className="h-full">
       {/* Brand tabs — 全部 + 各品牌 */}
       <div className="flex flex-wrap gap-1.5 mb-2">
         <TabBtn active={active === 'all'} onClick={() => setActive('all')}>
@@ -454,12 +456,12 @@ export function PRTab({
       <PRStatsPanel articles={searchFiltered} status={prStatus} />
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-        <Card title="創見最新報導" icon="📰" className="h-full"
+        <Card title="創見最新報導" icon="news" className="h-full"
           actions={
             <button onClick={() => exportNewsExcel(transcendFull, '創見最新報導', '創見最新報導')}
               disabled={transcendFull.length === 0}
               className="text-sm px-3.5 py-1.5 rounded-lg border border-gray-700/60 text-gray-400 hover:text-gray-200 hover:bg-gray-800 transition disabled:opacity-40 disabled:cursor-not-allowed shrink-0">
-              ⬇ 匯出 Excel
+              <Icon name="download" /> 匯出 Excel
             </button>
           }>
           {/* 時間篩選：今天/本週/本月/上月，PR 專用（見上方 PR_LIST_TIME_FILTERS） */}
@@ -472,7 +474,7 @@ export function PRTab({
           </div>
           {prStatus === 'error'
             ? <div className="h-32 flex flex-col items-center justify-center gap-2 text-red-400 text-sm">
-                <span>⚠ 報導載入失敗</span>
+                <span><Icon name="alert" /> 報導載入失敗</span>
                 <button onClick={refreshPRNews}
                   className="text-xs px-3 py-1 rounded-lg border border-red-700/60 text-red-300 hover:bg-red-900/30 transition">
                   重試

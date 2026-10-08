@@ -88,7 +88,7 @@ describe('PRStatsPanel — 日期邊界不會卡在建立當下的舊值（Asia/
   it('查詢失敗時明確顯示錯誤，不悄悄顯示 0', () => {
     vi.setSystemTime(taipei(2026, 7, 20, 12, 0, 0));
     render(<PRStatsPanel articles={[]} status="error" />);
-    expect(screen.getAllByText('⚠ 載入失敗').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('載入失敗').length).toBeGreaterThan(0);
     // 錯誤狀態下不應該顯示看起來正常的「0 篇」
     expect(screen.queryByText('篇')).toBeNull();
   });
@@ -123,6 +123,6 @@ describe('KeyMediaPanel — 統計本月＋上月，不再有本年', () => {
 
   it('查詢失敗時顯示錯誤訊息，不是空白排行榜', () => {
     render(<KeyMediaPanel articles={[]} status="error" />);
-    expect(screen.getByText('⚠ 資料載入失敗，請稍後重新整理')).toBeTruthy();
+    expect(screen.getByText('資料載入失敗，請稍後重新整理')).toBeTruthy();
   });
 });

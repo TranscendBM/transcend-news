@@ -1,6 +1,7 @@
 import { useState, useMemo } from 'react';
 
 import TabBtn from '../../components/TabBtn.jsx';
+import Icon from '../../components/Icon.jsx';
 import ShowMoreButton, { useShowMore } from '../../components/ShowMore.jsx';
 import NewsFilterToolbar from '../../components/filters/NewsFilterToolbar.jsx';
 import USNewsCard from '../news/USNewsCard.jsx';
@@ -136,7 +137,7 @@ export function USMarketTab({ upstreamArticles, upstreamStatus, refreshUpstreamN
           <div key={i} className="bg-gray-900 rounded-2xl border border-gray-700/60 p-4">
             <p className="text-xs text-gray-500 mb-1">{s.label}</p>
             {upstreamStatus === 'error' ? (
-              <p className="text-sm text-red-400 mt-1">⚠ 載入失敗</p>
+              <p className="text-sm text-red-400 mt-1"><Icon name="alert" /> 載入失敗</p>
             ) : upstreamStatus === 'loading' ? (
               <p className="text-sm text-gray-600 mt-1">載入中…</p>
             ) : (
@@ -153,7 +154,7 @@ export function USMarketTab({ upstreamArticles, upstreamStatus, refreshUpstreamN
       <div className="bg-gray-900 rounded-2xl border border-gray-700/60 p-4">
         <div className="flex items-center gap-2 mb-3">
           <h3 className="text-base font-semibold text-gray-200 flex items-center gap-2 min-w-0">
-            <span>🌐</span>上游供應鏈 ＆ DRAM / Flash 市場新聞
+            <Icon name="globe" className="text-gray-500" />上游供應鏈 ＆ DRAM / Flash 市場新聞
           </h3>
           {/* 匯出目前畫面上的完整結果（final，未截斷成前 80 則）：期間＋品牌＋搜尋/媒體/情緒都已套用 */}
           <button
@@ -162,7 +163,7 @@ export function USMarketTab({ upstreamArticles, upstreamStatus, refreshUpstreamN
               { 品牌: getUSBrand })}
             disabled={final.length === 0}
             className="ml-auto text-sm px-3.5 py-1.5 rounded-lg border border-gray-700/60 text-gray-400 hover:text-gray-200 hover:bg-gray-800 transition disabled:opacity-40 disabled:cursor-not-allowed shrink-0">
-            ⬇ 匯出 Excel
+            <Icon name="download" /> 匯出 Excel
           </button>
         </div>
 
@@ -195,7 +196,7 @@ export function USMarketTab({ upstreamArticles, upstreamStatus, refreshUpstreamN
 
         {upstreamStatus === 'error'
           ? <div className="h-32 flex flex-col items-center justify-center gap-2 text-red-400 text-sm">
-              <span>⚠ 上游新聞載入失敗</span>
+              <span><Icon name="alert" /> 上游新聞載入失敗</span>
               <button onClick={refreshUpstreamNews}
                 className="text-xs px-3 py-1 rounded-lg border border-red-700/60 text-red-300 hover:bg-red-900/30 transition">
                 重試
