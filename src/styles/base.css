@@ -109,3 +109,12 @@ body { font-family: 'Segoe UI', system-ui, -apple-system, sans-serif; background
 .light-theme .ir-table th,
 .light-theme .ir-table td { border-bottom:1px solid #e5e5e5 !important; }
 .light-theme .ir-table tbody tr:last-child td { border-bottom-color:#e5e5e5 !important; }
+
+/* IR 投資情報「顯示全部歷史」：表格列數多時固定高度、可上下捲動，表頭固定在
+   上方。兩列表頭（競品比較）的第二列要接在第一列下面，所以第一列高度固定。 */
+.ir-scroll { max-height:480px; overflow-y:auto; }
+.ir-scroll thead th { position:sticky; top:0; z-index:2; background:var(--surface); }
+.ir-scroll thead tr:first-child th { height:2rem; }
+.ir-scroll thead tr:nth-child(2) th { top:2rem; }
+.ir-scroll thead th.sticky { z-index:3; }
+.ir-scroll tbody td.sticky { z-index:1; }

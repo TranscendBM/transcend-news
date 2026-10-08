@@ -394,3 +394,98 @@ describe('IRTab — 年度營收趨勢（近 10 年）下方的年營收與年�
     expect(cells(rows[0])).toEqual(['2026', '280*', '+33.3%', '42*', '+20%']);
   });
 });
+
+describe('IRTab — 各卡片「顯示全部歷史」按鈕', () => {
+  // 創見＋威剛各 40 個月（2023/1–2026/4），共跨 4 個年度
+  const months = [];
+  for (let y = 2023, m = 1; y < 2026 || m <= 4; m++) {
+    if (m > 12) { m = 1; y++; }
+    months.push({ year: y, month: m });
+  }
+  const revenue = months.map(({ year, month }) => ({ year, month, revenue: 100e6 }));
+  const compRev = { '3260': months.map(({ year, month }) => ({ year, month, revenue: 50e6 })) };
+
+  const card = title => screen.getByText(title).closest('div.bg-gray-900');
+  const rows = c => c.querySelectorAll('tbody tr').length;
+
+  it('創見月營收：預設近 12 個月明細，展開後是全部 40 個月，標題與按鈕跟著變，可收合', () => {
+    renderIR({ revenue, compRev });
+    let c = card('創見月營收（近 24 個月）');
+    expect(rows(c)).toBe(12);
+    fireEvent.click(within(c).getByText('📜 顯示全部歷史（共 40 個月）'));
+
+    c = card('創見月營收（全部歷史，40 個月）');
+    expect(rows(c)).toBe(40);
+    expect(c.querySelector('.ir-scroll')).toBeTruthy();   // 長表格固定高度＋捲動
+    fireEvent.click(within(c).getByText('↩ 收合為預設範圍'));
+    c = card('創見月營收（近 24 個月）');
+    expect(rows(c)).toBe(12);
+    expect(c.querySelector('.ir-scroll')).toBeNull();
+  });
+
+  it('創見年度營收：預設近 10 年，只有 4 年資料時按鈕停用並說明已是全部', () => {
+    renderIR({ revenue, compRev });
+    const c = card('年度營收趨勢（近 10 年，創見）');
+    const btn = within(c).getByText('✓ 已顯示全部歷史（4 年）');
+    expect(btn.disabled).toBe(true);
+  });
+
+  it('創見 vs 競品月營收比較：預設 24 個月，展開後 40 個月，圖的 X 軸標籤自動隔幾個顯示', () => {
+    renderIR({ revenue, compRev });
+    let c = card('創見 vs 競品月營收比較（近 24 個月）');
+    expect(rows(c)).toBe(24);
+    fireEvent.click(within(c).getByText('📜 顯示全部歷史（共 40 個月）'));
+    c = card('創見 vs 競品月營收比較（全部歷史）');
+    expect(rows(c)).toBe(40);
+    const labels = [...c.querySelectorAll('svg text')].filter(t => /^\d{2}\/\d{1,2}$/.test(t.textContent));
+    expect(labels.length).toBeGreaterThan(10);
+    expect(labels.length).toBeLessThan(40);
+  });
+
+  it('季度損益摘要：預設近 8 季，展開後全部 10 季；只有 5 季時停用', () => {
+    const quarters = Array.from({ length: 10 }, (_, i) => ({
+      date: '20' + (24 + Math.floor(i / 4)) + '-' + String((i % 4) * 3 + 3).padStart(2, '0') + '-30',
+      grossMargin: 30, opMargin: 20, netMargin: 15, eps: 1,
+    }));
+    const { unmount } = renderIR({ financials: quarters });
+    let c = card('季度損益摘要（近 8 季）');
+    expect(rows(c)).toBe(8);
+    fireEvent.click(within(c).getByText('📜 顯示全部歷史（共 10 季）'));
+    c = card('季度損益摘要（全部歷史）');
+    expect(rows(c)).toBe(10);
+    unmount();
+
+    renderIR({ financials: quarters.slice(0, 5) });
+    expect(within(card('季度損益摘要（近 8 季）')).getByText('✓ 已顯示全部歷史（5 季）').disabled).toBe(true);
+  });
+
+  it('歷年股利配息：預設近 10 年，展開後全部 12 年', () => {
+    const dividends = Array.from({ length: 12 }, (_, i) => (
+      { year: 2014 + i, cashDividend: 5, stockDividend: 0, totalDividend: 5 }));
+    renderIR({ dividends });
+    let c = card('歷年股利配息（近 10 年）');
+    expect(rows(c)).toBe(10);
+    fireEvent.click(within(c).getByText('📜 顯示全部歷史（共 12 年）'));
+    c = card('歷年股利配息（全部歷史）');
+    expect(rows(c)).toBe(12);
+  });
+
+  it('各公司年度營收趨勢：展開後顯示全部年度', () => {
+    const yearly = years => years.flatMap(y => [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12].map(m => ({ year: y, month: m, revenue: 10e6 })));
+    const all = Array.from({ length: 12 }, (_, i) => 2014 + i);
+    renderIR({ revenue: yearly(all), compRev: { '3260': yearly(all) } });
+    let c = card('年度營收趨勢（近 10 年）');
+    expect(rows(c)).toBe(10);
+    fireEvent.click(within(c).getByText('📜 顯示全部歷史（共 12 年）'));
+    c = card('年度營收趨勢（全部歷史）');
+    expect(rows(c)).toBe(12);
+  });
+
+  it('複製圖表按鈕的標題跟著目前顯示的範圍', () => {
+    renderIR({ revenue, compRev });
+    const c = card('創見月營收（近 24 個月）');
+    fireEvent.click(within(c).getByText('📜 顯示全部歷史（共 40 個月）'));
+    expect(card('創見月營收（全部歷史，40 個月）').querySelector('button[title^="複製圖表"]').title)
+      .toBe('複製圖表：創見月營收（全部歷史，40 個月）');
+  });
+});

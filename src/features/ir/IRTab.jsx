@@ -4,6 +4,7 @@ import ReactDOM from 'react-dom';
 import Card from '../../components/Card.jsx';
 import TabBtn from '../../components/TabBtn.jsx';
 import CopyChartButton from '../../components/CopyChartButton.jsx';
+import HistoryToggle from '../../components/HistoryToggle.jsx';
 import CompanyLogo from '../../components/logos/CompanyLogo.jsx';
 import { isStockStale, fmtStockUpdated } from '../../utils/dates.js';
 import { BRAND } from '../../utils/news.js';
@@ -75,7 +76,7 @@ function MonthRevSVG({ data }) {
         <rect x={cx + bw * 0.1} y={PT + CH - toH(d.prevYr)} width={bw} height={toH(d.prevYr)} fill="#374151" rx="1" opacity="0.75" />
       </g>); })}
       {lp && <path d={lp} fill="none" stroke="#4ade80" strokeWidth="2" strokeLinecap="round" />}
-      {data.map((d, i) => <text key={i} x={PL + i * step + step / 2} y={VH - PB + 14} textAnchor="middle" fill="#6b7280" fontSize={data.length > 16 ? 7 : 9}>{d.label}</text>)}
+      {data.map((d, i) => i % Math.ceil(data.length / 30) === 0 && <text key={i} x={PL + i * step + step / 2} y={VH - PB + 14} textAnchor="middle" fill="#6b7280" fontSize={data.length > 16 ? 7 : 9}>{d.label}</text>)}
       {rT.map((t, i) => <text key={i} x={PL - 5} y={t.y + 4} textAnchor="end" fill="#6b7280" fontSize="9">{fR(t.v)}</text>)}
       {[minY, (minY + maxY) / 2, maxY].map((v, i) => <text key={i} x={VW - PR + 5} y={(toLY(v) || 0) + 4} textAnchor="start" fill="#6b7280" fontSize="9">{v > 0 ? '+' : ''}{v.toFixed(0)}%</text>)}
       <rect x={PL} y={VH - 5} width={10} height={5} fill="#960014" rx="1" />
@@ -123,6 +124,8 @@ function AnnualRevSVG({ data }) {
 function RevenueChart({ revenue }) {
   const monthChartRef = useRef(null);
   const annualChartRef = useRef(null);
+  const [showAll, setShowAll] = useState(false);
+  const [showAllAnnual, setShowAllAnnual] = useState(false);
   const fmtRev = v => Number(v).toLocaleString(); // 千分位，單位：元
 
   // 自行建立 lookup map，對照去年同期（不依賴 FinMind 的 revenue_year 欄位）
@@ -135,7 +138,7 @@ function RevenueChart({ revenue }) {
 
   const data = useMemo(() => {
     if (!revenue || !revenue.length) return [];
-    return revenue.slice(-24).map(r => {
+    return revenue.slice(showAll ? 0 : -24).map(r => {
       const prevYr = revMap[`${r.year - 1}-${r.month}`] || 0;
       const yoyPct = prevYr > 0 ? +((r.revenue - prevYr) / prevYr * 100).toFixed(2) : null;
       return {
@@ -145,7 +148,7 @@ function RevenueChart({ revenue }) {
         yoyPct,
       };
     });
-  }, [revenue, revMap]);
+  }, [revenue, revMap, showAll]);
 
   // 近 10 年年度彙總（取 11 筆讓最早那年也能算 YoY）
   const annualData = useMemo(() => {
@@ -157,20 +160,24 @@ function RevenueChart({ revenue }) {
       byYear[r.year].months += 1;
     });
     const years = Object.values(byYear).sort((a, b) => a.year - b.year);
-    const base = years.slice(-11); // 取 11 筆以計算最早年的 YoY
+    const base = showAllAnnual ? years : years.slice(-11); // 預設取 11 筆以計算最早年的 YoY
     return base.map((y, i, arr) => {
       const prev = arr[i - 1];
       const yoy = prev && prev.total > 0
         ? +((y.total - prev.total) / prev.total * 100).toFixed(2)
         : null;
       return { ...y, yoy };
-    }).slice(-10); // 最終只顯示 10 年
-  }, [revenue]);
+    }).slice(showAllAnnual ? 0 : -10); // 預設只顯示 10 年
+  }, [revenue, showAllAnnual]);
 
   const hasData = data.length > 0;
+  const totalMonths = revenue ? revenue.length : 0;
+  const totalYears = useMemo(() => new Set((revenue || []).map(r => r.year)).size, [revenue]);
+  const monthTitle = showAll ? '創見月營收（全部歷史，' + totalMonths + ' 個月）' : '創見月營收（近 24 個月）';
+  const annualTitle = showAllAnnual ? '年度營收趨勢（全部歷史，創見）' : '年度營收趨勢（近 10 年，創見）';
   const recent12 = useMemo(() => {
     if (!revenue || !revenue.length) return [];
-    return [...revenue].slice(-12).reverse().map(r => {
+    return [...revenue].slice(showAll ? 0 : -12).reverse().map(r => {
       const prevYr = revMap[`${r.year - 1}-${r.month}`] || 0;
       const yoyPct = prevYr > 0 ? +((r.revenue - prevYr) / prevYr * 100).toFixed(2) : null;
       // label 沒有隨 r 的其他欄位一起帶著走（原始 revenue 記錄本身沒有
@@ -178,14 +185,18 @@ function RevenueChart({ revenue }) {
       // 明細表格的「年月」欄位整欄空白——曾經真的發生過。
       return { ...r, label: `${String(r.year).slice(2)}/${r.month}`, prevYrCalc: prevYr, yoyPctCalc: yoyPct };
     });
-  }, [revenue, revMap]);
+  }, [revenue, revMap, showAll]);
 
   return (
     <>
-    <Card title="創見月營收（近 24 個月）" icon="💰"
+    <Card title={monthTitle} icon="💰"
       actions={hasData && (
-        <CopyChartButton containerRef={monthChartRef} title="創見月營收（近 24 個月）"
-          note="資料來源：FinMind，單位：新台幣元" />
+        <div className="flex gap-1.5 flex-wrap justify-end">
+          <HistoryToggle expanded={showAll} onToggle={() => setShowAll(v => !v)}
+            total={totalMonths} defaultCount={24} unit="個月" />
+          <CopyChartButton containerRef={monthChartRef} title={monthTitle}
+            note="資料來源：FinMind，單位：新台幣元" />
+        </div>
       )}>
       {hasData ? (
         <>
@@ -196,7 +207,7 @@ function RevenueChart({ revenue }) {
               年增率）——沒有這行提示的話，使用者很容易以為表格只有
               目前看得到的那幾欄，完全不會想到要往右滑。 */}
           <p className="text-xs text-gray-600 sm:hidden mb-1">← 左右滑動可看年增率 →</p>
-          <div className="mt-3 overflow-x-auto">
+          <div className={'mt-3 overflow-x-auto' + (showAll ? ' ir-scroll' : '')}>
             <table className="ir-table w-full text-sm">
               <thead>
                 <tr className="border-b border-gray-700/60 text-gray-500">
@@ -234,15 +245,21 @@ function RevenueChart({ revenue }) {
 
     {/* 近 10 年年度營收趨勢 */}
     {annualData.length > 0 && (
-    <Card title="年度營收趨勢（近 10 年，創見）" icon="📊"
-      actions={<CopyChartButton containerRef={annualChartRef} title="年度營收趨勢（近 10 年，創見）"
-        note="資料來源：FinMind，各年度月營收合計，單位：新台幣元" />}>
+    <Card title={annualTitle} icon="📊"
+      actions={
+        <div className="flex gap-1.5 flex-wrap justify-end">
+          <HistoryToggle expanded={showAllAnnual} onToggle={() => setShowAllAnnual(v => !v)}
+            total={totalYears} defaultCount={10} unit="年" />
+          <CopyChartButton containerRef={annualChartRef} title={annualTitle}
+            note="資料來源：FinMind，各年度月營收合計，單位：新台幣元" />
+        </div>
+      }>
       {/* 折線圖 */}
       <div ref={annualChartRef}><AnnualRevSVG data={annualData} /></div>
 
       {/* 明細表 */}
       <p className="text-xs text-gray-600 sm:hidden mb-1">← 左右滑動可看更多欄位 →</p>
-      <div className="mt-3 overflow-x-auto">
+      <div className={'mt-3 overflow-x-auto' + (showAllAnnual ? ' ir-scroll' : '')}>
         <table className="ir-table w-full text-sm">
           <thead>
             <tr className="border-b border-gray-700/60 text-gray-500">
@@ -326,10 +343,11 @@ function TermTip({ label, tip }) {
 // IR TAB — 季度損益摘要
 // ═══════════════════════════════════════════════════════════
 function QuarterlyPnL({ financials }) {
+  const [showAll, setShowAll] = useState(false);
   const quarters = useMemo(() => {
     if (!financials || !financials.length) return [];
-    return [...financials].sort((a, b) => b.date.localeCompare(a.date)).slice(0, 8);
-  }, [financials]);
+    return [...financials].sort((a, b) => b.date.localeCompare(a.date)).slice(0, showAll ? undefined : 8);
+  }, [financials, showAll]);
 
   const pctCell = v => {
     if (v == null || v === 0) return <span className="text-gray-600">—</span>;
@@ -345,11 +363,15 @@ function QuarterlyPnL({ financials }) {
   };
 
   return (
-    <Card title="季度損益摘要（近 8 季）" icon="📋">
+    <Card title={showAll ? '季度損益摘要（全部歷史）' : '季度損益摘要（近 8 季）'} icon="📋"
+      actions={
+        <HistoryToggle expanded={showAll} onToggle={() => setShowAll(v => !v)}
+          total={financials ? financials.length : 0} defaultCount={8} unit="季" />
+      }>
       {quarters.length > 0 ? (
         <>
         <p className="text-xs text-gray-600 sm:hidden mb-1">← 左右滑動可看更多欄位 →</p>
-        <div className="overflow-x-auto">
+        <div className={'overflow-x-auto' + (showAll ? ' ir-scroll' : '')}>
           <table className="ir-table w-full text-sm">
             <thead>
               <tr className="border-b border-gray-700/60 text-gray-500">
@@ -394,10 +416,11 @@ function QuarterlyPnL({ financials }) {
 // IR TAB — 歷年股利配息
 // ═══════════════════════════════════════════════════════════
 function DividendHistory({ dividends }) {
+  const [showAll, setShowAll] = useState(false);
   const records = useMemo(() => {
     if (!dividends || !dividends.length) return [];
-    return [...dividends].sort((a, b) => String(b.year).localeCompare(String(a.year))).slice(0, 10);
-  }, [dividends]);
+    return [...dividends].sort((a, b) => String(b.year).localeCompare(String(a.year))).slice(0, showAll ? undefined : 10);
+  }, [dividends, showAll]);
 
   const DIV_TIPS = [
     { label: '現金股利',
@@ -411,11 +434,15 @@ function DividendHistory({ dividends }) {
   const divTipMap = Object.fromEntries(DIV_TIPS.map(d => [d.label, d.tip]));
 
   return (
-    <Card title="歷年股利配息（近 10 年）" icon="💵">
+    <Card title={showAll ? '歷年股利配息（全部歷史）' : '歷年股利配息（近 10 年）'} icon="💵"
+      actions={
+        <HistoryToggle expanded={showAll} onToggle={() => setShowAll(v => !v)}
+          total={dividends ? dividends.length : 0} defaultCount={10} unit="年" />
+      }>
       {records.length > 0 ? (
         <>
         <p className="text-xs text-gray-600 sm:hidden mb-1">← 左右滑動可看更多欄位 →</p>
-        <div className="overflow-x-auto">
+        <div className={'overflow-x-auto' + (showAll ? ' ir-scroll' : '')}>
           <table className="ir-table w-full text-sm">
             <thead>
               <tr className="border-b border-gray-700/60 text-gray-500">
@@ -698,9 +725,10 @@ const COMP_REV_META = {
 
 function CompetitorRevenueChart({ revenue, compRev }) {
   const chartRef = useRef(null);
+  const [showAll, setShowAll] = useState(false);
   // series 用完整歷史建立（不只近 24 個月），表格的月增率才找得到
   // 最早那個月的「上個月」。
-  const { allSeries, byKey } = useMemo(() => {
+  const { allSeries, byKey, totalMonths } = useMemo(() => {
     const series = {};
     const addSeries = (code, records) => {
       if (!records || !records.length) return;
@@ -713,10 +741,11 @@ function CompetitorRevenueChart({ revenue, compRev }) {
     addSeries('2451', revenue || []);
     Object.entries(compRev || {}).forEach(([code, recs]) => addSeries(code, recs));
     return {
-      allSeries: Object.values(series).sort((a, b) => a.key < b.key ? -1 : 1).slice(-24),
+      allSeries: Object.values(series).sort((a, b) => a.key < b.key ? -1 : 1).slice(showAll ? 0 : -24),
       byKey: series,
+      totalMonths: Object.keys(series).length,
     };
-  }, [revenue, compRev]);
+  }, [revenue, compRev, showAll]);
 
   const compKeys = new Set(Object.keys(compRev || {}));
   const hasCodes = ['2451', ...COMPETITOR_ORDER.filter(c => compKeys.has(c))].filter(c => COMP_REV_META[c]);
@@ -753,13 +782,22 @@ function CompetitorRevenueChart({ revenue, compRev }) {
     return cur != null && prev > 0 ? +((cur - prev) / prev * 100).toFixed(1) : null;
   };
   const fmtM = v => v == null ? '—' : Math.round(v / 1e6).toLocaleString(); // 百萬元
+  // 全部歷史時資料點多，X 軸標籤隔幾個顯示一個（24 個月以內每個月都顯示）
+  const labelStep = Math.ceil(allSeries.length / 30);
+  const chartTitle = showAll ? '創見 vs 競品月營收比較（全部歷史）' : '創見 vs 競品月營收比較（近 24 個月）';
   const momCls = v => v == null ? 'text-gray-600' : v > 0 ? 'text-red-400' : v < 0 ? 'text-green-400' : 'text-gray-400';
 
   return (
-    <Card title="創見 vs 競品月營收比較（近 24 個月）" icon="📊"
-      actions={<CopyChartButton containerRef={chartRef} title="創見 vs 競品月營收比較（近 24 個月）"
-        legend={hasCodes.map(c => ({ name: `${COMP_REV_META[c].name}（${c}）`, color: COMP_REV_META[c].color }))}
-        note="資料來源：FinMind，單位：新台幣元" />}>
+    <Card title={chartTitle} icon="📊"
+      actions={
+        <div className="flex gap-1.5 flex-wrap justify-end">
+          <HistoryToggle expanded={showAll} onToggle={() => setShowAll(v => !v)}
+            total={totalMonths} defaultCount={24} unit="個月" />
+          <CopyChartButton containerRef={chartRef} title={chartTitle}
+            legend={hasCodes.map(c => ({ name: COMP_REV_META[c].name + '（' + c + '）', color: COMP_REV_META[c].color }))}
+            note="資料來源：FinMind，單位：新台幣元" />
+        </div>
+      }>
       {/* Legend */}
       <div className="flex flex-wrap gap-3 mb-3">
         {hasCodes.map(c => (
@@ -787,7 +825,7 @@ function CompetitorRevenueChart({ revenue, compRev }) {
                 strokeLinejoin="round" strokeLinecap="round" />
         ))}
         {/* X labels：每個月都顯示 */}
-        {allSeries.map((d, i) => (
+        {allSeries.map((d, i) => i % labelStep === 0 && (
           <text key={d.key} x={PL + i * step} y={H - PB + 12} textAnchor="middle" fill="#6b7280" fontSize="8">
             {d.label}
           </text>
@@ -798,7 +836,7 @@ function CompetitorRevenueChart({ revenue, compRev }) {
 
       {/* 各公司月營收＋月增率明細（新到舊） */}
       <p className="text-xs text-gray-600 sm:hidden mt-3 mb-1">← 左右滑動可看其他公司 →</p>
-      <div className="mt-3 overflow-x-auto">
+      <div className={'mt-3 overflow-x-auto' + (showAll ? ' ir-scroll' : '')}>
         <table className="ir-table w-full text-sm">
           <thead>
             <tr className="text-gray-500">
@@ -842,6 +880,7 @@ function CompetitorRevenueChart({ revenue, compRev }) {
 // ─── 年度營收趨勢（近 10 年）─────────────────────────────
 function AnnualRevenueChart({ revenue, compRev }) {
   const chartRef = useRef(null);
+  const [showAll, setShowAll] = useState(false);
   const allYears = useMemo(() => {
     const series = {};
     const addSeries = (code, records) => {
@@ -856,8 +895,12 @@ function AnnualRevenueChart({ revenue, compRev }) {
     Object.entries(compRev || {}).forEach(([code, recs]) => addSeries(code, recs));
     return Object.values(series)
       .sort((a, b) => a.label < b.label ? -1 : 1)
-      .slice(-10);
-  }, [revenue, compRev]);
+      .slice(showAll ? 0 : -10);
+  }, [revenue, compRev, showAll]);
+
+  const totalYears = new Set(
+    [...(revenue || []), ...Object.values(compRev || {}).flat()].map(r => r.year)).size;
+  const chartTitle = showAll ? '年度營收趨勢（全部歷史）' : '年度營收趨勢（近 10 年）';
 
   // 表格用：stat[年][公司] = { total, byMonth }。未滿 12 個月的年度（例如
   // 今年還沒結束，或某家公司少了一個月）不能直接拿去跟去年全年比，年增率
@@ -918,10 +961,16 @@ function AnnualRevenueChart({ revenue, compRev }) {
   const yoyCls = v => v == null ? 'text-gray-600' : v > 0 ? 'text-red-400' : v < 0 ? 'text-green-400' : 'text-gray-400';
 
   return (
-    <Card title="年度營收趨勢（近 10 年）" icon="📈"
-      actions={<CopyChartButton containerRef={chartRef} title="年度營收趨勢（近 10 年）"
-        legend={hasCodes.map(c => ({ name: `${COMP_REV_META[c].name}（${c}）`, color: COMP_REV_META[c].color }))}
-        note="資料來源：FinMind，各年度月營收合計，單位：新台幣元" />}>
+    <Card title={chartTitle} icon="📈"
+      actions={
+        <div className="flex gap-1.5 flex-wrap justify-end">
+          <HistoryToggle expanded={showAll} onToggle={() => setShowAll(v => !v)}
+            total={totalYears} defaultCount={10} unit="年" />
+          <CopyChartButton containerRef={chartRef} title={chartTitle}
+            legend={hasCodes.map(c => ({ name: COMP_REV_META[c].name + '（' + c + '）', color: COMP_REV_META[c].color }))}
+            note="資料來源：FinMind，各年度月營收合計，單位：新台幣元" />
+        </div>
+      }>
       {/* Legend */}
       <div className="flex flex-wrap gap-3 mb-3">
         {hasCodes.map(c => (
@@ -967,7 +1016,7 @@ function AnnualRevenueChart({ revenue, compRev }) {
 
       {/* 各公司年度營收＋年增率明細（新到舊） */}
       <p className="text-xs text-gray-600 sm:hidden mt-3 mb-1">← 左右滑動可看其他公司 →</p>
-      <div className="mt-3 overflow-x-auto">
+      <div className={'mt-3 overflow-x-auto' + (showAll ? ' ir-scroll' : '')}>
         <table className="ir-table w-full text-sm">
           <thead>
             <tr className="text-gray-500">
