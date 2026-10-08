@@ -88,41 +88,41 @@ describe('PRStatsPanel — 日期邊界不會卡在建立當下的舊值（Asia/
   it('查詢失敗時明確顯示錯誤，不悄悄顯示 0', () => {
     vi.setSystemTime(taipei(2026, 7, 20, 12, 0, 0));
     render(<PRStatsPanel articles={[]} status="error" />);
-    expect(screen.getAllByText('⚠ 載入失敗').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('載入失敗').length).toBeGreaterThan(0);
     // 錯誤狀態下不應該顯示看起來正常的「0 篇」
     expect(screen.queryByText('篇')).toBeNull();
   });
 });
 
-describe('KeyMediaPanel — 只統計本月，不再有本年', () => {
+describe('KeyMediaPanel — 統計本月＋上月，不再有本年', () => {
   afterEach(() => { vi.useRealTimers(); });
 
-  it('本月累計曝光在跨月後會反映新的邊界', async () => {
+  it('跨月後本月歸零、原本的篇數移到上月欄', async () => {
     vi.useFakeTimers();
     vi.setSystemTime(taipei(2026, 12, 31, 23, 59, 0));
     const articles = [mkArticle(taipei(2026, 12, 31, 12, 0, 0), '電子時報')];
 
     render(<KeyMediaPanel articles={articles} />);
-    // 該列文字內容是「1電子時報Digitimes1」：排名徽章(1) + 名稱 +
-    // 英文名 + 本月數(1)。只有一個數字欄位（本年欄位已移除）。
+    // 該列文字內容是「1電子時報Digitimes10」：排名徽章(1) + 名稱 +
+    // 英文名 + 本月數(1) + 上月數(0)。本年欄位已移除。
     const row = screen.getByText('電子時報').closest('.group');
-    expect(row.textContent).toBe('1電子時報Digitimes1');
+    expect(row.textContent).toBe('1電子時報Digitimes10');
 
     await act(async () => { await vi.advanceTimersByTimeAsync(TICK_MS); }); // → 隔年 1/1 00:00，新的一個月
 
     const rowAfter = screen.getByText('電子時報').closest('.group');
-    expect(rowAfter.textContent).toBe('1電子時報Digitimes0');
+    expect(rowAfter.textContent).toBe('1電子時報Digitimes01');
   });
 
   it('不再顯示本年欄位標題或本年數字欄位', () => {
     vi.setSystemTime(taipei(2026, 7, 20, 12, 0, 0));
     render(<KeyMediaPanel articles={[mkArticle(taipei(2026, 7, 20, 8, 0, 0), '電子時報')]} />);
     expect(screen.queryByText('本年累計曝光篇數（各媒體佔比）')).toBeNull();
-    expect(screen.getByText('本月累計曝光篇數（各媒體佔比）')).toBeTruthy();
+    expect(screen.getByText('本月／上月累計曝光篇數')).toBeTruthy();
   });
 
   it('查詢失敗時顯示錯誤訊息，不是空白排行榜', () => {
     render(<KeyMediaPanel articles={[]} status="error" />);
-    expect(screen.getByText('⚠ 資料載入失敗，請稍後重新整理')).toBeTruthy();
+    expect(screen.getByText('資料載入失敗，請稍後重新整理')).toBeTruthy();
   });
 });

@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
+import Icon from './Icon.jsx';
 
 // 股價自動更新倒數：獨立成自己的元件，狀態完全留在元件內部，每秒的
 // -1 更新只會讓這個小元件重新渲染，不會連帶讓整個 App()（含目前顯示
@@ -31,7 +32,7 @@ export default function StockCountdown({ resetSignal, onExpire }) {
 
   return (
     <span className="text-gray-700" title="股價自動更新倒數">
-      ⏱ {Math.floor(countdown / 60)}:{String(countdown % 60).padStart(2, '0')}
+      <Icon name="clock" /> {Math.floor(countdown / 60)}:{String(countdown % 60).padStart(2, '0')}
     </span>
   );
 }

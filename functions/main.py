@@ -16,6 +16,10 @@
   news_cleanup_job    每天 02:30                新聞保存期限清理（只留本月＋上個月）
   ai_worker_health_job  每天 02:35              彙總本機 AI worker 積壓狀況（ai_jobs/ai_insights）
 
+HTTPS 端點：
+  upload_media_exposure  網站「人工確認曝光」上傳 Excel（POST /api/media-exposure，
+                         由 Hosting rewrite 轉進來；以 MEDIA_EXPOSURE_UPLOAD_PASSCODE 把關）
+
 防重疊機制：每個 job 皆設 max_instances=1，並以 Firestore lease lock
 （meta/lock_*）防止「上一次還在跑、下一次又觸發」的重疊執行；
 鎖有 TTL（皆大於該函式 timeout），函式異常中止時鎖會過期被接管，
@@ -32,9 +36,10 @@ Cloud Logging。
 """
 
 import datetime
+import json
 
-from firebase_functions import scheduler_fn
-from firebase_functions.options import MemoryOption
+from firebase_functions import scheduler_fn, https_fn
+from firebase_functions.options import MemoryOption, CorsOptions
 from firebase_functions.params import SecretParam
 from firebase_admin import firestore
 
@@ -43,11 +48,13 @@ import fetch_news
 import digest
 import news_cleanup
 import ai_worker_health
+import media_exposure_upload
 
 TZ = 'Asia/Taipei'
 REGION = 'asia-east1'
 MAIL2000_SMTP_PASSWORD = SecretParam('MAIL2000_SMTP_PASSWORD')
 FINMIND_API_TOKEN = SecretParam('FINMIND_API_TOKEN')
+MEDIA_EXPOSURE_UPLOAD_PASSCODE = SecretParam('MEDIA_EXPOSURE_UPLOAD_PASSCODE')
 
 
 def _tw_now():
@@ -206,3 +213,25 @@ def news_cleanup_job(event: scheduler_fn.ScheduledEvent) -> None:
 def ai_worker_health_job(event: scheduler_fn.ScheduledEvent) -> None:
     _run_locked('ai_worker_health', lambda db: ai_worker_health.check_ai_worker_health(db),
                 ttl_minutes=5)
+
+# ─── 人工確認曝光：網站上傳 Excel（POST /api/media-exposure）───
+# 沒有登入機制的網站上開放寫入入口，必須帶上傳通行碼；解析／去重／寫入邏輯
+# 全在 media_exposure_upload.py（跟 CLI 共用 media_exposure.py）。
+@https_fn.on_request(
+    region=REGION, memory=MemoryOption.MB_512, timeout_sec=120, max_instances=3,
+    secrets=[MEDIA_EXPOSURE_UPLOAD_PASSCODE],
+    cors=CorsOptions(
+        cors_origins=[
+            'https://transcend-news.web.app',
+            'https://transcend-news-tbm.web.app',
+            'https://transcend-news-tbm.firebaseapp.com',
+        ],
+        cors_methods=['POST']))
+def upload_media_exposure(req: https_fn.Request) -> https_fn.Response:
+    status, body = media_exposure_upload.respond(
+        req.method, req.get_json(silent=True),
+        passcode=MEDIA_EXPOSURE_UPLOAD_PASSCODE.value, get_db=get_db)
+    return https_fn.Response(
+        json.dumps(body, ensure_ascii=False, default=str),
+        status=status, mimetype='application/json')
+

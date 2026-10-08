@@ -48,8 +48,8 @@ afterEach(() => {
   vi.useRealTimers();
 });
 
-describe('useUpstreamNews — 查詢範圍固定為「本月」且 cat 為 usMarket/supplier', () => {
-  it('queries cat in [usMarket, supplier] AND pubDate >= this month start, ordered by pubDate desc', async () => {
+describe('useUpstreamNews — 查詢範圍固定為「本月＋上個月」且 cat 為 usMarket/supplier', () => {
+  it('queries cat in [usMarket, supplier] AND pubDate >= last month start, ordered by pubDate desc', async () => {
     vi.setSystemTime(taipei(2026, 7, 20, 12, 0, 0));
     renderHook(() => useUpstreamNews());
     await waitFor(() => expect(onSnapshot).toHaveBeenCalledTimes(1));
@@ -60,7 +60,7 @@ describe('useUpstreamNews — 查詢範圍固定為「本月」且 cat 為 usMar
 
     const pubDateWhere = nthWhere(0, 'pubDate');
     expect(pubDateWhere.args[1]).toBe('>=');
-    expect(pubDateWhere.args[2]).toEqual(taipei(2026, 7, 1, 0, 0, 0));
+    expect(pubDateWhere.args[2]).toEqual(taipei(2026, 6, 1, 0, 0, 0));
 
     const [q] = callArgs(0);
     const whereConstraints = q.constraints.filter(c => c.__marker === 'where');
@@ -172,7 +172,7 @@ describe('useUpstreamNews — 跨月後重新建立查詢', () => {
 
     renderHook(() => useUpstreamNews());
     expect(onSnapshot).toHaveBeenCalledTimes(1);
-    expect(nthWhere(0, 'pubDate').args[2]).toEqual(taipei(2026, 7, 1, 0, 0, 0));
+    expect(nthWhere(0, 'pubDate').args[2]).toEqual(taipei(2026, 6, 1, 0, 0, 0));
 
     await act(async () => {
       await vi.advanceTimersByTimeAsync(2 * 60 * 1000);
@@ -180,7 +180,7 @@ describe('useUpstreamNews — 跨月後重新建立查詢', () => {
 
     expect(unsubSpy).toHaveBeenCalledTimes(1);
     expect(onSnapshot).toHaveBeenCalledTimes(2);
-    expect(nthWhere(1, 'pubDate').args[2]).toEqual(taipei(2026, 8, 1, 0, 0, 0));
+    expect(nthWhere(1, 'pubDate').args[2]).toEqual(taipei(2026, 7, 1, 0, 0, 0));
   });
 
   it('does not rebuild the query when still within the same Taipei month', async () => {

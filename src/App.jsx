@@ -3,6 +3,7 @@ import { useState, useEffect, useMemo, lazy, Suspense } from 'react';
 import { getDb, doc, onSnapshot, getDoc } from './services/firebase.js';
 import Spinner from './components/Spinner.jsx';
 import StockCountdown from './components/StockCountdown.jsx';
+import Icon from './components/Icon.jsx';
 import TranscendMark from './components/logos/TranscendMark.jsx';
 import { useNewsFeed } from './features/news/useNewsFeed.js';
 import { usePRNews } from './features/news/usePRNews.js';
@@ -190,15 +191,15 @@ export default function App() {
           {/* PR / IR / US tab switcher */}
           <nav className="flex gap-1 p-1 rounded-xl" style={{ background: 'rgba(0,0,0,0.35)' }}>
             {[
-              { id: 'pr', icon: '📡', label: 'PR 媒體戰情' },
-              { id: 'ir', icon: '📈', label: 'IR 投資情報' },
-              { id: 'us', icon: '🌐', label: '上游市場' },
-              { id: 'health', icon: '🩺', label: '系統健康' },
+              { id: 'pr', icon: 'megaphone', label: 'PR 媒體戰情' },
+              { id: 'ir', icon: 'trend', label: 'IR 投資情報' },
+              { id: 'us', icon: 'globe', label: '上游市場' },
+              { id: 'health', icon: 'activity', label: '系統健康' },
             ].map(t => (
               <button key={t.id} onClick={() => setTab(t.id)}
                 className={`flex items-center gap-1.5 px-4 py-1.5 rounded-lg text-sm font-semibold transition-all ${tab === t.id ? 'text-white shadow' : 'text-red-200/60 hover:text-white'}`}
                 style={tab === t.id ? { background: 'rgba(0,0,0,0.5)' } : {}}>
-                <span>{t.icon}</span>
+                <Icon name={t.icon} className="text-[1.25em]" />
                 <span className="hidden sm:inline">{t.label}</span>
               </button>
             ))}
@@ -209,7 +210,7 @@ export default function App() {
             <button onClick={() => fetchAll()} disabled={loading}
               className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium transition-all"
               style={{ background: 'rgba(255,255,255,0.15)', border: '1px solid rgba(255,255,255,0.2)', color: 'white' }}>
-              {loading ? <Spinner /> : '↻'}
+              {loading ? <Spinner /> : <Icon name="refresh" />}
               <span className="hidden sm:inline">{loading ? '載入中' : '重新整理'}</span>
             </button>
           </div>
@@ -222,12 +223,12 @@ export default function App() {
           <span className={connected ? 'text-green-500' : 'text-yellow-500'}>
             {connected ? '● Firebase 已連線' : '○ 連線中…'}
           </span>
-          <span className="text-gray-600">📰 {news.length} 則新聞</span>
+          <span className="text-gray-600"><Icon name="news" /> {news.length} 則新聞</span>
           {updatedStr && <span className="text-gray-600">更新 {updatedStr}</span>}
           <StockCountdown resetSignal={stocks} onExpire={() => { fetchStocks(); fetchDaily(); }} />
           {self && isStockStale(self) && (
             <span className="text-amber-500" title={`交易時段中超過 30 分鐘未更新（${fmtStockUpdated(self)}）`}>
-              ⚠ 股價資料過期
+              <Icon name="alert" /> 股價資料過期
             </span>
           )}
           {self && (

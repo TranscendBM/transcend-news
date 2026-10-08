@@ -77,6 +77,11 @@ class TestNormalization(unittest.TestCase):
     def test_media_aliases_are_stable(self):
         self.assertEqual(exposure.normalize_media('時報新聞'), '時報資訊')
         self.assertEqual(exposure.normalize_media('工商'), '工商時報')
+        self.assertEqual(exposure.normalize_media('鉅亨網新聞中心'), '鉅亨網')
+        self.assertEqual(exposure.normalize_media('財訊新聞'), '財訊快報')
+        self.assertEqual(exposure.normalize_media('DIGITIMES'), '電子時報')
+        self.assertEqual(exposure.normalize_media('精實財經'), 'MoneyDJ理財網')
+        self.assertEqual(exposure.normalize_media('中國時報'), '時報資訊')
 
 
 class TestWorkbookParsing(unittest.TestCase):

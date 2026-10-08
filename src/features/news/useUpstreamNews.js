@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   getDb, collection, query, where, orderBy, onSnapshot,
 } from '../../services/firebase.js';
-import { taipeiMonthStart } from '../../utils/dates.js';
+import { taipeiMonthStart, taipeiPrevMonthStart } from '../../utils/dates.js';
 
 // 每分鐘檢查一次是否已經跨入新的台灣月份，跟 usePRNews()/useNow() 預設 interval 一致。
 const MONTH_CHECK_INTERVAL_MS = 60000;
@@ -18,7 +18,9 @@ const UPSTREAM_CATS = ['usMarket', 'supplier'];
  *
  * 查詢條件固定為：
  *   where('cat', 'in', ['usMarket', 'supplier'])
- *   where('pubDate', '>=', taipeiMonthStart(now))
+ *   where('pubDate', '>=', taipeiPrevMonthStart(taipeiMonthStart(now)))
+ *   （2026-10 起改為「本月＋上個月」，讓頁面可以切換到「上月」檢視；
+ *   上個月 1 日正好是 news_cleanup.py 的保留截止點，不會讀到更舊的資料。）
  *   orderBy('pubDate', 'desc')
  * 只查「本月」而不是整個上游分類，理由同 usePRNews：正式資料庫目前只
  * 保留「本月＋上個月」，但單一分類的文件量仍可能達到數千筆。
@@ -55,7 +57,7 @@ export function useUpstreamNews({ enabled = true } = {}) {
     return query(
       collection(db, 'news'),
       where('cat', 'in', UPSTREAM_CATS),
-      where('pubDate', '>=', monthStart),
+      where('pubDate', '>=', taipeiPrevMonthStart(monthStart)),
       orderBy('pubDate', 'desc'),
     );
   }, []);
