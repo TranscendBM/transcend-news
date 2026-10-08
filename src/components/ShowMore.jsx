@@ -20,12 +20,12 @@ export default function ShowMoreButton({ remaining, step, onMore, onAll }) {
   return (
     <div className="flex items-center justify-center gap-2 pt-3">
       <button onClick={onMore}
-        className="text-xs px-3 py-1.5 rounded-lg border border-gray-700/60 text-gray-400 hover:text-gray-200 hover:bg-gray-800 transition">
+        className="text-sm px-3.5 py-1.5 rounded-lg border border-gray-700/60 text-gray-400 hover:text-gray-200 hover:bg-gray-800 transition">
         顯示更多（再 {Math.min(step, remaining)} 則）
       </button>
       {remaining > step && (
         <button onClick={onAll}
-          className="text-xs px-3 py-1.5 rounded-lg text-gray-500 hover:text-gray-200 transition">
+          className="text-sm px-3.5 py-1.5 rounded-lg text-gray-500 hover:text-gray-200 transition">
           全部顯示（尚有 {remaining} 則）
         </button>
       )}

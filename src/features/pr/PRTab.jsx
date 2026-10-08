@@ -184,16 +184,16 @@ export function ManualExposurePanel({
       actions={
         <div className="flex gap-1.5 shrink-0 flex-wrap justify-end">
           <button onClick={onOpenInsights} disabled={records.length === 0}
-            className="text-xs px-2.5 py-1 rounded-lg border border-red-700/50 text-red-400 hover:bg-red-900/20 transition disabled:opacity-40 disabled:cursor-not-allowed">
+            className="text-sm px-3.5 py-1.5 rounded-lg border border-red-700/50 text-red-400 hover:bg-red-900/20 transition disabled:opacity-40 disabled:cursor-not-allowed">
             📊 曝光分析 ›
           </button>
           <button onClick={() => setUploadOpen(open => !open)} aria-expanded={uploadOpen}
-            className="text-xs px-2.5 py-1 rounded-lg border border-gray-700/60 text-gray-400 hover:text-gray-200 hover:bg-gray-800 transition">
+            className="text-sm px-3.5 py-1.5 rounded-lg border border-gray-700/60 text-gray-400 hover:text-gray-200 hover:bg-gray-800 transition">
             {uploadOpen ? '收合上傳' : '⬆ 上傳 Excel'}
           </button>
           <button onClick={() => exportMediaExposureExcel(records)}
             disabled={records.length === 0}
-            className="text-xs px-2.5 py-1 rounded-lg border border-gray-700/60 text-gray-400 hover:text-gray-200 hover:bg-gray-800 transition disabled:opacity-40 disabled:cursor-not-allowed">
+            className="text-sm px-3.5 py-1.5 rounded-lg border border-gray-700/60 text-gray-400 hover:text-gray-200 hover:bg-gray-800 transition disabled:opacity-40 disabled:cursor-not-allowed">
             ⬇ 匯出 Excel
           </button>
         </div>
@@ -458,7 +458,7 @@ export function PRTab({
           actions={
             <button onClick={() => exportNewsExcel(transcendFull, '創見最新報導', '創見最新報導')}
               disabled={transcendFull.length === 0}
-              className="text-xs px-2.5 py-1 rounded-lg border border-gray-700/60 text-gray-400 hover:text-gray-200 hover:bg-gray-800 transition disabled:opacity-40 disabled:cursor-not-allowed shrink-0">
+              className="text-sm px-3.5 py-1.5 rounded-lg border border-gray-700/60 text-gray-400 hover:text-gray-200 hover:bg-gray-800 transition disabled:opacity-40 disabled:cursor-not-allowed shrink-0">
               ⬇ 匯出 Excel
             </button>
           }>

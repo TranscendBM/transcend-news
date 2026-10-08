@@ -133,7 +133,7 @@ export default function MediaExposureUpload({ onImported = () => {} }) {
           placeholder="上傳通行碼" aria-label="上傳通行碼"
           className="sm:w-44 rounded-xl border border-gray-700/60 px-3 py-1.5 text-sm outline-none focus:border-red-700" />
         <button onClick={() => run('check')} disabled={busy || files.length === 0}
-          className="text-xs px-3 py-1.5 rounded-lg border border-gray-700/60 text-gray-300 hover:bg-gray-800 transition disabled:opacity-40 disabled:cursor-not-allowed shrink-0">
+          className="text-sm px-3.5 py-1.5 rounded-lg border border-gray-700/60 text-gray-300 hover:bg-gray-800 transition disabled:opacity-40 disabled:cursor-not-allowed shrink-0">
           {phase === 'checking' ? '檢查中…' : '① 檢查檔案'}
         </button>
       </div>

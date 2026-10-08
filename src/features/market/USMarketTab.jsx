@@ -161,7 +161,7 @@ export function USMarketTab({ upstreamArticles, upstreamStatus, refreshUpstreamN
               `上游市場新聞_${UPSTREAM_TIME_FILTERS.find(f => f.id === timeFilter)?.label}`,
               { 品牌: getUSBrand })}
             disabled={final.length === 0}
-            className="ml-auto text-xs px-2.5 py-1 rounded-lg border border-gray-700/60 text-gray-400 hover:text-gray-200 hover:bg-gray-800 transition disabled:opacity-40 disabled:cursor-not-allowed shrink-0">
+            className="ml-auto text-sm px-3.5 py-1.5 rounded-lg border border-gray-700/60 text-gray-400 hover:text-gray-200 hover:bg-gray-800 transition disabled:opacity-40 disabled:cursor-not-allowed shrink-0">
             ⬇ 匯出 Excel
           </button>
         </div>

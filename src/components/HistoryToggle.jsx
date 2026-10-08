@@ -10,7 +10,7 @@ export default function HistoryToggle({ expanded, onToggle, total, defaultCount,
       : `📜 顯示全部歷史（共 ${total} ${unit}）`;
   return (
     <button onClick={onToggle} disabled={nothingMore} aria-pressed={expanded}
-      className="text-xs px-2.5 py-1 rounded-lg border border-gray-700/60 text-gray-400 hover:text-gray-200 hover:bg-gray-800 transition disabled:opacity-50 disabled:cursor-default shrink-0">
+      className="text-sm px-3.5 py-1.5 rounded-lg border border-gray-700/60 text-gray-400 hover:text-gray-200 hover:bg-gray-800 transition disabled:opacity-50 disabled:cursor-default shrink-0">
       {label}
     </button>
   );

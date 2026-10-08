@@ -33,7 +33,7 @@ export default function CopyChartButton({ containerRef, title, legend, note }) {
 
   return (
     <button onClick={onClick} disabled={state === 'busy'} title={`複製圖表：${title}`}
-      className="text-xs px-2.5 py-1 rounded-lg border border-gray-700/60 text-gray-400 hover:text-gray-200 hover:bg-gray-800 transition disabled:opacity-60 shrink-0">
+      className="text-sm px-3.5 py-1.5 rounded-lg border border-gray-700/60 text-gray-400 hover:text-gray-200 hover:bg-gray-800 transition disabled:opacity-60 shrink-0">
       {label}
     </button>
   );

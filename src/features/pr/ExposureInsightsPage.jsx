@@ -542,7 +542,7 @@ export default function ExposureInsightsPage({ records = [], autoArticles = [], 
           )}
         </div>
         <button onClick={() => exportExposureInsightsExcel(ins)} disabled={ins.empty}
-          className="ml-auto text-xs px-2.5 py-1 rounded-lg border border-gray-700/60 text-gray-400 hover:text-gray-200 hover:bg-gray-800 transition disabled:opacity-40 disabled:cursor-not-allowed">
+          className="ml-auto text-sm px-3.5 py-1.5 rounded-lg border border-gray-700/60 text-gray-400 hover:text-gray-200 hover:bg-gray-800 transition disabled:opacity-40 disabled:cursor-not-allowed">
           ⬇ 匯出分析 Excel
         </button>
       </div>
