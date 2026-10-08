@@ -7,6 +7,7 @@ const exportMediaExposureExcel = vi.fn();
 vi.mock('./utils/formatting.js', () => ({
   exportNewsExcel: (...args) => exportNewsExcel(...args),
   exportMediaExposureExcel: (...args) => exportMediaExposureExcel(...args),
+  exportExposureInsightsExcel: vi.fn(),
 }));
 
 import { PRTab } from './features/pr/PRTab.jsx';
@@ -262,5 +263,28 @@ describe('PRTab — 人工確認曝光放在頁面最下方並提供上傳', () 
     expect(screen.getByLabelText('上傳通行碼')).toBeTruthy();
     fireEvent.click(screen.getByText('收合上傳'));
     expect(screen.queryByLabelText('上傳通行碼')).toBeNull();
+  });
+});
+
+describe('PRTab — 人工確認曝光分析（下一頁）', () => {
+  const manual = [{
+    id: 'e1', title: '人工確認新聞', mediaName: '經濟日報', reporter: '王記者',
+    exposureDate: taipei(2026, 8, 3, 10), link: 'https://example.com/e1', exposureType: 'online',
+  }];
+
+  it('沒有人工確認資料時，「曝光分析」按鈕停用', () => {
+    renderPRTab({ mediaExposureStatus: 'ready' });
+    expect(screen.getByText('📊 曝光分析 ›').disabled).toBe(true);
+  });
+
+  it('按「曝光分析」切到分析頁（PR 主頁內容隱藏），按返回回到 PR 主頁', () => {
+    renderPRTab({ mediaExposure: manual, mediaExposureStatus: 'ready' });
+    fireEvent.click(screen.getByText('📊 曝光分析 ›'));
+    expect(screen.getByText('人工確認曝光分析')).toBeTruthy();
+    expect(screen.queryByText('重點媒體曝光監控')).toBeNull();
+
+    fireEvent.click(screen.getByText('← 返回 PR 媒體戰情'));
+    expect(screen.queryByText('人工確認曝光分析')).toBeNull();
+    expect(screen.getByText('重點媒體曝光監控')).toBeTruthy();
   });
 });

@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import * as XLSX from 'xlsx';
-import { exportNewsExcel, exportMediaExposureExcel } from './formatting.js';
+import { exportNewsExcel, exportMediaExposureExcel, exportExposureInsightsExcel } from './formatting.js';
+import { buildExposureInsights } from '../features/pr/exposureInsights.js';
 
 // 只 mock 真的會操作檔案系統／觸發瀏覽器下載的部分（writeFile），
 // json_to_sheet / book_new / book_append_sheet 都是 xlsx 真正的資料轉換
@@ -98,5 +99,34 @@ describe('exportMediaExposureExcel', () => {
     }]);
     expect(JSON.stringify(rows)).not.toContain('不可公開的內部備註');
     expect(filename).toMatch(/^人工確認曝光_\d{8}\.xlsx$/);
+  });
+});
+
+describe('exportExposureInsightsExcel', () => {
+  beforeEach(() => { vi.clearAllMocks(); });
+  const tw = (m, d) => new Date(Date.UTC(2026, m - 1, d, 4));
+  const ins = buildExposureInsights([
+    { exposureDate: tw(7, 6), mediaName: '經濟日報', reporter: '王一', title: '創見營收創新高', link: 'https://e.com/1' },
+    { exposureDate: tw(8, 5), mediaName: '經濟日報', reporter: '王一', title: '創見7月營收', link: 'https://e.com/2' },
+    { exposureDate: tw(8, 6), mediaName: '鉅亨網', reporter: '', title: '創見新品', link: 'https://e.com/3' },
+  ]);
+
+  it('沒有資料時不下載', async () => {
+    await exportExposureInsightsExcel(buildExposureInsights([]));
+    expect(XLSX.writeFile).not.toHaveBeenCalled();
+  });
+
+  it('輸出月趨勢、媒體×月、記者×月、題材×月四張工作表，月份是欄位', async () => {
+    await exportExposureInsightsExcel(ins);
+    const [wb, filename] = XLSX.writeFile.mock.calls[0];
+    expect(wb.SheetNames).toEqual(['月趨勢', '媒體×月', '記者×月', '題材×月']);
+    expect(filename).toMatch(/^人工確認曝光分析_\d{8}\.xlsx$/);
+
+    const media = XLSX.utils.sheet_to_json(wb.Sheets['媒體×月']);
+    expect(media[0]).toMatchObject({ 媒體: '經濟日報', '2026-07': 1, '2026-08': 1, 合計: 2, 主力記者: '王一' });
+    const reporters = XLSX.utils.sheet_to_json(wb.Sheets['記者×月']);
+    expect(reporters).toHaveLength(1);                 // 未署名不列入記者表
+    const monthly = XLSX.utils.sheet_to_json(wb.Sheets['月趨勢']);
+    expect(monthly.map(m => m.曝光篇數)).toEqual([1, 2]);
   });
 });

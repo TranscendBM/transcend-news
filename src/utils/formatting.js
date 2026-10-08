@@ -55,3 +55,33 @@ export async function exportMediaExposureExcel(records) {
   const stamp = `${today.getFullYear()}${String(today.getMonth() + 1).padStart(2, '0')}${String(today.getDate()).padStart(2, '0')}`;
   XLSX.writeFile(wb, `人工確認曝光_${stamp}.xlsx`);
 }
+
+// 人工確認曝光分析 → Excel：月趨勢／媒體×月／記者×月／題材×月，各一張工作表。
+export async function exportExposureInsightsExcel(ins) {
+  if (!ins || ins.empty) return;
+  const XLSX = await import('xlsx');
+  const wb = XLSX.utils.book_new();
+  const add = (name, rows, widths) => {
+    const sheet = XLSX.utils.json_to_sheet(rows);
+    if (widths) sheet['!cols'] = widths.map(wch => ({ wch }));
+    XLSX.utils.book_append_sheet(wb, sheet, name);
+  };
+  const perMonth = byMonth => Object.fromEntries(ins.months.map(m => [m, byMonth[m] || 0]));
+  add('月趨勢', ins.monthly.map(m => ({
+    月份: m.month, 曝光篇數: m.count, 媒體數: m.mediaCount, 具名記者數: m.reporterCount, 未署名篇數: m.unsignedCount,
+  })));
+  add('媒體×月', ins.media.map(m => ({
+    媒體: m.name, 類型: m.category, ...perMonth(m.byMonth), 合計: m.total, 佔比: +(m.share * 100).toFixed(1) + '%',
+    記者數: m.reporterCount, 主力記者: m.topReporter || '', 最近報導: m.lastDate.toLocaleDateString('zh-TW', { timeZone: 'Asia/Taipei' }),
+  })), [18, 10]);
+  add('記者×月', ins.reporters.map(r => ({
+    記者: r.name, 媒體: r.media.map(x => x.name + '(' + x.count + ')').join('、'), ...perMonth(r.byMonth), 合計: r.total,
+    最近報導: r.lastDate.toLocaleDateString('zh-TW', { timeZone: 'Asia/Taipei' }),
+  })), [12, 28]);
+  add('題材×月', ins.topics.map(t => ({
+    題材: t.label, ...perMonth(t.byMonth), 合計: t.total, 佔比: +(t.share * 100).toFixed(1) + '%',
+  })), [16]);
+  const today = new Date();
+  const stamp = today.getFullYear() + String(today.getMonth() + 1).padStart(2, '0') + String(today.getDate()).padStart(2, '0');
+  XLSX.writeFile(wb, '人工確認曝光分析_' + stamp + '.xlsx');
+}

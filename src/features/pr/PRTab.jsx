@@ -7,6 +7,7 @@ import NewsFilterToolbar from '../../components/filters/NewsFilterToolbar.jsx';
 import NewsCard from '../news/NewsCard.jsx';
 import TodayBriefing from '../intelligence/TodayBriefing.jsx';
 import MediaExposureUpload from './MediaExposureUpload.jsx';
+import ExposureInsightsPage from './ExposureInsightsPage.jsx';
 import { useNow } from '../../hooks/useNow.js';
 import { exportNewsExcel, exportMediaExposureExcel } from '../../utils/formatting.js';
 import {
@@ -168,7 +169,9 @@ function exposureDate(record) {
     : new Date(record.exposureDate || 0);
 }
 
-export function ManualExposurePanel({ records = [], status = 'idle', onRetry = () => {}, onImported = () => {} }) {
+export function ManualExposurePanel({
+  records = [], status = 'idle', onRetry = () => {}, onImported = () => {}, onOpenInsights = () => {},
+}) {
   const [uploadOpen, setUploadOpen] = useState(false);
   const now = useNow();
   const monthStart = taipeiMonthStart(now);
@@ -179,7 +182,11 @@ export function ManualExposurePanel({ records = [], status = 'idle', onRetry = (
   return (
     <Card title="人工確認曝光" icon="✓"
       actions={
-        <div className="flex gap-1.5 shrink-0">
+        <div className="flex gap-1.5 shrink-0 flex-wrap justify-end">
+          <button onClick={onOpenInsights} disabled={records.length === 0}
+            className="text-xs px-2.5 py-1 rounded-lg border border-red-700/50 text-red-400 hover:bg-red-900/20 transition disabled:opacity-40 disabled:cursor-not-allowed">
+            📊 曝光分析 ›
+          </button>
           <button onClick={() => setUploadOpen(open => !open)} aria-expanded={uploadOpen}
             className="text-xs px-2.5 py-1 rounded-lg border border-gray-700/60 text-gray-400 hover:text-gray-200 hover:bg-gray-800 transition">
             {uploadOpen ? '收合上傳' : '⬆ 上傳 Excel'}
@@ -369,6 +376,12 @@ export function PRTab({
   const [prQuery, setPrQuery] = useState('');
   const [prMedia, setPrMedia] = useState('all');
   const [prSentiment, setPrSentiment] = useState('all');
+  // 'main'＝PR 媒體戰情主頁；'insights'＝人工確認曝光分析（下一頁）
+  const [view, setView] = useState('main');
+  const goView = next => {
+    setView(next);
+    try { window.scrollTo(0, 0); } catch { /* 非瀏覽器環境略過 */ }
+  };
 
   // 所有有效創見 PR 文章（已排除 CMoney / 券商明細），並在這裡就先去重
   // （dedupeArticlesByTitle）——同一則報導可能因為不同 RSS/搜尋條件被
@@ -414,6 +427,12 @@ export function PRTab({
   // Excel 匯出用上面未截斷的 transcendFull，兩者不是同一份陣列。
   const more = useShowMore(transcendFull, 50, [timeFilter, prQuery, prMedia, prSentiment]);
   const transcend = more.shown;
+
+  if (view === 'insights') {
+    return (
+      <ExposureInsightsPage records={mediaExposure} autoArticles={prArticles} onBack={() => goView('main')} />
+    );
+  }
 
   return (
     <div className="space-y-4 fade-in">
@@ -484,6 +503,7 @@ export function PRTab({
         status={mediaExposureStatus}
         onRetry={refreshMediaExposure}
         onImported={refreshMediaExposure}
+        onOpenInsights={() => goView('insights')}
       />
     </div>
   );
