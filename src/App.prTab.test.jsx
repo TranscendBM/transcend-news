@@ -1,3 +1,4 @@
+/* global Node */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, fireEvent, within } from '@testing-library/react';
 
@@ -6,6 +7,7 @@ const exportMediaExposureExcel = vi.fn();
 vi.mock('./utils/formatting.js', () => ({
   exportNewsExcel: (...args) => exportNewsExcel(...args),
   exportMediaExposureExcel: (...args) => exportMediaExposureExcel(...args),
+  exportExposureInsightsExcel: vi.fn(),
 }));
 
 import { PRTab } from './features/pr/PRTab.jsx';
@@ -92,7 +94,7 @@ describe('PRTab — 查詢失敗顯示明確錯誤，可重試', () => {
     const refreshPRNews = vi.fn();
     renderPRTab({ prArticles: [], prStatus: 'error', refreshPRNews });
 
-    expect(screen.getByText('⚠ 報導載入失敗')).toBeTruthy();
+    expect(screen.getByText('報導載入失敗')).toBeTruthy();
     fireEvent.click(screen.getByText('重試'));
     expect(refreshPRNews).toHaveBeenCalledTimes(1);
   });
@@ -141,7 +143,7 @@ describe('PRTab — 篩選工具列（搜尋／媒體／情緒）', () => {
     // 卡片內查找，避免跟媒體篩選下拉選單裡的同名選項搞混。
     const keyMediaCard = screen.getByText('重點媒體曝光監控').closest('.bg-gray-900');
     const row = within(keyMediaCard).getByText('電子時報').closest('.group');
-    expect(row.textContent).toBe('1電子時報Digitimes1');
+    expect(row.textContent).toBe('1電子時報Digitimes10'); // 本月 1、上月 0
   });
 
   it('sentiment filter affects the list and the stats count', () => {
@@ -191,7 +193,7 @@ describe('PRTab — Excel 匯出符合目前搜尋條件、媒體、情緒與期
     // earlierThisMonth（已被期間篩選排除）。
     fireEvent.change(screen.getByLabelText('依媒體篩選'), { target: { value: '正常媒體' } });
 
-    fireEvent.click(within(card).getByText('⬇ 匯出 Excel'));
+    fireEvent.click(within(card).getByText('匯出 Excel'));
     expect(exportNewsExcel).toHaveBeenCalledTimes(1);
     const [exported] = exportNewsExcel.mock.calls[0];
     expect(exported.map(a => a.id)).toEqual(['today1']);
@@ -240,7 +242,49 @@ describe('PRTab — 人工確認曝光與自動新聞分開呈現', () => {
     };
     renderPRTab({ mediaExposure: [manual], mediaExposureStatus: 'ready' });
     const card = screen.getByText('人工確認曝光').closest('.bg-gray-900');
-    fireEvent.click(within(card).getByText('⬇ 匯出 Excel'));
+    fireEvent.click(within(card).getByText('匯出 Excel'));
     expect(exportMediaExposureExcel).toHaveBeenCalledWith([manual]);
+  });
+});
+
+describe('PRTab — 人工確認曝光放在頁面最下方並提供上傳', () => {
+  it('人工確認曝光是頁面上最後一張卡片，在重點媒體曝光監控之後', () => {
+    renderPRTab({ prArticles: [], mediaExposureStatus: 'ready' });
+    const media = screen.getByText('重點媒體曝光監控').closest('.bg-gray-900');
+    const manual = screen.getByText('人工確認曝光').closest('.bg-gray-900');
+    expect(media.compareDocumentPosition(manual) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(manual.parentElement.lastElementChild).toBe(manual);
+  });
+
+  it('預設不顯示上傳區，按「上傳 Excel」才展開，再按一次收合', () => {
+    renderPRTab({ mediaExposureStatus: 'ready' });
+    expect(screen.queryByLabelText('上傳通行碼')).toBeNull();
+    fireEvent.click(screen.getByText('上傳 Excel'));
+    expect(screen.getByLabelText('上傳通行碼')).toBeTruthy();
+    fireEvent.click(screen.getByText('收合上傳'));
+    expect(screen.queryByLabelText('上傳通行碼')).toBeNull();
+  });
+});
+
+describe('PRTab — 人工確認曝光分析（下一頁）', () => {
+  const manual = [{
+    id: 'e1', title: '人工確認新聞', mediaName: '經濟日報', reporter: '王記者',
+    exposureDate: taipei(2026, 8, 3, 10), link: 'https://example.com/e1', exposureType: 'online',
+  }];
+
+  it('沒有人工確認資料時，「曝光分析」按鈕停用', () => {
+    renderPRTab({ mediaExposureStatus: 'ready' });
+    expect(screen.getByText('曝光分析').disabled).toBe(true);
+  });
+
+  it('按「曝光分析」切到分析頁（PR 主頁內容隱藏），按返回回到 PR 主頁', () => {
+    renderPRTab({ mediaExposure: manual, mediaExposureStatus: 'ready' });
+    fireEvent.click(screen.getByText('曝光分析'));
+    expect(screen.getByText('人工確認曝光分析')).toBeTruthy();
+    expect(screen.queryByText('重點媒體曝光監控')).toBeNull();
+
+    fireEvent.click(screen.getByText('返回 PR 媒體戰情'));
+    expect(screen.queryByText('人工確認曝光分析')).toBeNull();
+    expect(screen.getByText('重點媒體曝光監控')).toBeTruthy();
   });
 });

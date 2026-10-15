@@ -43,7 +43,7 @@ export default function TodayBriefing({ articles, title = '今日情報快報' }
   };
 
   return (
-    <Card title={title} icon="☀️">
+    <Card title={title} icon="sun">
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 -mt-1 mb-3">
         <p className="text-xs text-gray-500">今天的重要消息與建議下一步</p>
         <span className="text-xs px-2 py-1 rounded-full bg-gray-800 text-gray-500 whitespace-nowrap">規則分析 · 零 API 費用</span>

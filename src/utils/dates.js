@@ -97,6 +97,33 @@ export function taipeiMonthStart(now = new Date()) {
   return taipeiInstant(year, month, 1);
 }
 
+/** 台灣時間「上個月 1 日」00:00 對應的實際時刻（跟 news_cleanup.py 的保留截止點一致）。 */
+export function taipeiPrevMonthStart(now = new Date()) {
+  const { year, month } = taipeiPartsOf(now);
+  return taipeiInstant(year, month - 1, 1);
+}
+
+/**
+ * 今天／本週／本月／上月 的 [start, end) 區間。end 為 null 代表到現在為止；
+ * 上月的 end 是本月 1 日，避免本月的新聞混進上月。
+ */
+export function taipeiPeriodRange(period, now = new Date()) {
+  switch (period) {
+    case 'today': return { start: taipeiDayStart(now), end: null };
+    case 'week': return { start: taipeiWeekStart(now), end: null };
+    case 'month': return { start: taipeiMonthStart(now), end: null };
+    case 'lastMonth': return { start: taipeiPrevMonthStart(now), end: taipeiMonthStart(now) };
+    default: throw new Error(`unknown period: ${period}`);
+  }
+}
+
+/** pubDate 是否落在 taipeiPeriodRange 回傳的區間內。 */
+export function inPeriod(article, range) {
+  const p = article.pubDate;
+  const d = p?.toDate ? p.toDate() : new Date(p || 0);
+  return d >= range.start && (!range.end || d < range.end);
+}
+
 export function sortByDate(arr) {
   return [...arr].sort((a, b) => {
     const da = a.pubDate?.toDate ? a.pubDate.toDate() : new Date(a.pubDate || 0);

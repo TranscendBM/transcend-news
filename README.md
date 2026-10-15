@@ -280,6 +280,34 @@ Firestore，也不在報告中輸出新聞標題、內部備註等內容。正�
 總數、涵蓋媒體與最近紀錄，刻意不把人工確認數靜默加進自動新聞監測統計，
 避免同一曝光被誤算兩次。匯出功能也只使用公開欄位，不會包含內部備註。
 
+### 網站上傳（PR 頁面最下方「人工確認曝光」→「⬆ 上傳 Excel」）
+
+不用開指令列，直接在網站選 .xlsx 檔（可一次多個）上傳：
+
+1. **① 檢查檔案**：只解析、不寫入，回報讀到幾列、不重複幾筆、新增／已存在各幾筆、
+   各月筆數、無效列的位置與原因（等同 CLI 的 dry-run）。
+2. **② 確認匯入**：有無效列時必須勾選「確認略過」，送出的略過數要跟檢查結果一致
+   （等同 CLI 的 `--approve-skipping-invalid`）。
+
+架構：網站沒有登入機制、Firestore 也禁止客戶端寫入，所以上傳走 Cloud Function
+`upload_media_exposure`（`functions/main.py` → `functions/media_exposure_upload.py`），
+由 Hosting rewrite（`firebase.json`）把 `/api/media-exposure` 轉進去，並以
+**上傳通行碼**把關：Secret Manager 的 `MEDIA_EXPOSURE_UPLOAD_PASSCODE`，沒有通行碼
+無法解析也無法寫入（錯誤時延遲 1.5 秒回應）。限制：最多 6 個檔案、每檔 4 MB、
+合計 8 MB、單次 5,000 筆。解析／去重／媒體名稱對照與 CLI 共用
+`functions/media_exposure.py`，兩種匯入方式產生的文件 ID 一致，混用不會重複。
+
+更換通行碼：
+
+```bash
+printf '%s' '新的通行碼' > /tmp/pass.txt
+firebase functions:secrets:set MEDIA_EXPOSURE_UPLOAD_PASSCODE --data-file /tmp/pass.txt --force
+firebase deploy --only functions:upload_media_exposure   # 讓函式讀到新版本
+rm /tmp/pass.txt
+```
+
+本機 `npm run dev` 時，`/api` 會由 `vite.config.js` 轉到線上網站，所以上傳會真的寫入正式資料庫。
+
 ## 🌐 上游市場新聞（`src/features/news/useUpstreamNews.js`）
 
 上游市場分頁（供應鏈＋ DRAM/Flash 市場）的統計卡片、品牌篩選、「創見最新

@@ -15,6 +15,12 @@
     {
       "target": "main",
       "public": "dist",
+      "rewrites": [
+        {
+          "source": "/api/media-exposure",
+          "function": { "functionId": "upload_media_exposure", "region": "asia-east1" }
+        }
+      ],
       "ignore": [
         "firebase.json",
         "**/.*",

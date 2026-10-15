@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 
 import Card from '../../components/Card.jsx';
+import Icon from '../../components/Icon.jsx';
 import { getDb, collection, doc, getDoc, getDocs, query, orderBy, limit } from '../../services/firebase.js';
 
 // 排程總覽（跟 functions/main.py 的實際排程設定同步維護）——
@@ -75,13 +76,13 @@ function dataFreshnessNote(jobKey, dataDoc, now) {
 
 function StatusBadge({ level }) {
   const cfg = {
-    ok: { icon: '🟢', text: '正常', cls: 'text-green-400' },
-    warn: { icon: '🟡', text: '資料偏舊', cls: 'text-yellow-400' },
-    stale: { icon: '🟡', text: '過期', cls: 'text-yellow-400' },
-    error: { icon: '🔴', text: '執行失敗', cls: 'text-red-400' },
-    unknown: { icon: '⚪', text: '尚無紀錄', cls: 'text-gray-500' },
-  }[level] || { icon: '⚪', text: '尚無紀錄', cls: 'text-gray-500' };
-  return <span className={`inline-flex items-center gap-1 text-sm font-semibold ${cfg.cls}`}>{cfg.icon} {cfg.text}</span>;
+    ok: { text: '正常', cls: 'text-green-400' },
+    warn: { text: '資料偏舊', cls: 'text-yellow-400' },
+    stale: { text: '過期', cls: 'text-yellow-400' },
+    error: { text: '執行失敗', cls: 'text-red-400' },
+    unknown: { text: '尚無紀錄', cls: 'text-gray-500' },
+  }[level] || { text: '尚無紀錄', cls: 'text-gray-500' };
+  return <span className={`inline-flex items-center gap-1 text-sm font-semibold ${cfg.cls}`}><Icon name="dot" className="text-[1.3em]" />{cfg.text}</span>;
 }
 
 function JobRow({ job, statusDoc, dataDoc, now }) {
@@ -110,13 +111,13 @@ function JobRow({ job, statusDoc, dataDoc, now }) {
       </p>
       {hasError && (
         <p className="text-xs text-red-400/90 mt-1 break-all">
-          ⚠ {statusDoc.lastError}
+          <Icon name="alert" /> {statusDoc.lastError}
           {statusDoc.lastErrorAt && ` （${fmtAgo(tsToMs(statusDoc.lastErrorAt), now)}）`}
         </p>
       )}
       {freshness && (
         <p className={`text-xs mt-1 ${freshness.level === 'ok' ? 'text-gray-600' : 'text-yellow-500/90'}`}>
-          {freshness.level === 'ok' ? '✓' : '⚠'} {freshness.text}
+          {freshness.level === 'ok' ? <Icon name="check" /> : <Icon name="alert" />} {freshness.text}
         </p>
       )}
     </div>
@@ -160,7 +161,7 @@ function AiWorkerRow({ statusDoc, now }) {
       </p>
       {looksDown && (
         <p className="text-xs text-yellow-500/90 mt-1">
-          ⚠ 有積壓工作但很久沒有新的分析結果，本機 worker 可能沒有在執行
+          <Icon name="alert" /> 有積壓工作但很久沒有新的分析結果，本機 worker 可能沒有在執行
         </p>
       )}
     </div>
@@ -213,7 +214,7 @@ export function HealthTab() {
 
   return (
     <div className="space-y-4 fade-in">
-      <Card title="排程健康狀態" icon="🩺"
+      <Card title="排程健康狀態" icon="activity"
         actions={
           <button onClick={load} disabled={loading}
             className="text-xs px-2.5 py-1 rounded-lg border border-gray-700/60 text-gray-400 hover:text-gray-200 hover:bg-gray-800 transition disabled:opacity-40">
@@ -225,7 +226,7 @@ export function HealthTab() {
           各排程實際成功/失敗紀錄每天由 Cloud Functions 寫入，這裡不是即時監控，是每次開啟這頁時查詢一次目前狀態。
         </p>
         {error ? (
-          <div className="h-20 flex items-center justify-center text-red-400 text-sm">⚠ 載入失敗，請重試</div>
+          <div className="h-20 flex items-center justify-center text-red-400 text-sm"><Icon name="alert" /> 載入失敗，請重試</div>
         ) : loading && !jobStatus ? (
           <div className="h-20 flex items-center justify-center text-gray-600 text-sm">載入中…</div>
         ) : (

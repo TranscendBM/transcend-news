@@ -2,16 +2,23 @@ import { useState, useMemo } from 'react';
 
 import Card from '../../components/Card.jsx';
 import TabBtn from '../../components/TabBtn.jsx';
+import ShowMoreButton, { useShowMore } from '../../components/ShowMore.jsx';
 import NewsFilterToolbar from '../../components/filters/NewsFilterToolbar.jsx';
 import NewsCard from '../news/NewsCard.jsx';
 import TodayBriefing from '../intelligence/TodayBriefing.jsx';
+import MediaExposureUpload from './MediaExposureUpload.jsx';
+import ExposureInsightsPage from './ExposureInsightsPage.jsx';
 import { useNow } from '../../hooks/useNow.js';
 import { exportNewsExcel, exportMediaExposureExcel } from '../../utils/formatting.js';
-import { sortByDate, taipeiDayStart, taipeiWeekStart, taipeiMonthStart } from '../../utils/dates.js';
+import {
+  sortByDate, taipeiDayStart, taipeiWeekStart, taipeiMonthStart, taipeiPeriodRange, inPeriod,
+} from '../../utils/dates.js';
 import {
   BRAND, KEY_MEDIA, dedupeArticlesByTitle, isValidTranscendPR,
   isBriefingCandidate, filterNewsList,
 } from '../../utils/news.js';
+import Icon from '../../components/Icon.jsx';
+import { tagClass } from '../../components/tagStyles.js';
 import { COMPETITORS } from '../../config/competitors.js';
 
 // ═══════════════════════════════════════════════════════════
@@ -40,23 +47,25 @@ export function PRStatsPanel({ articles, status = 'ready' }) {
     today: articles.filter(n => getD(n) >= todayStart).length,
     week: articles.filter(n => getD(n) >= weekStart).length,
     month: articles.filter(n => getD(n) >= monthStart).length,
+    lastMonth: articles.filter(n => inPeriod(n, taipeiPeriodRange('lastMonth', now))).length,
   };
 
   const PERIODS = [
     { label: '今天', val: counts.today, color: '#dc2626' },
     { label: '本週', val: counts.week, color: '#ea580c' },
     { label: '本月', val: counts.month, color: '#ca8a04' },
+    { label: '上月', val: counts.lastMonth, color: '#6b7280' },
   ];
 
   return (
     <div className="space-y-4">
       {/* 3 個統計卡片：查詢失敗時明確顯示錯誤，不悄悄顯示 0 */}
-      <div className="grid grid-cols-3 gap-3">
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
         {PERIODS.map(p => (
           <div key={p.label} className="bg-gray-900 border border-gray-700/60 rounded-2xl p-4 text-center">
             <p className="text-xs text-gray-500 mb-1">媒體曝光｜{p.label}</p>
             {status === 'error' ? (
-              <p className="text-sm text-red-400 mt-1">⚠ 載入失敗</p>
+              <p className="text-sm text-red-400 mt-1"><Icon name="alert" /> 載入失敗</p>
             ) : status === 'loading' ? (
               <p className="text-sm text-gray-600 mt-1">載入中…</p>
             ) : (
@@ -88,34 +97,38 @@ export function KeyMediaPanel({ articles, status = 'ready' }) {
   // 只依賴 [articles] 的 memo 卡在舊邊界。
   const stats = (() => {
     const monthArticles = articles.filter(n => getD(n) >= monthStart);
+    const lastMonthArticles = articles.filter(n => inPeriod(n, taipeiPeriodRange('lastMonth', now)));
     const mTotal = monthArticles.length || 1;
+    const countFor = (list, km) => list.filter(n =>
+      (n.mediaName || n.sourceName || '').includes(km.name)).length;
 
     return KEY_MEDIA.map(km => {
-      const monthCount = monthArticles.filter(n =>
-        (n.mediaName || n.sourceName || '').includes(km.name)).length;
+      const monthCount = countFor(monthArticles, km);
       return {
         ...km,
         monthCount,
         monthPct: Math.round(monthCount / mTotal * 100),
+        lastMonthCount: countFor(lastMonthArticles, km),
       };
-    }).sort((a, b) => b.monthCount - a.monthCount);
+    }).sort((a, b) => b.monthCount - a.monthCount || b.lastMonthCount - a.lastMonthCount);
   })();
 
   const maxMonth = Math.max(...stats.map(s => s.monthCount), 1);
 
   if (status === 'error') {
     return (
-      <Card title="重點媒體曝光監控" icon="🎯">
-        <div className="text-sm text-red-400 text-center py-6">⚠ 資料載入失敗，請稍後重新整理</div>
+      <Card title="重點媒體曝光監控" icon="target">
+        <div className="text-sm text-red-400 text-center py-6"><Icon name="alert" /> 資料載入失敗，請稍後重新整理</div>
       </Card>
     );
   }
 
   return (
-    <Card title="重點媒體曝光監控" icon="🎯">
+    <Card title="重點媒體曝光監控" icon="target">
       <div className="flex items-center gap-4 mb-3 text-xs text-gray-500">
-        <span>本月累計曝光篇數（各媒體佔比）</span>
-        <span className="ml-auto w-12 text-right">本月</span>
+        <span>本月／上月累計曝光篇數</span>
+        <span className="ml-auto w-8 text-right">本月</span>
+        <span className="w-8 text-right">上月</span>
       </div>
       <div className="space-y-2.5">
         {stats.map((s, i) => (
@@ -135,12 +148,15 @@ export function KeyMediaPanel({ articles, status = 'ready' }) {
               <span className={`text-xs tabular-nums w-8 text-right font-bold ${s.monthCount > 0 ? 'text-ink' : 'text-gray-600'}`}>
                 {s.monthCount}
               </span>
+              <span className="text-xs tabular-nums w-8 text-right text-gray-500">
+                {s.lastMonthCount}
+              </span>
             </div>
           </div>
         ))}
       </div>
       <p className="text-xs text-gray-700 mt-3 text-right">
-        本月各媒體篇數{status === 'loading' ? '（載入中…）' : ''}
+        本月／上月各媒體篇數{status === 'loading' ? '（載入中…）' : ''}
       </p>
     </Card>
   );
@@ -155,7 +171,10 @@ function exposureDate(record) {
     : new Date(record.exposureDate || 0);
 }
 
-export function ManualExposurePanel({ records = [], status = 'idle', onRetry = () => {} }) {
+export function ManualExposurePanel({
+  records = [], status = 'idle', onRetry = () => {}, onImported = () => {}, onOpenInsights = () => {},
+}) {
+  const [uploadOpen, setUploadOpen] = useState(false);
   const now = useNow();
   const monthStart = taipeiMonthStart(now);
   const monthRecords = records.filter(record => exposureDate(record) >= monthStart);
@@ -163,21 +182,33 @@ export function ManualExposurePanel({ records = [], status = 'idle', onRetry = (
   const latest = records.slice(0, 12);
 
   return (
-    <Card title="人工確認曝光" icon="✓"
+    <Card title="人工確認曝光" icon="checkcircle"
       actions={
-        <button onClick={() => exportMediaExposureExcel(records)}
-          disabled={records.length === 0}
-          className="text-xs px-2.5 py-1 rounded-lg border border-gray-700/60 text-gray-400 hover:text-gray-200 hover:bg-gray-800 transition disabled:opacity-40 disabled:cursor-not-allowed shrink-0">
-          ⬇ 匯出 Excel
-        </button>
+        <div className="flex gap-1.5 shrink-0 flex-wrap justify-end">
+          <button onClick={onOpenInsights} disabled={records.length === 0}
+            className="text-sm px-3.5 py-1.5 rounded-lg border border-red-700/50 text-red-400 hover:bg-red-900/20 transition disabled:opacity-40 disabled:cursor-not-allowed">
+            <Icon name="chart" /> 曝光分析 <Icon name="chevronright" />
+          </button>
+          <button onClick={() => setUploadOpen(open => !open)} aria-expanded={uploadOpen}
+            className="text-sm px-3.5 py-1.5 rounded-lg border border-gray-700/60 text-gray-400 hover:text-gray-200 hover:bg-gray-800 transition">
+            {uploadOpen ? '收合上傳' : <><Icon name="upload" /> 上傳 Excel</>}
+          </button>
+          <button onClick={() => exportMediaExposureExcel(records)}
+            disabled={records.length === 0}
+            className="text-sm px-3.5 py-1.5 rounded-lg border border-gray-700/60 text-gray-400 hover:text-gray-200 hover:bg-gray-800 transition disabled:opacity-40 disabled:cursor-not-allowed">
+            <Icon name="download" /> 匯出 Excel
+          </button>
+        </div>
       }>
       <p className="text-xs text-gray-500 mb-4">
         新聞稿發布後由同仁人工核對的實際曝光。此區與自動新聞監測分開統計，內部備註不會顯示在網站。
       </p>
 
+      {uploadOpen && <MediaExposureUpload onImported={onImported} />}
+
       {status === 'error' ? (
         <div className="py-8 text-center text-sm text-red-400">
-          <p>⚠ 人工曝光載入失敗</p>
+          <p><Icon name="alert" /> 人工曝光載入失敗</p>
           <button onClick={onRetry}
             className="mt-2 text-xs px-3 py-1 rounded-lg border border-red-700/60 text-red-300 hover:bg-red-900/30 transition">
             重試
@@ -206,7 +237,7 @@ export function ManualExposurePanel({ records = [], status = 'idle', onRetry = (
                 const date = exposureDate(record);
                 return (
                   <div key={record.id} className="py-2.5 flex gap-3 items-start">
-                    <span className="text-xs px-2 py-0.5 rounded-full bg-green-900/30 text-green-500 shrink-0">
+                    <span className={tagClass('green', 'shrink-0')}>
                       人工確認
                     </span>
                     <div className="min-w-0 flex-1">
@@ -276,11 +307,12 @@ function CompetitorNews({ news }) {
         const d = n.pubDate?.toDate ? n.pubDate.toDate() : new Date(n.pubDate || 0);
         return d >= cutoff;
       })
-    )).slice(0, 80);
+    ));
   }, [news, active, timeFilter]);
+  const more = useShowMore(filtered, 80, [active, timeFilter]);
 
   return (
-    <Card title="競品動態監測" icon="🔍" className="h-full">
+    <Card title="競品動態監測" icon="search" className="h-full">
       {/* Brand tabs — 全部 + 各品牌 */}
       <div className="flex flex-wrap gap-1.5 mb-2">
         <TabBtn active={active === 'all'} onClick={() => setActive('all')}>
@@ -303,7 +335,10 @@ function CompetitorNews({ news }) {
       </div>
 
       {filtered.length > 0
-        ? <div className="space-y-2">{filtered.map((n, i) => <NewsCard key={n.id || i} article={n} />)}</div>
+        ? <>
+            <div className="space-y-2">{more.shown.map((n, i) => <NewsCard key={n.id || i} article={n} />)}</div>
+            <ShowMoreButton remaining={more.remaining} step={80} onMore={more.showMore} onAll={more.showAll} />
+          </>
         : <p className="text-sm text-gray-600 text-center py-8">
             {active === 'all' ? '暫無競品報導' : `暫無 ${comp?.name} 相關報導`}
           </p>
@@ -320,6 +355,7 @@ const PR_LIST_TIME_FILTERS = [
   { id: 'today', label: '今天' },
   { id: 'week', label: '本週' },
   { id: 'month', label: '本月' },
+  { id: 'lastMonth', label: '上月' },
 ];
 
 // ═══════════════════════════════════════════════════════════
@@ -342,6 +378,12 @@ export function PRTab({
   const [prQuery, setPrQuery] = useState('');
   const [prMedia, setPrMedia] = useState('all');
   const [prSentiment, setPrSentiment] = useState('all');
+  // 'main'＝PR 媒體戰情主頁；'insights'＝人工確認曝光分析（下一頁）
+  const [view, setView] = useState('main');
+  const goView = next => {
+    setView(next);
+    try { window.scrollTo(0, 0); } catch { /* 非瀏覽器環境略過 */ }
+  };
 
   // 所有有效創見 PR 文章（已排除 CMoney / 券商明細），並在這裡就先去重
   // （dedupeArticlesByTitle）——同一則報導可能因為不同 RSS/搜尋條件被
@@ -379,28 +421,27 @@ export function PRTab({
   // 這裡只需要再依日期篩選）：統計用途（例如 Excel 匯出）需要跟畫面上
   // 「這個期間有幾篇」的實際定義完全一致，不能只看畫面上顯示的前 N 筆。
   const transcendFull = useMemo(() => {
-    const cutoffs = {
-      today: taipeiDayStart(now),
-      week: taipeiWeekStart(now),
-      month: taipeiMonthStart(now),
-    };
-    const cutoff = cutoffs[timeFilter];
-    return searchFiltered.filter(n => {
-      const d = n.pubDate?.toDate ? n.pubDate.toDate() : new Date(n.pubDate || 0);
-      return d >= cutoff;
-    });
+    const range = taipeiPeriodRange(timeFilter, now);
+    return searchFiltered.filter(n => inPeriod(n, range));
   }, [searchFiltered, timeFilter, now]);
 
-  // 畫面清單只顯示前 50 篇（渲染效能考量，不是資料本身被裁切）；
+  // 畫面清單先顯示前 50 篇，可按「顯示更多」展開（渲染效能考量，不是資料本身被裁切）；
   // Excel 匯出用上面未截斷的 transcendFull，兩者不是同一份陣列。
-  const transcend = useMemo(() => transcendFull.slice(0, 50), [transcendFull]);
+  const more = useShowMore(transcendFull, 50, [timeFilter, prQuery, prMedia, prSentiment]);
+  const transcend = more.shown;
+
+  if (view === 'insights') {
+    return (
+      <ExposureInsightsPage records={mediaExposure} autoArticles={prArticles} onBack={() => goView('main')} />
+    );
+  }
 
   return (
     <div className="space-y-4 fade-in">
       <TodayBriefing articles={news.filter(isBriefingCandidate)} />
 
       {/* PR 專用篩選工具列：搜尋/媒體/情緒，resultCount／totalCount 一律
-          來自 usePRNews 的本月資料，不是受全站 2000 筆上限限制的 news。 */}
+          來自 usePRNews 的本月＋上月資料，不是受全站 2000 筆上限限制的 news。 */}
       <NewsFilterToolbar
         query={prQuery} setQuery={setPrQuery}
         media={prMedia} setMedia={setPrMedia}
@@ -414,22 +455,16 @@ export function PRTab({
           但不套用今天/本週/本月的期間篩選——三個期間的數字本來就要同時顯示。 */}
       <PRStatsPanel articles={searchFiltered} status={prStatus} />
 
-      <ManualExposurePanel
-        records={mediaExposure}
-        status={mediaExposureStatus}
-        onRetry={refreshMediaExposure}
-      />
-
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-        <Card title="創見最新報導" icon="📰" className="h-full"
+        <Card title="創見最新報導" icon="news" className="h-full"
           actions={
             <button onClick={() => exportNewsExcel(transcendFull, '創見最新報導', '創見最新報導')}
               disabled={transcendFull.length === 0}
-              className="text-xs px-2.5 py-1 rounded-lg border border-gray-700/60 text-gray-400 hover:text-gray-200 hover:bg-gray-800 transition disabled:opacity-40 disabled:cursor-not-allowed shrink-0">
-              ⬇ 匯出 Excel
+              className="text-sm px-3.5 py-1.5 rounded-lg border border-gray-700/60 text-gray-400 hover:text-gray-200 hover:bg-gray-800 transition disabled:opacity-40 disabled:cursor-not-allowed shrink-0">
+              <Icon name="download" /> 匯出 Excel
             </button>
           }>
-          {/* 時間篩選：只有今天/本週/本月，PR 專用（見上方 PR_LIST_TIME_FILTERS） */}
+          {/* 時間篩選：今天/本週/本月/上月，PR 專用（見上方 PR_LIST_TIME_FILTERS） */}
           <div className="flex gap-1.5 mb-3">
             {PR_LIST_TIME_FILTERS.map(f => (
               <TabBtn key={f.id} active={timeFilter === f.id} onClick={() => setTimeFilter(f.id)}>
@@ -439,14 +474,17 @@ export function PRTab({
           </div>
           {prStatus === 'error'
             ? <div className="h-32 flex flex-col items-center justify-center gap-2 text-red-400 text-sm">
-                <span>⚠ 報導載入失敗</span>
+                <span><Icon name="alert" /> 報導載入失敗</span>
                 <button onClick={refreshPRNews}
                   className="text-xs px-3 py-1 rounded-lg border border-red-700/60 text-red-300 hover:bg-red-900/30 transition">
                   重試
                 </button>
               </div>
             : transcend.length > 0
-            ? <div className="space-y-2">{transcend.map((n, i) => <NewsCard key={n.id || i} article={n} />)}</div>
+            ? <>
+                <div className="space-y-2">{transcend.map((n, i) => <NewsCard key={n.id || i} article={n} />)}</div>
+                <ShowMoreButton remaining={more.remaining} step={50} onMore={more.showMore} onAll={more.showAll} />
+              </>
             : <div className="h-32 flex items-center justify-center text-gray-600 text-sm">
                 {prStatus === 'ready' ? '此區間暫無符合報導' : '載入中…'}
               </div>
@@ -458,8 +496,17 @@ export function PRTab({
         <CompetitorNews news={news} />
       </div>
 
-      {/* 重點媒體曝光監控：移至最下方，同樣套用搜尋/媒體/情緒篩選 */}
+      {/* 重點媒體曝光監控：同樣套用搜尋/媒體/情緒篩選 */}
       <KeyMediaPanel articles={searchFiltered} status={prStatus} />
+
+      {/* 人工確認曝光：放在頁面最下方（含 Excel 上傳）；跟自動新聞監測分開統計 */}
+      <ManualExposurePanel
+        records={mediaExposure}
+        status={mediaExposureStatus}
+        onRetry={refreshMediaExposure}
+        onImported={refreshMediaExposure}
+        onOpenInsights={() => goView('insights')}
+      />
     </div>
   );
 }

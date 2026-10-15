@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import {
   fmtDate, sortByDate, isStockStale, stockUpdatedAtMs,
   taipeiDayStart, taipeiWeekStart, taipeiMonthStart,
+  taipeiPrevMonthStart, taipeiPeriodRange, inPeriod,
 } from './dates.js';
 
 // 建構「台灣時間 y-m-d h:mi:s」對應的實際時刻（不依賴測試環境本身的時區）：
@@ -118,5 +119,25 @@ describe('taipeiMonthStart', () => {
   it('uses Taipei wall-clock time, not the UTC calendar date, at the month boundary', () => {
     const nowUtc = new Date(Date.UTC(2026, 6, 31, 16, 30, 0)); // 台灣時間已是 8/1 00:30
     expect(taipeiMonthStart(nowUtc)).toEqual(taipei(2026, 7, 1, 0, 0, 0));
+  });
+});
+
+describe('taipeiPrevMonthStart / taipeiPeriodRange — 上月區間', () => {
+  it('上月 = 上個月 1 日 00:00 起、到本月 1 日 00:00 為止（不含）', () => {
+    const now = taipei(2026, 9, 1, 0, 30); // 10/1 00:30 台灣時間
+    expect(taipeiPrevMonthStart(now)).toEqual(taipei(2026, 8, 1));
+    const range = taipeiPeriodRange('lastMonth', now);
+    expect(range).toEqual({ start: taipei(2026, 8, 1), end: taipei(2026, 9, 1) });
+    expect(inPeriod({ pubDate: taipei(2026, 8, 30, 23, 59) }, range)).toBe(true);
+    expect(inPeriod({ pubDate: taipei(2026, 9, 1, 0, 0) }, range)).toBe(false);
+    expect(inPeriod({ pubDate: taipei(2026, 7, 31, 23, 59) }, range)).toBe(false);
+  });
+
+  it('一月的上月會跨年到去年十二月', () => {
+    expect(taipeiPrevMonthStart(taipei(2027, 0, 15))).toEqual(taipei(2026, 11, 1));
+  });
+
+  it('本月區間沒有結束時間', () => {
+    expect(taipeiPeriodRange('month', taipei(2026, 9, 15)).end).toBeNull();
   });
 });
