@@ -115,9 +115,13 @@ def period_signatures(value) -> dict[str, frozenset]:
 
 
 def periods_compatible(a: dict, b: dict) -> bool:
-    """兩邊都要有相同的期間；一邊有、另一邊沒有，也視為不相容（保守）。"""
-    for kind in set(a) | set(b):
-        if kind not in a or kind not in b:
+    """
+    a＝新聞稿、b＝曝光標題的期間。新聞稿有的期間（月份／季度）曝光標題也要有而且相同；
+    曝光標題多提了月份 → 不相容（月營收報導不能配給沒寫月份的稿）；
+    曝光標題順帶提到季度（「9月營收…Q3創高」）→ 只有月營收這類新聞稿允許。
+    """
+    for kind in a:
+        if kind not in b:
             return False
         if kind == 'quarter':
             # 有年份的要年份一致；只有 q 的只比季別
@@ -130,6 +134,13 @@ def periods_compatible(a: dict, b: dict) -> bool:
             if ya and yb and ya != yb:
                 return False
         elif a[kind] != b[kind]:
+            return False
+    for kind in b:
+        if kind in a:
+            continue
+        if kind == 'month':
+            return False
+        if kind == 'quarter' and 'month' not in a:
             return False
     return True
 
@@ -185,6 +196,12 @@ def prepare_press_release(pr) -> dict:
         t = title_tokens(n) if n else set()
         if t and t not in token_sets:
             token_sets.append(t)
+    # 完整標題很長，各媒體只會引用其中一段：每個子句（以逗號、頓號、冒號切開，夠長才算）也各自成一組關鍵字
+    for n in (pr.get('officialTitle'), pr.get('title')):
+        for clause in re.split(r'[，,、；;：:]', n or ''):
+            t = title_tokens(clause)
+            if len(t) >= 5 and t not in token_sets:
+                token_sets.append(t)
     primary = title_tokens(pr.get('topic') or pr.get('title') or pr.get('officialTitle') or '')
     tokens = primary
     display = pr.get('officialTitle') or pr.get('title') or pr.get('topic') or ''
@@ -221,12 +238,9 @@ def mentions_company(title) -> bool:
 
 def compatible(p, ex_sigs, title='') -> bool:
     """新聞稿與曝光標題的期間（月份／季度）是否相容。"""
-    if (p.get('_generic_rev') or 'month' in p['_sigs']) and not mentions_company(title):
-        return False          # 月營收這類通用標題：曝光標題一定要提到創見，避免把競品的營收報導算進來
     if p.get('_generic_rev'):
         months = ex_sigs.get('month')
-        return (p.get('_implied_month') is not None and months == frozenset({str(p['_implied_month'])})
-                and 'quarter' not in ex_sigs)
+        return p.get('_implied_month') is not None and months == frozenset({str(p['_implied_month'])})
     return periods_compatible(p['_sigs'], ex_sigs)
 
 
@@ -347,6 +361,9 @@ def match_exposure(exposure: dict, prs: list[dict]) -> dict:
             if not strong_tokens(tokens) <= ex_strong:
                 continue
             value = dice(tokens, ex_tokens)
+            # 關鍵字夠多的一組（新聞稿標題或其中一個子句）被曝光標題涵蓋六成以上 → 可建議
+            if len(tokens) >= 5 and len(tokens & ex_tokens) / len(tokens) >= 0.6:
+                value = max(value, 0.6)
             # 稿單標題的關鍵字全部出現在曝光標題裡（但曝光標題多了別的字）→ 也算可建議，分數固定偏低
             if len(tokens) >= 2 and tokens <= ex_tokens:
                 value = max(value, 0.55)

@@ -157,12 +157,27 @@ class TestMatchRules(unittest.TestCase):
         r = pm.match_exposure(ex('創見營收展望佳', '2025-05-09'), prs)
         self.assertIsNone(r['pressReleaseId'])
 
-    def test_competitor_only_revenue_article_is_not_counted(self):
-        prs = [pr('r8', '8月營收', '2026-09-03')]
-        r = pm.match_exposure(ex('威剛8月營收創歷史新高', '2026-09-04'), prs)
-        self.assertNotEqual(r['matchStatus'], 'auto_matched')
-        r = pm.match_exposure(ex('創見與威剛8月營收創歷史新高', '2026-09-04'), prs)
-        self.assertEqual(r['matchStatus'], 'auto_matched')
+    def test_full_title_clause_quoted_by_media_matches(self):
+        prs = [pr('e', '創見資訊參展2026台北國際電子產業科技展,展出嵌入式鏡頭與DDR5記憶體,拓展Edge AI應用', '2026-10-13', topic='電子展')]
+        r = pm.match_exposure(ex('創見參加台北國際電子產業科技展 展出嵌入式鏡頭與DDR5記憶體', '2026-10-13'), prs)
+        self.assertEqual((r['matchStatus'], r['pressReleaseId']), ('auto_matched', 'e'))
+        r = pm.match_exposure(ex('創見搶攻邊緣 AI 嵌入式鏡頭、DDR5高速記憶體雙線出擊', '2026-10-13'), prs)
+        self.assertNotEqual(r['matchStatus'], 'auto_matched')      # 只有部分相同：最多建議
+
+    def test_revenue_article_without_company_name_still_matches_by_month_and_date(self):
+        prs = [pr('r9', '9月營收', '2026-10-06', topic='9月營收')]
+        r = pm.match_exposure(ex('營收速報：9月營收60.4億元 年增290%', '2026-10-06'), prs)
+        self.assertEqual(r['pressReleaseId'], 'r9')
+        r = pm.match_exposure(ex('營收速報：8月營收48.4億元', '2026-10-06'), prs)
+        self.assertIsNone(r['pressReleaseId'])
+
+    def test_monthly_revenue_article_may_mention_quarter_but_quarterly_pr_needs_its_quarter(self):
+        prs = [pr('r9', '9月營收', '2026-10-06', topic='9月營收'), pr('q3', '營收新聞稿 2026 Q3', '2026-11-05')]
+        r = pm.match_exposure(ex('創見9月營收60.4億元 Q3營收大增291%', '2026-10-06'), prs)
+        self.assertEqual(r['pressReleaseId'], 'r9')
+        # 月營收報導不能配給季度新聞稿；也不能因為提到 Q3 就配到沒有月份的稿
+        r = pm.match_exposure(ex('創見9月營收60.4億元 Q3營收大增291%', '2026-11-06'), [prs[1]])
+        self.assertIsNone(r['pressReleaseId'])
 
     def test_generic_revenue_without_date_never_matches(self):
         r = pm.match_exposure(ex('創見4月營收年增', '2025-05-09'), [pr('r', '營收新聞稿', None)])
