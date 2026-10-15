@@ -26,10 +26,13 @@ function mkTranscend(id, title, pubDate, extra = {}) {
   };
 }
 
+// PR 媒體戰情分成四個子頁，目前的子頁存在網址 ?section=；每個測試先指定要看哪一頁。
 function renderPRTab({
+  section = 'news',
   prArticles = [], prStatus = 'ready', refreshPRNews = vi.fn(), news = [],
   mediaExposure = [], mediaExposureStatus = 'idle', refreshMediaExposure = vi.fn(),
 } = {}) {
+  window.history.replaceState(null, '', `/?tab=pr&section=${section}`);
   return render(<PRTab
     news={news}
     prArticles={prArticles}
@@ -101,6 +104,7 @@ describe('PRTab — 查詢失敗顯示明確錯誤，可重試', () => {
   });
 
   it('does not show a plain 0 in the stats cards while loading or on error', () => {
+    window.history.replaceState(null, '', '/?tab=pr&section=news');
     const { rerender } = render(
       <PRTab news={[]} prArticles={[]} prStatus="loading" refreshPRNews={vi.fn()} />);
     expect(screen.getByText('媒體曝光｜本月').parentElement.textContent).not.toContain('0');
@@ -128,7 +132,7 @@ describe('PRTab — 篩選工具列（搜尋／媒體／情緒）', () => {
     expect(screen.queryByText('創見獲獎新聞')).toBeNull();
   });
 
-  it('media filter affects the list, stats, and the key-media ranking', () => {
+  it('media filter affects the list and the stats', () => {
     vi.setSystemTime(taipei(2026, 7, 20, 12, 0, 0));
     // 電子時報／Digitimes 是 KEY_MEDIA 內建的重點媒體之一（見 utils/news.js）。
     const digitimes = mkTranscend('d1', '創見新品發表會', taipei(2026, 7, 15), { mediaName: '電子時報' });
@@ -140,11 +144,8 @@ describe('PRTab — 篩選工具列（搜尋／媒體／情緒）', () => {
     expect(screen.getByText('媒體曝光｜本月').parentElement.textContent).toContain('1');
     expect(screen.getByText('創見新品發表會')).toBeTruthy();
     expect(screen.queryByText('創見產能報導')).toBeNull();
-    // 重點媒體排行只算電子時報／Digitimes 的這篇——限定在 KeyMediaPanel
-    // 卡片內查找，避免跟媒體篩選下拉選單裡的同名選項搞混。
-    const keyMediaCard = screen.getByText('重點媒體曝光監控').closest('.bg-gray-900');
-    const row = within(keyMediaCard).getByText('電子時報').closest('.group');
-    expect(row.textContent).toBe('1電子時報Digitimes10'); // 本月 1、上月 0
+    // 重點媒體曝光監控屬於「曝光成效」子頁，不在新聞監測這一頁
+    expect(screen.queryByText('重點媒體曝光監控')).toBeNull();
   });
 
   it('sentiment filter affects the list and the stats count', () => {
@@ -214,10 +215,15 @@ describe('PRTab — 人工確認曝光與自動新聞分開呈現', () => {
       exposureDate: taipei(2026, 8, 16),
       verified: true,
     };
-    renderPRTab({ prArticles: [automated], mediaExposure: [manual], mediaExposureStatus: 'ready' });
+    renderPRTab({ section: 'overview', prArticles: [automated], mediaExposure: [manual], mediaExposureStatus: 'ready' });
 
+    // 總覽：自動統計只算自動新聞（1），人工確認曝光有自己的摘要
     expect(screen.getByText('媒體曝光｜本月').parentElement.textContent).toContain('1');
-    // 「新聞稿曝光成效」也會列出這則曝光，所以限定在「人工確認曝光」卡片內查找
+    const summary = screen.getByText('新聞稿曝光成效').closest('.bg-gray-900');
+    expect(within(summary).getByText('人工確認曝光').nextElementSibling.textContent).toBe('1');
+
+    // 「曝光成效」子頁的人工確認曝光卡片
+    fireEvent.click(within(summary).getByRole('button', { name: '查看全部：新聞稿曝光成效' }));
     const card = screen.getByText('人工確認曝光', { selector: 'h3' }).closest('.bg-gray-900');
     expect(within(card).getByText('本月人工確認').parentElement.textContent).toContain('1');
     expect(within(card).getByText('人工確認新聞')).toBeTruthy();
@@ -226,7 +232,7 @@ describe('PRTab — 人工確認曝光與自動新聞分開呈現', () => {
 
   it('does not render internal-note fields even if an unsafe caller supplies one', () => {
     vi.setSystemTime(taipei(2026, 8, 20, 12, 0, 0));
-    renderPRTab({
+    renderPRTab({ section: 'exposure',
       mediaExposure: [{
         id: 'exp_1', title: '人工確認新聞', mediaName: '經濟日報',
         link: 'https://example.com/manual', exposureDate: taipei(2026, 8, 16),
@@ -243,16 +249,16 @@ describe('PRTab — 人工確認曝光與自動新聞分開呈現', () => {
       id: 'exp_1', title: '人工確認新聞', mediaName: '經濟日報',
       link: 'https://example.com/manual', exposureDate: taipei(2026, 8, 16),
     };
-    renderPRTab({ mediaExposure: [manual], mediaExposureStatus: 'ready' });
+    renderPRTab({ section: 'exposure', mediaExposure: [manual], mediaExposureStatus: 'ready' });
     const card = screen.getByText('人工確認曝光', { selector: 'h3' }).closest('.bg-gray-900');
-    fireEvent.click(within(card).getByText('匯出 Excel'));
+    fireEvent.click(within(card).getByText('匯出曝光明細'));
     expect(exportMediaExposureExcel).toHaveBeenCalledWith([manual]);
   });
 });
 
-describe('PRTab — 人工確認曝光放在頁面最下方並提供上傳', () => {
-  it('人工確認曝光是頁面上最後一張卡片，在重點媒體曝光監控之後', () => {
-    renderPRTab({ prArticles: [], mediaExposureStatus: 'ready' });
+describe('PRTab — 曝光成效頁：人工確認曝光在最下方並提供上傳', () => {
+  it('人工確認曝光是曝光成效頁最後一張卡片，在重點媒體曝光監控之後', () => {
+    renderPRTab({ section: 'exposure', prArticles: [], mediaExposureStatus: 'ready' });
     const media = screen.getByText('重點媒體曝光監控').closest('.bg-gray-900');
     const manual = screen.getByText('人工確認曝光').closest('.bg-gray-900');
     expect(media.compareDocumentPosition(manual) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
@@ -260,7 +266,7 @@ describe('PRTab — 人工確認曝光放在頁面最下方並提供上傳', () 
   });
 
   it('預設不顯示上傳區，按「上傳 Excel」才展開，再按一次收合', () => {
-    renderPRTab({ mediaExposureStatus: 'ready' });
+    renderPRTab({ section: 'exposure', mediaExposureStatus: 'ready' });
     expect(screen.queryByLabelText('上傳通行碼')).toBeNull();
     fireEvent.click(screen.getByText('上傳 Excel'));
     expect(screen.getByLabelText('上傳通行碼')).toBeTruthy();
@@ -276,12 +282,12 @@ describe('PRTab — 人工確認曝光分析（下一頁）', () => {
   }];
 
   it('沒有人工確認資料時，「曝光分析」按鈕停用', () => {
-    renderPRTab({ mediaExposureStatus: 'ready' });
+    renderPRTab({ section: 'exposure', mediaExposureStatus: 'ready' });
     expect(screen.getByText('曝光分析').disabled).toBe(true);
   });
 
   it('按「曝光分析」切到分析頁（PR 主頁內容隱藏），按返回回到 PR 主頁', () => {
-    renderPRTab({ mediaExposure: manual, mediaExposureStatus: 'ready' });
+    renderPRTab({ section: 'exposure', mediaExposure: manual, mediaExposureStatus: 'ready' });
     fireEvent.click(screen.getByText('曝光分析'));
     expect(screen.getByText('人工確認曝光分析')).toBeTruthy();
     expect(screen.queryByText('重點媒體曝光監控')).toBeNull();
@@ -303,29 +309,44 @@ describe('PRTab — 新聞稿曝光成效區塊', () => {
   ];
   const perfCard = () => screen.getByText('新聞稿曝光成效').closest('.bg-gray-900');
 
-  it('出現在「重點媒體曝光監控」之後、「人工確認曝光」之前，且人工確認曝光仍是最後一張卡片', () => {
-    renderPRTab({ mediaExposure: exposures, mediaExposureStatus: 'ready' });
+  it('順序是「新聞稿曝光成效」→「重點媒體曝光監控」→「人工確認曝光」，人工確認曝光是最後一張卡片', () => {
+    renderPRTab({ section: 'exposure', mediaExposure: exposures, mediaExposureStatus: 'ready' });
     const media = screen.getByText('重點媒體曝光監控').closest('.bg-gray-900');
     const manual = screen.getByText('人工確認曝光', { selector: 'h3' }).closest('.bg-gray-900');
-    expect(media.compareDocumentPosition(perfCard()) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-    expect(perfCard().compareDocumentPosition(manual) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(perfCard().compareDocumentPosition(media) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(media.compareDocumentPosition(manual) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(manual.parentElement.lastElementChild).toBe(manual);
   });
 
-  it('有資料時顯示摘要與主題分組；既有 PR 自動新聞統計不受影響', () => {
+  it('有資料時顯示摘要與主題分組', () => {
     vi.setSystemTime(taipei(2026, 8, 20, 12, 0, 0));
     renderPRTab({
+      section: 'exposure',
       prArticles: [mkTranscend('auto', '系統監測新聞', taipei(2026, 8, 15))],
       mediaExposure: exposures, mediaExposureStatus: 'ready',
     });
     const card = perfCard();
     expect(within(card).getByText('新聞稿／主題', { selector: 'p' }).nextElementSibling.textContent).toBe('2');
     expect(within(card).getByText('人工確認曝光', { selector: 'p' }).nextElementSibling.textContent).toBe('3');
-    expect(screen.getByText('媒體曝光｜本月').parentElement.textContent).toContain('1');   // 自動監測仍只算自己的
+  });
+
+  it('重點媒體曝光監控用全部有效創見報導，不受「新聞監測」搜尋工具列的篩選影響', () => {
+    vi.setSystemTime(taipei(2026, 7, 20, 12, 0, 0));
+    const digitimes = mkTranscend('d1', '創見新品發表會', taipei(2026, 7, 15), { mediaName: '電子時報' });
+    const other = mkTranscend('o1', '創見產能報導', taipei(2026, 7, 16), { mediaName: '其他媒體' });
+    const props = { prArticles: [digitimes, other], mediaExposureStatus: 'ready' };
+    const { unmount } = renderPRTab({ section: 'news', ...props });
+    fireEvent.change(screen.getByLabelText('依媒體篩選'), { target: { value: '其他媒體' } });
+    expect(screen.getByText('媒體曝光｜本月').parentElement.textContent).toContain('1');   // 新聞監測的統計被篩選
+    unmount();
+    // 同一個測試內重新 render 曝光成效頁：新的 PRTab（沒有保留篩選）與資料本身一致
+    renderPRTab({ section: 'exposure', ...props });
+    const row = within(screen.getByText('重點媒體曝光監控').closest('.bg-gray-900')).getByText('電子時報').closest('.group');
+    expect(row.textContent).toBe('1電子時報Digitimes10');
   });
 
   it('新聞稿曝光成效的篩選只影響自己，不會改變「人工確認曝光」卡片的數字', () => {
-    renderPRTab({ mediaExposure: exposures, mediaExposureStatus: 'ready' });
+    renderPRTab({ section: 'exposure', mediaExposure: exposures, mediaExposureStatus: 'ready' });
     fireEvent.change(within(perfCard()).getByLabelText('曝光媒體篩選'), { target: { value: '經濟日報' } });
     expect(within(perfCard()).getByText('人工確認曝光', { selector: 'p' }).nextElementSibling.textContent).toBe('1');
     const manual = screen.getByText('人工確認曝光', { selector: 'h3' }).closest('.bg-gray-900');
@@ -334,7 +355,7 @@ describe('PRTab — 新聞稿曝光成效區塊', () => {
 
   it('載入失敗：區塊顯示錯誤並可重試，不影響 PR 主頁其他區塊', () => {
     const refreshMediaExposure = vi.fn();
-    renderPRTab({ mediaExposure: [], mediaExposureStatus: 'error', refreshMediaExposure });
+    renderPRTab({ section: 'exposure', mediaExposure: [], mediaExposureStatus: 'error', refreshMediaExposure });
     expect(within(perfCard()).getByText(/新聞稿曝光成效載入失敗/)).toBeTruthy();
     fireEvent.click(within(perfCard()).getByText('重試'));
     expect(refreshMediaExposure).toHaveBeenCalledTimes(1);
@@ -342,7 +363,7 @@ describe('PRTab — 新聞稿曝光成效區塊', () => {
   });
 
   it('還沒匯入任何人工曝光資料：顯示空狀態，頁面不崩潰', () => {
-    renderPRTab({ mediaExposure: [], mediaExposureStatus: 'ready' });
+    renderPRTab({ section: 'exposure', mediaExposure: [], mediaExposureStatus: 'ready' });
     expect(within(perfCard()).getByText('尚未匯入人工確認曝光資料')).toBeTruthy();
     expect(screen.getByText('重點媒體曝光監控')).toBeTruthy();
   });
@@ -350,7 +371,7 @@ describe('PRTab — 新聞稿曝光成效區塊', () => {
 
 describe('PRTab — 人工確認曝光清單的連結安全', () => {
   it('不安全網址不會輸出成可點擊連結，標題仍顯示', () => {
-    renderPRTab({
+    renderPRTab({ section: 'exposure',
       mediaExposureStatus: 'ready',
       mediaExposure: [
         { id: 'ok', title: '安全的曝光', mediaName: '經濟日報', link: 'https://example.com/ok', exposureDate: taipei(2026, 8, 16) },

@@ -9,11 +9,16 @@ import { useNewsFeed } from './features/news/useNewsFeed.js';
 import { usePRNews } from './features/news/usePRNews.js';
 import { useUpstreamNews } from './features/news/useUpstreamNews.js';
 import { useMediaExposure } from './features/pr/useMediaExposure.js';
+import { useUrlParam } from './hooks/useUrlParam.js';
+import { writeParams } from './utils/urlState.js';
 import { sortByDate, isStockStale, fmtStockUpdated } from './utils/dates.js';
 import { COMPETITORS, STOCK_META } from './config/competitors.js';
 
 // 三個分頁各自的程式碼／SVG 圖表都相當大，但同時只會顯示一個——lazy
 // load 讓使用者只下載目前分頁需要的程式碼，不用一次打包進主 bundle。
+// 主分頁存在網址 ?tab=（pr／ir／us／health；沒有或不認識的值 → pr），上一頁／下一頁會切換分頁。
+const TAB_IDS = ['pr', 'ir', 'us', 'health'];
+
 const PRTab = lazy(() => import('./features/pr/PRTab.jsx').then(m => ({ default: m.PRTab })));
 const USMarketTab = lazy(() => import('./features/market/USMarketTab.jsx').then(m => ({ default: m.USMarketTab })));
 const IRTab = lazy(() => import('./features/ir/IRTab.jsx').then(m => ({ default: m.IRTab })));
@@ -23,7 +28,9 @@ const HealthTab = lazy(() => import('./features/health/HealthTab.jsx').then(m =>
 // MAIN APP
 // ═══════════════════════════════════════════════════════════
 export default function App() {
-  const [tab, setTab] = useState('pr');
+  const [tab] = useUrlParam('tab', TAB_IDS, 'pr');
+  // 切換主分頁時移除 section（PR 子頁只屬於 PR 分頁）
+  const setTab = id => writeParams({ tab: id, section: null });
   const [stocks, setStocks] = useState({});
   const [revenue, setRevenue] = useState(null);
   const [financials, setFinancials] = useState(null);
@@ -177,11 +184,11 @@ export default function App() {
       {/* ─────────── HEADER ─────────── */}
       <header className="sticky top-0 z-50 shadow-2xl"
         style={{ background: 'rgb(150,0,20)' }}>
-        <div className="max-w-7xl mx-auto px-4 h-14 flex items-center justify-between gap-3">
+        <div className="max-w-7xl mx-auto px-3 sm:px-4 h-14 flex items-center justify-between gap-2 sm:gap-3">
 
           {/* Logo */}
           <div className="flex items-center gap-3 shrink-0">
-            <TranscendMark height={26} fill="white" />
+            <TranscendMark height={20} fill="white" />
             <div className="border-l border-white/20 pl-3 hidden sm:block">
               <p className="text-lg font-bold text-white/90 leading-tight tracking-wide">新聞監控</p>
               <p className="text-xs text-red-200/60 leading-tight">News Intelligence</p>
@@ -197,7 +204,7 @@ export default function App() {
               { id: 'health', icon: 'activity', label: '系統健康' },
             ].map(t => (
               <button key={t.id} onClick={() => setTab(t.id)}
-                className={`flex items-center gap-1.5 px-4 py-1.5 rounded-lg text-sm font-semibold transition-all ${tab === t.id ? 'text-white shadow' : 'text-red-200/60 hover:text-white'}`}
+                className={`flex items-center gap-1.5 px-2.5 sm:px-4 py-1.5 rounded-lg text-sm font-semibold transition-all ${tab === t.id ? 'text-white shadow' : 'text-red-200/60 hover:text-white'}`}
                 style={tab === t.id ? { background: 'rgba(0,0,0,0.5)' } : {}}>
                 <Icon name={t.icon} className="text-[1.25em]" />
                 <span className="hidden sm:inline">{t.label}</span>
@@ -208,7 +215,7 @@ export default function App() {
           {/* Action buttons */}
           <div className="flex items-center gap-2 shrink-0">
             <button onClick={() => fetchAll()} disabled={loading}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium transition-all"
+              className="flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 rounded-lg text-sm font-medium transition-all"
               style={{ background: 'rgba(255,255,255,0.15)', border: '1px solid rgba(255,255,255,0.2)', color: 'white' }}>
               {loading ? <Spinner /> : <Icon name="refresh" />}
               <span className="hidden sm:inline">{loading ? '載入中' : '重新整理'}</span>

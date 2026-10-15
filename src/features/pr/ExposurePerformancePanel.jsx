@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useMemo } from 'react';
 
 import Card from '../../components/Card.jsx';
 import Icon from '../../components/Icon.jsx';
@@ -8,6 +8,7 @@ import { tagClass } from '../../components/tagStyles.js';
 import { exportExposurePerformanceExcel } from '../../utils/formatting.js';
 import { MAX_EXPOSURE_RECORDS } from './exposureLimits.js';
 import { EVENT_KIND_LABELS } from './exposureEvents.js';
+import { usePRState } from './prState.jsx';
 import {
   EMPTY_FILTERS, TOPIC_SORTS, applyFilters, buildDetailRows, buildPerformance, buildSummaryRows,
   filterOptions, hasActiveFilters, sortTopics, toPublicRecords, typeLabel,
@@ -28,7 +29,7 @@ const fmtDay = d => (d ? d.toLocaleDateString('zh-TW', { timeZone: 'Asia/Taipei'
 const pct = v => `${Math.round(v * 100)}%`;
 const TOPIC_PAGE = 15;
 
-const inputCls = 'rounded-xl border border-gray-700/60 px-3 py-2 text-sm outline-none transition focus:border-red-700';
+const inputCls = 'min-w-0 max-w-full rounded-xl border border-gray-700/60 px-3 py-2 text-sm outline-none transition focus:border-red-700';
 const btnCls = 'text-sm px-3.5 py-1.5 rounded-lg border border-gray-700/60 text-gray-400 hover:text-gray-200 hover:bg-gray-800 transition disabled:opacity-40 disabled:cursor-not-allowed shrink-0';
 
 function Kpi({ label, value, hint }) {
@@ -121,9 +122,10 @@ function TopicRow({ topic, open, onToggle, onExport }) {
 export default function ExposurePerformancePanel({
   records = [], status = 'idle', onRetry = () => {}, maxRecords = MAX_EXPOSURE_RECORDS,
 }) {
-  const [filters, setFilters] = useState(EMPTY_FILTERS);
-  const [openKeys, setOpenKeys] = useState(() => new Set());
-  const [sortMode, setSortMode] = useState('recent');   // 預設：最近曝光的主題排最前面
+  // 篩選、展開的主題、排序放在 PR store：切換子頁再回來仍保留
+  const [filters, setFilters] = usePRState('exposure.filters', EMPTY_FILTERS);
+  const [openKeys, setOpenKeys] = usePRState('exposure.openTopics', () => new Set());
+  const [sortMode, setSortMode] = usePRState('exposure.sort', 'recent');   // 預設：最近曝光的主題排最前面
   const setFilter = (name, value) => setFilters(f => ({ ...f, [name]: value }));
 
   // 衍生資料全部 memoize：只在原始資料或篩選條件改變時重算
@@ -157,7 +159,7 @@ export default function ExposurePerformancePanel({
     <Card title="新聞稿曝光成效" icon="chart"
       actions={
         <button onClick={exportAll} disabled={!showData || perf.total === 0} className={btnCls}>
-          <Icon name="download" /> 匯出 Excel{filtering ? '（目前篩選）' : ''}
+          <Icon name="download" /> 匯出新聞稿成效{filtering ? '（目前篩選）' : ''}
         </button>
       }>
       <p className="text-xs text-gray-500 mb-1">
