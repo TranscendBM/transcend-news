@@ -179,6 +179,14 @@ class TestMatchRules(unittest.TestCase):
         r = pm.match_exposure(ex('創見9月營收60.4億元 Q3營收大增291%', '2026-11-06'), [prs[1]])
         self.assertIsNone(r['pressReleaseId'])
 
+    def test_competitor_led_article_is_not_a_press_release_derivative(self):
+        prs = [pr('r9', '9月營收', '2026-10-06', topic='9月營收')]
+        r = pm.match_exposure(ex('威剛9月營收年增2倍、Q3首破500億！創見前9月增370%創高', '2026-10-05'), prs)
+        self.assertEqual(r['matchStatus'], 'unmatched')
+        self.assertEqual(r['reason'], 'peer_led')
+        r = pm.match_exposure(ex('創見9月營收年增290% 威剛衰退', '2026-10-06'), prs)
+        self.assertEqual(r['matchStatus'], 'auto_matched')
+
     def test_generic_revenue_without_date_never_matches(self):
         r = pm.match_exposure(ex('創見4月營收年增', '2025-05-09'), [pr('r', '營收新聞稿', None)])
         self.assertNotEqual(r['matchStatus'], 'auto_matched')

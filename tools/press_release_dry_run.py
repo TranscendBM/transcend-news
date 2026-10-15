@@ -71,6 +71,7 @@ def main():
     src.add_argument('--api', action='store_true')
     ap.add_argument('--exposures-json')
     ap.add_argument('--verbose', action='store_true')
+    ap.add_argument('--samples', default='6')
     args = ap.parse_args()
 
     sheets = FileSheets(args.sheet_json) if args.sheet_json else ps.SheetsClient()
@@ -87,6 +88,26 @@ def main():
                       'skippedRows': parsed['skipped']}, ensure_ascii=False, indent=1))
     print('== 報告（dry-run，零寫入）==')
     print(json.dumps(plan['report'], ensure_ascii=False, indent=1))
+    print('== 曝光分類（coverageClass，與配對狀態分開）==')
+    classified = plan['matches']['classified']
+    by_class = {}
+    for exp in exposures:
+        cls = classified.get(exp['id'])
+        if cls:
+            by_class.setdefault(cls['coverageClass'], []).append((exp, cls))
+    undecidable = sum(1 for _, c in sum(by_class.values(), []) if c['coverageClassMethod'] == 'fallback')
+    print(json.dumps({'總文件數': len(exposures), **{k: len(v) for k, v in by_class.items()},
+                      'review': len(by_class.get('review', [])), '規則無法判定(fallback)': undecidable,
+                      '預計更新文件數': len(plan['matches']['updates']),
+                      '其中分類欄位變動': plan['matches']['counts']['classChanged'],
+                      '人工分類受保護': plan['matches']['counts']['classProtected'],
+                      '人工確認配對（不會被覆蓋）': plan['matches']['counts']['confirmed'],
+                      '刪除': 0}, ensure_ascii=False, indent=1))
+    per = int(args.samples)
+    for name, items in by_class.items():
+        print(f'-- {name}（代表案例 {per} 筆）')
+        for exp, cls in items[:per]:
+            print(f"   [{cls['coverageClassMethod']:19} {cls['coverageClassConfidence']:.2f}] {','.join(cls['coverageClassReasons']):32} {str(exp.get('title'))[:50]!r}")
     print('== 日期不完整（只列標題、列號）==')
     for r in parsed['records']:
         if r['datePrecision'] != 'day':

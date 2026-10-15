@@ -9,7 +9,9 @@ import { PRStatsPanel } from './PRStatsPanel.jsx';
 import { KeyMediaPanel } from './KeyMediaPanel.jsx';
 import PRSummaryCard from './PRSummaryCard.jsx';
 import { selectCompetitorNews } from './prData.js';
-import { buildPerformance, sortTopics, toPublicRecords } from './exposurePerformance.js';
+import {
+  buildPerformance, coverageScopeText, defaultCoverageFilter, filterByCoverage, sortTopics, toPublicRecords,
+} from './exposurePerformance.js';
 
 // ═══════════════════════════════════════════════════════════
 // PR 總覽：只放「快速判讀」的摘要。每一塊最多 5 筆、右上角「查看全部」切到對應子頁；
@@ -37,7 +39,10 @@ function RetryMessage({ children, onRetry }) {
 }
 
 function ExposureSummary({ records, status, onRetry }) {
-  const perf = useMemo(() => buildPerformance(toPublicRecords(records)), [records]);
+  // 正式的新聞稿曝光成效只算「新聞稿衍生曝光」（有分類資料時）；一般公司報導、產業連帶、待確認、不相關另計
+  const publicRecords = useMemo(() => toPublicRecords(records), [records]);
+  const scope = useMemo(() => defaultCoverageFilter(publicRecords), [publicRecords]);
+  const perf = useMemo(() => buildPerformance(filterByCoverage(publicRecords, scope)), [publicRecords, scope]);
   const latestTopics = useMemo(() => sortTopics(perf.topics, 'recent').slice(0, 3), [perf]);
 
   if (status === 'error') return <RetryMessage onRetry={onRetry}>新聞稿曝光成效載入失敗</RetryMessage>;
@@ -60,6 +65,7 @@ function ExposureSummary({ records, status, onRetry }) {
           </div>
         ))}
       </div>
+      <p className="text-xs text-gray-500 mt-2" data-testid="overview-exposure-scope">{coverageScopeText(scope, perf.total)}</p>
       <p className="text-xs text-gray-500 mt-3 mb-1.5">最近的新聞稿／主題</p>
       <ul className="space-y-1.5">
         {latestTopics.map(t => (

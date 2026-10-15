@@ -356,6 +356,28 @@ rm /tmp/pass.txt
   會列出解析統計、日期不完整與可能重複的標題、配對統計，不輸出備註。
 - **部署**：`firebase deploy --only functions:press_release_sync_job,hosting:main --project transcend-news-tbm`。
 
+## 🏷 曝光分類（`functions/coverage_classify.py`，`coverageClass`）
+
+`unmatched` 不等於錯誤，也不一定該配到新聞稿。每篇曝光另有獨立的分類欄位（與 `matchStatus` 分開，不影響 `pressReleaseId`／`confirmed`／`auto_matched`／`suggested`）：
+
+| coverageClass | 顯示 | 規則 |
+|---|---|---|
+| `press_release_derived` | 新聞稿衍生曝光 | `confirmed`、`auto_matched` |
+| `review` | 待確認 | `suggested`；有新聞稿特徵但無法唯一配對；資訊不足；信心 < 0.7 |
+| `company_coverage` | 一般公司報導 | 創見的產品、營運、財報、公司活動、管理層談話（非新聞稿轉載） |
+| `industry_related` | 產業連帶報導 | 持股轉讓、指數成分調整、記憶體漲價／缺貨、原廠外包、競品營收比較、股市個股清單 |
+| `unrelated` | 不相關 | 同名公司（創見文化事業…）等 |
+
+附屬欄位：`coverageClassLabel`、`coverageClassMethod`（`manual`／`press_release_match`／`rule`／`fallback`）、`coverageClassConfidence`、
+`coverageClassReasons`、`classifiedAt`、`classificationVersion`。
+
+- 分類跟著 `press_release_sync_job` 一起執行（配對之後），只更新「分類結果有變動」的文件（版本升級也算變動，可安全重跑）；
+  `coverageClassMethod = manual` 的人工分類永遠不被覆蓋；單筆失敗保留既有分類；分批寫入（每批 ≤ 400）；不刪除任何文件。
+- 同業在標題中比創見更前面出現的報導（例如「威剛9月營收…創見…」）不會被當成創見新聞稿轉載。
+- 網站「曝光成效」：統計預設只算「新聞稿衍生曝光」，其他分類另計並可用篩選查看；Excel 明細帶配對狀態、曝光分類、分類方法、信心程度。
+  公開網站沒有任何修改分類的寫入功能（人工修正需要日後的安全管理介面）。
+- `tools/press_release_dry_run.py` 會列出各分類數量、代表案例與預計更新數（零寫入）。
+
 ## 🌐 上游市場新聞（`src/features/news/useUpstreamNews.js`）
 
 上游市場分頁（供應鏈＋ DRAM/Flash 市場）的統計卡片、品牌篩選、「創見最新

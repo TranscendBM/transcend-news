@@ -11,6 +11,7 @@ import { EVENT_KIND_LABELS } from './exposureEvents.js';
 import { usePRState } from './prState.jsx';
 import {
   EMPTY_FILTERS, MATCH_FILTERS, TOPIC_SORTS, applyFilters, buildDetailRows, buildPerformance, buildSummaryRows,
+  COVERAGE_FILTERS, countByCoverage, coverageScopeText, defaultCoverageFilter, filterByCoverage, hasCoverageData,
   countMatchKinds, filterOptions, filterTopicsByMatch, hasActiveFilters, sortTopics, toPublicRecords, typeLabel,
 } from './exposurePerformance.js';
 
@@ -156,6 +157,7 @@ export default function ExposurePerformancePanel({
   // 篩選、展開的主題、排序放在 PR store：切換子頁再回來仍保留
   const [filters, setFilters] = usePRState('exposure.filters', EMPTY_FILTERS);
   const [openKeys, setOpenKeys] = usePRState('exposure.openTopics', () => new Set());
+  const [coverageChoice, setCoverageChoice] = usePRState('exposure.coverage', null);   // null＝預設範圍
   const [matchFilter, setMatchFilter] = usePRState('exposure.match', 'all');   // 配對狀態篩選
   const [sortMode, setSortMode] = usePRState('exposure.sort', 'recent');   // 預設：最近曝光的主題排最前面
   const setFilter = (name, value) => setFilters(f => ({ ...f, [name]: value }));
@@ -164,15 +166,20 @@ export default function ExposurePerformancePanel({
   const publicRecords = useMemo(() => toPublicRecords(records), [records]);
   const options = useMemo(() => filterOptions(publicRecords), [publicRecords]);
   const filtered = useMemo(() => applyFilters(publicRecords, filters), [publicRecords, filters]);
-  const perf = useMemo(() => buildPerformance(filtered), [filtered]);
+  // 曝光分類：正式的新聞稿曝光成效預設只算「新聞稿衍生曝光」；其他分類另計，可用篩選查看
+  const coverageData = useMemo(() => hasCoverageData(publicRecords), [publicRecords]);
+  const coverageCounts = useMemo(() => countByCoverage(filtered), [filtered]);
+  const activeCoverage = coverageData ? (coverageChoice || defaultCoverageFilter(publicRecords)) : 'all';
+  const scoped = useMemo(() => filterByCoverage(filtered, activeCoverage), [filtered, activeCoverage]);
+  const perf = useMemo(() => buildPerformance(scoped), [scoped]);
   const topics = useMemo(() => sortTopics(perf.topics, sortMode), [perf.topics, sortMode]);
   const hasMatchData = useMemo(() => publicRecords.some(r => r.matchStatus), [publicRecords]);
   const matchCounts = useMemo(() => countMatchKinds(perf.topics), [perf.topics]);
   const activeMatch = hasMatchData ? matchFilter : 'all';
   const shownTopics = useMemo(() => filterTopicsByMatch(topics, activeMatch), [topics, activeMatch]);
-  const more = useShowMore(shownTopics, TOPIC_PAGE, [filters, sortMode, activeMatch]);
+  const more = useShowMore(shownTopics, TOPIC_PAGE, [filters, sortMode, activeMatch, activeCoverage]);
 
-  const filtering = hasActiveFilters(filters) || activeMatch !== 'all';
+  const filtering = hasActiveFilters(filters) || activeMatch !== 'all' || (coverageData && activeCoverage !== 'derived');
   const truncated = records.length >= maxRecords;
   const toggle = key => setOpenKeys(prev => {
     const next = new Set(prev);
@@ -205,6 +212,22 @@ export default function ExposurePerformancePanel({
         這是推定而非正式新聞稿編號，每組都標示依據，可展開檢視每一則。
       </p>
       <SyncStatusLine sync={sync} hasMatchData={hasMatchData} />
+      {coverageData && (
+        <div className="mb-3" data-testid="coverage-filter">
+          <div className="flex flex-wrap gap-1.5" role="group" aria-label="曝光分類篩選">
+            {Object.entries(COVERAGE_FILTERS).map(([id, label]) => (
+              <TabBtn key={id} active={activeCoverage === id} onClick={() => setCoverageChoice(id)}>
+                {label} {id === 'all' ? filtered.length : coverageCounts[id]}
+              </TabBtn>
+            ))}
+          </div>
+          <p className="text-xs text-gray-500 mt-1.5">
+            新聞稿曝光成效的正式統計預設只計算「新聞稿衍生曝光」（人工確認或稿單自動配對）；
+            一般公司報導 {coverageCounts.company}、產業連帶報導 {coverageCounts.industry}、待確認 {coverageCounts.review}（含只有建議配對的）、
+            不相關 {coverageCounts.unrelated} 則另計，不含在正式成效內，可用上面的篩選查看。
+          </p>
+        </div>
+      )}
       <p className="text-xs text-gray-500 mb-4">
         統計依目前已載入的 {publicRecords.length.toLocaleString()} 筆人工確認曝光
         {truncated && (
@@ -273,8 +296,9 @@ export default function ExposurePerformancePanel({
             </div>
           ) : (
             <>
+              <p className="text-xs text-gray-500 -mb-1" data-testid="coverage-scope">{coverageScopeText(activeCoverage, perf.total)}</p>
               <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-                <Kpi label="人工確認曝光" value={perf.total} hint="則" />
+                <Kpi label="人工確認曝光" value={perf.total} hint={coverageData ? `則・${COVERAGE_FILTERS[activeCoverage]}` : '則'} />
                 <Kpi label="涵蓋媒體" value={perf.mediaCount} hint="家" />
                 <Kpi label="新聞稿／主題" value={perf.topicCount} hint="依標題彙整" />
                 <Kpi label="最近曝光" value={fmtDay(perf.latestDate)} hint={`首次 ${fmtDay(perf.firstDate)}`} />
