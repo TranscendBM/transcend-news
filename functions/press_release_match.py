@@ -42,7 +42,7 @@ SIMILARITY_GAP = 0.08
 STOPWORDS = {
     'transcend', '創見', '創見資訊', 'with', 'and', 'for', 'the', 'of', 'in', 'new', 'to', 'a', 'an',
 }
-_ALNUM = re.compile(r'[a-z0-9]+(?:[.\-+][a-z0-9]+)*')
+_ALNUM = re.compile(r'[a-z0-9]+(?:[.+][a-z0-9]+)*')   # 連字號當分隔：DDR5-7200 ＝ DDR5 7200
 _CJK_RUN = re.compile(r'[一-鿿]+')
 _YEAR_LIKE = re.compile(r'^(19|20)\d\d$')
 _TRACKING = {'fbclid', 'gclid', 'mc_cid', 'mc_eid', 'ref', 'source'}
@@ -176,16 +176,18 @@ def effective_date(pr) -> date | None:
 
 def prepare_press_release(pr) -> dict:
     """附上比對用的衍生欄位（不寫回 Firestore）。"""
-    names = [pr.get('title'), pr.get('officialTitle'), pr.get('englishTitle')]
+    names = [pr.get('topic'), pr.get('title'), pr.get('officialTitle'), pr.get('englishTitle')]
     titles = {normalize_title(n) for n in names if n}
     titles.discard('')
-    tokens = set()
+    # 稿單可能同時有簡稱（主題）與完整標題：每個名稱各自成一組關鍵字，比對時取最合的一組
+    token_sets = []
     for n in names:
-        if n:
-            tokens |= title_tokens(n)
-    for kw in pr.get('keywords') or []:
-        tokens |= alnum_tokens(kw)
-    display = pr.get('officialTitle') or pr.get('title') or ''
+        t = title_tokens(n) if n else set()
+        if t and t not in token_sets:
+            token_sets.append(t)
+    primary = title_tokens(pr.get('topic') or pr.get('title') or pr.get('officialTitle') or '')
+    tokens = primary
+    display = pr.get('officialTitle') or pr.get('title') or pr.get('topic') or ''
     sigs = period_signatures(' '.join(n for n in names if n))
     day = effective_date(pr)
     # 「營收新聞稿」這種沒有寫月份的重複型標題：營收是「上個月」的，所以月份由發稿日推得
@@ -196,12 +198,14 @@ def prepare_press_release(pr) -> dict:
     if generic_rev and day is not None:
         implied = day.month - 1 or 12
         tokens = {'營收'}
+        token_sets = [tokens]
     return {
         **pr,
         '_generic_rev': generic_rev,
         '_implied_month': implied,
         '_titles': titles,
         '_tokens': tokens,
+        '_sets': token_sets or [tokens],
         '_strong': strong_tokens(tokens),
         '_sigs': sigs,
         '_date': day,
@@ -297,14 +301,19 @@ def match_exposure(exposure: dict, prs: list[dict]) -> dict:
                 continue
             if not compatible(p, ex_sigs, title):
                 continue
-            if not p['_strong'] <= ex_strong:
-                continue
-            if len(p['_tokens']) < 2 and not p['_sigs'] and not p['_strong'] and not p['_generic_rev']:
-                continue
-            matched = len(p['_tokens'] & ex_tokens)
-            coverage = matched / len(p['_tokens']) if p['_tokens'] else 0
-            if coverage >= COVERAGE_MIN:
-                scored.append((coverage, matched, p))
+            best_set = None
+            for tokens in p['_sets']:
+                strong = strong_tokens(tokens)
+                if not strong <= ex_strong:
+                    continue
+                if len(tokens) < 2 and not p['_sigs'] and not strong and not p['_generic_rev']:
+                    continue
+                matched = len(tokens & ex_tokens)
+                coverage = matched / len(tokens) if tokens else 0
+                if coverage >= COVERAGE_MIN and (best_set is None or (coverage, matched) > best_set):
+                    best_set = (coverage, matched)
+            if best_set:
+                scored.append((best_set[0], best_set[1], p))
         if scored:
             scored.sort(key=lambda s: (-s[0], -s[1]))
             best = scored[0]
@@ -328,19 +337,24 @@ def match_exposure(exposure: dict, prs: list[dict]) -> dict:
     # 5. 標題相似度 → 只建議
     cand = []
     for p in prs:
-        if not compatible(p, ex_sigs, title) or not p['_strong'] <= ex_strong:
+        if not compatible(p, ex_sigs, title):
             continue
         gap = _days_between(ex_day, p['_date'])
         if gap is not None and not (-WINDOW_BEFORE_DAYS <= gap <= SUGGEST_MAX_DAYS):
             continue
-        sim = dice(p['_tokens'], ex_tokens)
-        # 只有一個關鍵字的短標題（例如 COMPUTEX）：關鍵字夠長、曝光落在發稿日附近才建議
-        if (len(p['_tokens']) == 1 and gap is not None and 0 <= gap <= WINDOW_AFTER_DAYS * 2
-                and p['_tokens'] <= ex_tokens and len(next(iter(p['_tokens']))) >= 5):
-            sim = max(sim, SIMILARITY_MIN)
-        # 稿單標題的關鍵字全部出現在曝光標題裡（但曝光標題多了別的字）→ 也算可建議，分數固定偏低
-        if len(p['_tokens']) >= 2 and p['_tokens'] <= ex_tokens:
-            sim = max(sim, 0.55)
+        sim = 0.0
+        for tokens in p['_sets']:
+            if not strong_tokens(tokens) <= ex_strong:
+                continue
+            value = dice(tokens, ex_tokens)
+            # 稿單標題的關鍵字全部出現在曝光標題裡（但曝光標題多了別的字）→ 也算可建議，分數固定偏低
+            if len(tokens) >= 2 and tokens <= ex_tokens:
+                value = max(value, 0.55)
+            # 只有一個關鍵字的短標題（例如 COMPUTEX）：關鍵字夠長、曝光落在發稿日附近才建議
+            if (len(tokens) == 1 and gap is not None and 0 <= gap <= WINDOW_AFTER_DAYS * 2
+                    and tokens <= ex_tokens and len(next(iter(tokens))) >= 5):
+                value = max(value, SIMILARITY_MIN)
+            sim = max(sim, value)
         if sim >= SIMILARITY_MIN:
             cand.append((sim, p))
     if cand:

@@ -43,6 +43,7 @@ FIELD_ALIASES = {
     'scheduled': ['時程', '日期', '預定日期', '預定發布日', '預計發布日'],
     'actual': ['實際發布日', '實際發布日期', '發布日期', '發布日'],
     'title': ['標題'],
+    'topic': ['主題', '簡稱'],
     'officialTitle': ['正式標題', '新聞稿標題'],
     'englishTitle': ['英文標題', 'english title'],
     'type': ['類型', '分類'],
@@ -168,7 +169,7 @@ def find_header(rows):
             field = _ALIAS_LOOKUP.get(_norm_header(cell))
             if field and field not in columns:
                 columns[field] = col
-        if 'title' in columns or 'officialTitle' in columns:
+        if 'title' in columns or 'officialTitle' in columns or 'topic' in columns:
             return index, columns
     return None, {}
 
@@ -234,12 +235,14 @@ def parse_sheet(sheet_title, rows, spreadsheet_id=SPREADSHEET_ID):
         raise SyncAbort(f'分頁 {sheet_title} 找不到標題列（需要「標題」欄），為避免錯位已停止同步')
     year = int(sheet_title)
     records, skipped, seen_ids = [], [], {}
-    header_labels = {_norm_header(a) for a in FIELD_ALIASES['title'] + FIELD_ALIASES['officialTitle']}
+    header_labels = {_norm_header(a) for a in FIELD_ALIASES['title'] + FIELD_ALIASES['officialTitle'] + FIELD_ALIASES['topic']}
 
     for offset, row in enumerate(rows[header_index + 1:], start=header_index + 2):
         title_text = _cell(row, columns, 'title')
+        topic = _cell(row, columns, 'topic')
         official = _cell(row, columns, 'officialTitle')
-        display = official or title_text
+        # 顯示用標題：正式標題 → 標題（完整新聞稿標題）→ 主題（簡稱）
+        display = official or title_text or topic
         if not display:
             if any(str(c or '').strip() for c in row):
                 skipped.append({'sheet': sheet_title, 'row': offset, 'reason': 'no_title'})
@@ -260,10 +263,11 @@ def parse_sheet(sheet_title, rows, spreadsheet_id=SPREADSHEET_ID):
         product = _cell(row, columns, 'product')
         keywords = _split_keywords(_cell(row, columns, 'keywords'))
         url = _cell(row, columns, 'officialUrl')
-        norm_title = pm.normalize_title(display)
+        # id 用「主題（簡稱）優先」：以前只有簡稱時 id 就是用簡稱算的，補上完整標題後 id 不變
+        norm_title = pm.normalize_title(topic or display)
 
         content = {
-            'title': title_text or official, 'officialTitle': official, 'englishTitle': _cell(row, columns, 'englishTitle'),
+            'title': display, 'topic': topic, 'officialTitle': official, 'englishTitle': _cell(row, columns, 'englishTitle'),
             'type': _cell(row, columns, 'type'), 'product': product, 'keywords': keywords,
             'officialUrl': url, 'rawDate': raw_date, 'scheduledDate': scheduled,
             'actualReleaseDate': actual, 'status': status, 'explicitPressReleaseId': explicit or None,
@@ -400,6 +404,11 @@ def plan_matches(exposures, press_releases):
             continue
         if action == 'keep':
             counts['auto_matched'] += 1
+            # 稿單補了完整標題：只更新顯示用的新聞稿名稱，配對本身不動
+            display = prs_by_id[exp['pressReleaseId']]['_display']
+            if display and display != exp.get('pressReleaseTitle'):
+                updates.append({'id': exp['id'], 'fields': {'pressReleaseTitle': display}, 'reason': 'retitle'})
+                counts['changed'] += 1
             continue
         counts[result['matchStatus']] += 1
         new = {k: result[k] for k in MATCH_FIELDS}
