@@ -179,6 +179,16 @@ class TestMatchRules(unittest.TestCase):
         self.assertEqual((r['matchStatus'], r['suggestedPressReleaseId']), ('suggested', 'c'))
         self.assertIsNone(r['pressReleaseId'])
 
+    def test_short_topic_and_full_title_both_work_and_hyphenated_models_split(self):
+        prs = [pr('d', '創見推出全系列DDR5-7200工業用記憶體模組，加速AI PC、邊緣運算與伺服器平台升級', '2026-08-20', topic='DDR5 7200'),
+               pr('e', '創見推出64GB DDR5工業用記憶體，提升高速運算效能與系統穩定性', '2026-09-14', topic='DDR5 6400 64GB')]
+        r = pm.match_exposure(ex('創見DDR5-7200工業記憶體搶攻AI與資料中心', '2026-08-22'), prs)
+        self.assertEqual((r['matchStatus'], r['pressReleaseId']), ('auto_matched', 'd'))
+        r = pm.match_exposure(ex('創見推出64GB DDR5工業用記憶體 提升高速運算效能與系統穩定性', '2026-09-15'), prs)
+        self.assertEqual(r['pressReleaseId'], 'e')
+        r = pm.match_exposure(ex('創見DDR5-6400工業記憶體登場', '2026-08-22'), prs)
+        self.assertNotEqual(r['pressReleaseId'], 'd')
+
     def test_general_company_coverage_is_not_forced_into_a_press_release(self):
         prs = [pr('p1', 'DDR5 7200 電競記憶體', '2026-05-10')]
         r = pm.match_exposure(ex('創見資訊股價今日上漲', '2026-05-11'), prs)

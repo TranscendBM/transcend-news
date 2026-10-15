@@ -468,6 +468,23 @@ class TestMatchingWrites(unittest.TestCase):
         self.sync()
         self.assertEqual(self.db.store['media_exposure']['e_auto']['pressReleaseId'], pid)
 
+    def test_topic_column_with_full_title_keeps_ids_and_retitles_existing_matches(self):
+        self.sync()
+        old_ids = {r['title']: r['id'] for r in ps.parse_sheet('2026', ROWS_2026)['records']}
+        pid = self.db.store['media_exposure']['e_auto']['pressReleaseId']
+        full = '創見推出 RDE3 與 USD710S 車用隨身碟，通過軍規認證'
+        rows = [ROWS_2026[0], ['時程', '主題', '標題', '類型']] + [
+            [r[0], r[1], full if r[1] == 'RDE3 + USD710S' else '', r[2]] for r in ROWS_2026[2:] if len(r) > 1]
+        parsed = ps.parse_sheet('2026', rows)['records']
+        self.assertEqual({r['id'] for r in parsed if r['topic'] == 'RDE3 + USD710S'}, {pid})   # id 不變
+        self.assertEqual(old_ids['RDE3 + USD710S'], pid)
+        self.assertTrue(all(r['title'] for r in parsed))               # 沒有完整標題的列仍用主題當標題，不會被略過
+        ps.run_sync(self.db, FakeSheets({'2026': rows, '2025': ROWS_2025}), run_id='r3', now=NOW)
+        exp = self.db.store['media_exposure']['e_auto']
+        self.assertEqual((exp['pressReleaseId'], exp['matchStatus']), (pid, 'auto_matched'))
+        self.assertEqual(exp['pressReleaseTitle'], full.replace('，', ','))   # 儲存格文字會做 NFKC
+        self.assertEqual(sum(1 for d in self.db.store['press_releases'].values() if d['active']), 8)
+
     def test_stale_auto_match_is_reevaluated_when_press_release_disappears(self):
         self.sync()
         tabs = {'2026': [r for r in ROWS_2026 if not (len(r) > 1 and r[1].startswith('RDE3'))], '2025': ROWS_2025}
