@@ -342,3 +342,44 @@ describe('ExposurePerformancePanel — 分組依據標籤', () => {
     expect(lastExportArgs().summaryRows.map(r => r['分組依據']).sort()).toEqual(['標題相似', '標題相同'].sort());
   });
 });
+
+describe('ExposurePerformancePanel — 主題排序（依新聞時間由近到遠）', () => {
+  // 曝光數最多的是 9/1 那組（3 則），但最近的是 9/20（1 則）
+  const SORT_RECORDS = [
+    raw('a1', tw(2026, 8, 30), 'A', '', '甲甲甲 新品發表'), raw('a2', tw(2026, 8, 31), 'B', '', '甲甲甲 新品發表'),
+    raw('a3', tw(2026, 9, 1), 'C', '', '甲甲甲 新品發表'),
+    raw('c1', tw(2026, 9, 9), 'E', '', '丙丙丙 展覽'), raw('c2', tw(2026, 9, 10), 'F', '', '丙丙丙 展覽'),
+    raw('b1', tw(2026, 9, 20), 'D', '', '乙乙乙 獲獎'),
+  ];
+  const order = () => topicButtons().map(b => b.querySelector('p').textContent.slice(0, 3));
+
+  it('預設依最近曝光時間由近到遠（不是依曝光數）', () => {
+    renderPanel({ records: SORT_RECORDS });
+    expect(order()).toEqual(['乙乙乙', '丙丙丙', '甲甲甲']);
+    expect(screen.getByText(/依最近曝光時間由近到遠排序/)).toBeTruthy();
+    expect(screen.getByRole('button', { name: '最新優先' }).className).toContain('text-white');
+  });
+
+  it('可切換成「曝光數最多」，再切回「最新優先」', () => {
+    renderPanel({ records: SORT_RECORDS });
+    fireEvent.click(screen.getByRole('button', { name: '曝光數最多' }));
+    expect(order()).toEqual(['甲甲甲', '丙丙丙', '乙乙乙']);
+    expect(screen.getByText(/依曝光數由多到少排序/)).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: '最新優先' }));
+    expect(order()).toEqual(['乙乙乙', '丙丙丙', '甲甲甲']);
+  });
+
+  it('篩選後仍依時間排序；Excel 匯出的主題順序跟畫面一致', () => {
+    renderPanel({ records: SORT_RECORDS });
+    fireEvent.click(screen.getByText('匯出 Excel'));
+    expect(lastExportArgs().summaryRows.map(r => r['新聞稿／主題'].slice(0, 3))).toEqual(['乙乙乙', '丙丙丙', '甲甲甲']);
+    expect(lastExportArgs().detailRows.map(r => r['新聞稿／主題'].slice(0, 3))).toEqual(
+      ['乙乙乙', '丙丙丙', '丙丙丙', '甲甲甲', '甲甲甲', '甲甲甲']);
+    fireEvent.click(screen.getByRole('button', { name: '曝光數最多' }));
+    fireEvent.click(screen.getByText('匯出 Excel'));
+    expect(lastExportArgs().summaryRows.map(r => r['新聞稿／主題'].slice(0, 3))).toEqual(['甲甲甲', '丙丙丙', '乙乙乙']);
+    fireEvent.click(screen.getByRole('button', { name: '最新優先' }));
+    select('曝光媒體篩選', 'F');
+    expect(order()).toEqual(['丙丙丙']);
+  });
+});

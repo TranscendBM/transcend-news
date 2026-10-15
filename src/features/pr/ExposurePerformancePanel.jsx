@@ -3,13 +3,14 @@ import { useMemo, useState } from 'react';
 import Card from '../../components/Card.jsx';
 import Icon from '../../components/Icon.jsx';
 import ShowMoreButton, { useShowMore } from '../../components/ShowMore.jsx';
+import TabBtn from '../../components/TabBtn.jsx';
 import { tagClass } from '../../components/tagStyles.js';
 import { exportExposurePerformanceExcel } from '../../utils/formatting.js';
 import { MAX_EXPOSURE_RECORDS } from './exposureLimits.js';
 import { EVENT_KIND_LABELS } from './exposureEvents.js';
 import {
-  EMPTY_FILTERS, applyFilters, buildDetailRows, buildPerformance, buildSummaryRows,
-  filterOptions, hasActiveFilters, toPublicRecords, typeLabel,
+  EMPTY_FILTERS, TOPIC_SORTS, applyFilters, buildDetailRows, buildPerformance, buildSummaryRows,
+  filterOptions, hasActiveFilters, sortTopics, toPublicRecords, typeLabel,
 } from './exposurePerformance.js';
 
 // 「新聞稿曝光成效」：把人工確認曝光（media_exposure 公開欄位）依「新聞稿／主題」彙整。
@@ -122,6 +123,7 @@ export default function ExposurePerformancePanel({
 }) {
   const [filters, setFilters] = useState(EMPTY_FILTERS);
   const [openKeys, setOpenKeys] = useState(() => new Set());
+  const [sortMode, setSortMode] = useState('recent');   // 預設：最近曝光的主題排最前面
   const setFilter = (name, value) => setFilters(f => ({ ...f, [name]: value }));
 
   // 衍生資料全部 memoize：只在原始資料或篩選條件改變時重算
@@ -129,7 +131,8 @@ export default function ExposurePerformancePanel({
   const options = useMemo(() => filterOptions(publicRecords), [publicRecords]);
   const filtered = useMemo(() => applyFilters(publicRecords, filters), [publicRecords, filters]);
   const perf = useMemo(() => buildPerformance(filtered), [filtered]);
-  const more = useShowMore(perf.topics, TOPIC_PAGE, [filters]);
+  const topics = useMemo(() => sortTopics(perf.topics, sortMode), [perf.topics, sortMode]);
+  const more = useShowMore(topics, TOPIC_PAGE, [filters, sortMode]);
 
   const filtering = hasActiveFilters(filters);
   const truncated = records.length >= maxRecords;
@@ -140,7 +143,7 @@ export default function ExposurePerformancePanel({
   });
 
   const exportAll = () => exportExposurePerformanceExcel({
-    summaryRows: buildSummaryRows(perf.topics), detailRows: buildDetailRows(perf.topics),
+    summaryRows: buildSummaryRows(topics), detailRows: buildDetailRows(topics),
   });
   const exportTopic = topic => exportExposurePerformanceExcel({
     detailRows: buildDetailRows([topic]), suffix: topic.name,
@@ -274,9 +277,16 @@ export default function ExposurePerformancePanel({
               </div>
 
               <div>
-                <p className="text-xs text-gray-500 mb-2">
-                  新聞稿／主題（{perf.topicCount}，依曝光數排序；點開看明細）
-                </p>
+                <div className="flex flex-wrap items-center justify-between gap-2 mb-2">
+                  <p className="text-xs text-gray-500">
+                    新聞稿／主題（{perf.topicCount}，依{sortMode === 'recent' ? '最近曝光時間由近到遠' : '曝光數由多到少'}排序；點開看明細）
+                  </p>
+                  <div className="flex gap-1.5" role="group" aria-label="主題排序">
+                    {Object.entries(TOPIC_SORTS).map(([id, label]) => (
+                      <TabBtn key={id} active={sortMode === id} onClick={() => setSortMode(id)}>{label}</TabBtn>
+                    ))}
+                  </div>
+                </div>
                 <div className="space-y-2">
                   {more.shown.map(t => (
                     <TopicRow key={t.key} topic={t} open={openKeys.has(t.key)}
