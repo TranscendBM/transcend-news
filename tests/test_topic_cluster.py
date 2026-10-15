@@ -190,6 +190,12 @@ class TestMetrics(unittest.TestCase):
         self.assertIn('transcend', doc['tags'])
         self.assertIn('finance', doc['tags'])
 
+    def test_importance_reason_labels_have_no_duplicated_word(self):
+        clusters, _ = cluster([art(1, '創見遭罰156萬元 違反貿易法', 0, sentiment='negative')])
+        doc = tc.build_topic_doc(clusters[0], BASE + timedelta(hours=1))
+        self.assertIn('風險事件 +12', ' '.join(doc['importanceReasons']))
+        self.assertNotIn('事件事件', ' '.join(doc['importanceReasons']))
+
     def test_fields_and_tags(self):
         clusters, _ = cluster([art(1, '三星罷工 記憶體供需吃緊 創見看漲價', 0, cat='usMarket')])
         doc = tc.build_topic_doc(clusters[0], BASE + timedelta(hours=1))

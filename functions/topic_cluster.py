@@ -451,7 +451,7 @@ def compute_importance(stats: dict) -> tuple[int, list[str]]:
         add(5, '涉及競品')
     kind_points = {'revenue': 8, 'earnings': 8, 'risk': 12, 'supply': 8, 'price': 6}
     if stats['eventType'] in kind_points:
-        label = {'revenue': '營收', 'earnings': '財報', 'risk': '風險事件', 'supply': '供應鏈', 'price': '價格'}[stats['eventType']]
+        label = {'revenue': '營收', 'earnings': '財報', 'risk': '風險', 'supply': '供應鏈', 'price': '價格'}[stats['eventType']]
         add(kind_points[stats['eventType']], f'{label}事件')
     if stats['articleCount'] and stats['negativeCount'] / stats['articleCount'] >= 0.5:
         add(8, '負面報導占多數')
