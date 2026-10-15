@@ -9,9 +9,13 @@
 //      半年（上半年、H1）——再用發布日推定年份，且期間必須「已經結束、且在發布日前 75 天內」。
 //   2. 標題講營收 → 「月營收公告」；講 EPS／獲利／財報 → 「季度財報／獲利」。
 //      同一個期間的所有報導合成同一個事件（key 相同）。
-//   3. 沒有明確期間時，只有在「標題有創見＋營收＋月／季字眼、且發布日在每月 12 日前
+//   3. 標題有「創見」且提到展覽名單（config/exposureShows.js）裡的展 → 「該展覽、該月」的參展事件；
+//      同一個展的別名（智慧製造展＝Touch Taiwan）、預告與開展期間的報導都合成同一個事件。
+//   4. 沒有明確期間時，只有在「標題有創見＋營收＋月／季字眼、且發布日在每月 12 日前
 //      （營收公布期）」才推定為上個月營收；否則不歸類（寧可不合併）。
 // 規則是推定，畫面上會標示「依事件規則」，可展開查看每一則；之後有人工 campaignId 就優先用它。
+
+import { EXPO_SHOWS } from '../../config/exposureShows.js';
 
 const NUM = { 一: 1, 二: 2, 兩: 2, 三: 3, 四: 4, 五: 5, 六: 6, 七: 7, 八: 8, 九: 9, 十: 10, 十一: 11, 十二: 12 };
 const toInt = s => (/^\d+$/.test(s) ? Number(s) : NUM[s] ?? null);
@@ -22,7 +26,7 @@ export const MAX_DELAY_DAYS = 75;
 /** 沒有明確期間時，只在每月這一天以前才推定為「上個月營收」。 */
 export const REVENUE_ANNOUNCE_BY_DAY = 12;
 
-export const EVENT_KIND_LABELS = { revenue: '月營收公告', earnings: '季度財報／獲利' };
+export const EVENT_KIND_LABELS = { revenue: '月營收公告', earnings: '季度財報／獲利', expo: '展覽參展' };
 
 const dayNum = day => { const [y, m, d] = day.split('-').map(Number); return Date.UTC(y, m - 1, d); };
 
@@ -105,6 +109,15 @@ export function detectEvent(title, day) {
       const py = m === 1 ? y - 1 : y;
       const pm = m === 1 ? 12 : m - 1;
       return { kind: 'revenue', key: `revenue:${py}-${pm}`, label: `${py}年${pm}月營收公告`, inferred: true };
+    }
+  }
+
+  // 展覽參展：營收／財報規則都沒命中時才套用（營收標題裡順帶提到「將參展…」仍歸營收公告）
+  if (/創見/.test(text)) {
+    const show = EXPO_SHOWS.find(s => s.patterns.some(p => p.test(text)));
+    if (show) {
+      const [y, m] = day.split('-').map(Number);
+      return { kind: 'expo', key: `expo:${show.id}:${y}-${m}`, label: `${y}年${m}月 ${show.label} 參展` };
     }
   }
   return null;
