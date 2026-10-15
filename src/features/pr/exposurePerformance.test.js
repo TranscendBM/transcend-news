@@ -377,3 +377,32 @@ describe('sortTopics — 主題清單排序', () => {
     expect(sortTopics([], 'recent')).toEqual([]);
   });
 });
+
+describe('groupByTopic — 展覽參展事件', () => {
+  const group = rows => groupByTopic(pub(rows));
+
+  it('使用者提供的兩篇「能源週」參展新聞歸成同一個主題（依事件規則：展覽參展）', () => {
+    const topics = group([
+      raw('e1', tw(2026, 10, 6), 'MoneyDJ理財網', '', '創見參展能源週，展示三大產品線'),
+      raw('e2', tw(2026, 10, 6), '工商時報', '', '創見參展智慧能源週 聚焦AI視覺、高效運算'),
+    ]);
+    expect(topics).toHaveLength(1);
+    expect(topics[0]).toMatchObject({
+      total: 2, basis: 'event', eventKind: 'expo', name: '2026年10月 智慧能源週 參展', mediaCount: 2,
+    });
+  });
+
+  it('同一天不同的展、或同一個展不同月份，不會混在一起；營收新聞不會被拉進展覽組', () => {
+    const topics = group([
+      raw('1', tw(2026, 5, 19), 'A', '', '創見參展COMPUTEX 2026 秀AI嵌入式'),
+      raw('2', tw(2026, 5, 19), 'B', '', '創見前進COMPUTEX 展示工用和消費產品'),
+      raw('3', tw(2026, 6, 2), 'C', '', '創見資訊榮獲COMPUTEX 2026永續設計獎金獎'),
+      raw('4', tw(2026, 5, 19), 'D', '', '創見參展智慧製造展 聚焦智慧影像'),
+      raw('5', tw(2026, 10, 6), 'E', '', '創見9月營收60.4億 將參展智慧能源週'),
+    ]);
+    expect(topics).toHaveLength(4);
+    const computexMay = topics.find(t => t.name.includes('2026年5月 COMPUTEX'));
+    expect(computexMay.total).toBe(2);
+    expect(topics.find(t => t.items.some(r => r.id === '5')).eventKind).toBeNull();   // 單篇營收，沒有成組
+  });
+});
