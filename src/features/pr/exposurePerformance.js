@@ -210,6 +210,24 @@ export function groupByTopic(records, { similarThreshold = SIMILAR_THRESHOLD } =
   }).sort((x, y) => y.total - x.total || y.lastDate - x.lastDate || x.name.localeCompare(y.name, 'zh-Hant'));
 }
 
+// ── 主題排序 ─────────────────────────────────────────────
+export const TOPIC_SORTS = { recent: '最新優先', count: '曝光數最多' };
+
+/**
+ * 主題清單排序（不改動原陣列）：
+ *   recent：依「最近曝光時間」由近到遠；同一時間再依曝光數、首次曝光時間、名稱
+ *   count ：依曝光數由多到少；同數量再依最近曝光時間（groupByTopic 的原始順序）
+ * 畫面清單與 Excel 匯出都用同一個排序結果，兩邊順序一致。
+ */
+export function sortTopics(topics, mode = 'recent') {
+  const list = [...topics];
+  if (mode === 'count') {
+    return list.sort((a, b) => b.total - a.total || b.lastDate - a.lastDate || a.name.localeCompare(b.name, 'zh-Hant'));
+  }
+  return list.sort((a, b) => b.lastDate - a.lastDate || b.total - a.total || b.firstDate - a.firstDate
+    || a.name.localeCompare(b.name, 'zh-Hant'));
+}
+
 /** 一份（已篩選的）紀錄 → 摘要、類型分布、媒體排行、主題分組。 */
 export function buildPerformance(records) {
   const total = records.length;

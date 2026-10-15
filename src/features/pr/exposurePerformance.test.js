@@ -3,7 +3,7 @@ import { describe, it, expect } from 'vitest';
 import {
   EMPTY_FILTERS, PRIVATE_FIELD_NAMES, applyFilters, buildDetailRows, buildPerformance, buildSummaryRows,
   filterOptions, groupByTopic, hasActiveFilters, normalizeTitleKey, sanitizeCell, toPublicRecord,
-  titleSimilarity, toPublicRecords, typeLabel,
+  sortTopics, titleSimilarity, toPublicRecords, typeLabel,
 } from './exposurePerformance.js';
 
 // 台灣時間 y-m-d h:00 的實際時刻
@@ -345,5 +345,35 @@ describe('Excel 資料列與公式注入防護', () => {
       '新聞稿／主題': '同一則', 分組依據: '標題相同', 曝光總數: 3, 不重複媒體數: 2, 首次曝光: '2026-09-01', 最近曝光: '2026-09-03',
       主要媒體: 'A報（2）、B網（1）', 類型分布: '網路新聞 2、影音 1',
     }]);
+  });
+});
+
+describe('sortTopics — 主題清單排序', () => {
+  // 甲：3 則、最近 9/1；乙：1 則、最近 9/20；丙：2 則、最近 9/10；丁：1 則、最近 9/20（跟乙同一天）
+  const topics = groupByTopic(pub([
+    raw('a1', tw(2026, 8, 30), 'A', '', '甲甲甲 新品發表'), raw('a2', tw(2026, 8, 31), 'B', '', '甲甲甲 新品發表'), raw('a3', tw(2026, 9, 1), 'C', '', '甲甲甲 新品發表'),
+    raw('b1', tw(2026, 9, 20, 10), 'D', '', '乙乙乙 獲獎'),
+    raw('c1', tw(2026, 9, 9), 'E', '', '丙丙丙 展覽'), raw('c2', tw(2026, 9, 10), 'F', '', '丙丙丙 展覽'),
+    raw('d1', tw(2026, 9, 20, 10), 'G', '', '丁丁丁 公告'),
+  ]));
+  const names = list => list.map(t => t.name.slice(0, 3));
+
+  it('recent：依最近曝光時間由近到遠；同一時間再依曝光數、名稱', () => {
+    const sorted = sortTopics(topics, 'recent');
+    expect(sorted.map(t => t.lastDate.getTime())).toEqual([...sorted.map(t => t.lastDate.getTime())].sort((a, b) => b - a));
+    expect(names(sorted).slice(2)).toEqual(['丙丙丙', '甲甲甲']);          // 9/10 比 9/1 近
+    expect(new Set(names(sorted).slice(0, 2))).toEqual(new Set(['乙乙乙', '丁丁丁']));   // 9/20 同一天排前面
+  });
+
+  it('count：依曝光數由多到少，同數量再依最近時間', () => {
+    expect(names(sortTopics(topics, 'count')).slice(0, 2)).toEqual(['甲甲甲', '丙丙丙']);
+    expect(sortTopics(topics, 'count').map(t => t.total)).toEqual([3, 2, 1, 1]);
+  });
+
+  it('預設是 recent；不改動傳入的陣列', () => {
+    const before = topics.map(t => t.key);
+    expect(sortTopics(topics).map(t => t.key)).toEqual(sortTopics(topics, 'recent').map(t => t.key));
+    expect(topics.map(t => t.key)).toEqual(before);
+    expect(sortTopics([], 'recent')).toEqual([]);
   });
 });
