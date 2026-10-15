@@ -122,3 +122,18 @@ describe('ExposureInsightsPage', () => {
     expect(screen.getByText('匯出分析 Excel').disabled).toBe(true);
   });
 });
+
+describe('ExposureInsightsPage — 自動監測沒抓到的曝光連結安全', () => {
+  it('不安全網址不會輸出成可點擊連結', () => {
+    const now = new Date();
+    const records = [
+      { id: 'n1', exposureDate: now, mediaName: '經濟日報', reporter: '王一', title: '安全標題', link: 'https://example.com/n1' },
+      { id: 'n2', exposureDate: now, mediaName: '鉅亨網', reporter: '李二', title: '惡意標題', link: 'javascript:alert(1)' },
+    ];
+    render(<ExposureInsightsPage records={records} autoArticles={[{ title: '別的', link: 'https://x.com', pubDate: now }]} />);
+    fireEvent.click(screen.getByRole('button', { name: '自動監測比對' }));
+    expect(screen.getByText('安全標題').closest('a').getAttribute('href')).toBe('https://example.com/n1');
+    expect(screen.getByText('惡意標題').closest('a')).toBeNull();
+    expect(document.querySelector('a[href^="javascript"]')).toBeNull();
+  });
+});

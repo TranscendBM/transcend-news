@@ -3,7 +3,7 @@ import {
   getDb, collection, query, orderBy, limit, onSnapshot,
 } from '../../services/firebase.js';
 
-const MAX_EXPOSURE_RECORDS = 1000;
+import { MAX_EXPOSURE_RECORDS } from './exposureLimits.js';
 
 /**
  * 人工確認曝光的獨立資料管線。

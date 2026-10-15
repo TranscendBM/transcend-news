@@ -1,0 +1,284 @@
+import { useMemo, useState } from 'react';
+
+import Card from '../../components/Card.jsx';
+import Icon from '../../components/Icon.jsx';
+import ShowMoreButton, { useShowMore } from '../../components/ShowMore.jsx';
+import { tagClass } from '../../components/tagStyles.js';
+import { exportExposurePerformanceExcel } from '../../utils/formatting.js';
+import { MAX_EXPOSURE_RECORDS } from './exposureLimits.js';
+import {
+  EMPTY_FILTERS, applyFilters, buildDetailRows, buildPerformance, buildSummaryRows,
+  filterOptions, hasActiveFilters, toPublicRecords, typeLabel,
+} from './exposurePerformance.js';
+
+// 「新聞稿曝光成效」：把人工確認曝光（media_exposure 公開欄位）依「新聞稿／主題」彙整。
+// 篩選只做一次（filtered），摘要、類型分布、媒體排行、主題分組、明細與 Excel 匯出
+// 全部吃同一份結果，畫面上的數字才會彼此一致。
+
+const TYPE_COLORS = { online: '#960014', video: '#b45309', social: '#475569', other: '#94a3b8' };
+const TYPE_TONES = { online: 'blue', video: 'amber', social: 'green' };
+const typeColor = key => TYPE_COLORS[key] || TYPE_COLORS.other;
+
+const fmtDay = d => (d ? d.toLocaleDateString('zh-TW', { timeZone: 'Asia/Taipei' }) : '—');
+const pct = v => `${Math.round(v * 100)}%`;
+const TOPIC_PAGE = 15;
+
+const inputCls = 'rounded-xl border border-gray-700/60 px-3 py-2 text-sm outline-none transition focus:border-red-700';
+const btnCls = 'text-sm px-3.5 py-1.5 rounded-lg border border-gray-700/60 text-gray-400 hover:text-gray-200 hover:bg-gray-800 transition disabled:opacity-40 disabled:cursor-not-allowed shrink-0';
+
+function Kpi({ label, value, hint }) {
+  return (
+    <div className="rounded-xl border border-gray-700/60 bg-gray-900 p-3 text-center">
+      <p className="text-xs text-gray-500">{label}</p>
+      <p className="text-2xl font-bold text-ink mt-1 tabular-nums">{value}</p>
+      {hint && <p className="text-xs text-gray-600 mt-0.5">{hint}</p>}
+    </div>
+  );
+}
+
+function ExposureLink({ record }) {
+  // record.link 已經過 safeHttpUrl；不安全的網址在這裡是空字串，不會輸出成連結
+  return record.link
+    ? <a href={record.link} target="_blank" rel="noopener noreferrer" className="text-ink hover:text-red-500 leading-snug">{record.title || record.link}</a>
+    : <span className="text-ink leading-snug">{record.title || '（無標題）'}</span>;
+}
+
+function TopicRow({ topic, open, onToggle, onExport }) {
+  const detailId = `exposure-topic-${topic.key.replace(/[^a-z0-9]/gi, '').slice(0, 24)}-${topic.total}`;
+  return (
+    <div className="rounded-xl border border-gray-700/60 bg-gray-900">
+      <button onClick={onToggle} aria-expanded={open} aria-controls={detailId}
+        className="w-full text-left p-3 flex items-start gap-3 hover:bg-gray-800/30 rounded-xl transition">
+        <Icon name="chevronright" className={`mt-1 text-gray-500 transition-transform ${open ? 'rotate-90' : ''}`} />
+        <div className="min-w-0 flex-1">
+          <p className="text-sm font-medium text-ink leading-snug break-words">{topic.name}</p>
+          <p className="text-xs text-gray-500 mt-1">
+            {topic.mediaCount} 家媒體・首次 {fmtDay(topic.firstDate)}・最近 {fmtDay(topic.lastDate)}
+            {topic.source === 'id' && '・依新聞稿編號'}
+          </p>
+          <div className="flex flex-wrap gap-1.5 mt-2">
+            {topic.typeCounts.map(c => (
+              <span key={c.key} className={tagClass(TYPE_TONES[c.key] || 'gray')}>{c.label} {c.count}</span>
+            ))}
+            {topic.topMedia.map(m => (
+              <span key={m.key} className={tagClass('gray')}>{m.label} {m.count}</span>
+            ))}
+          </div>
+        </div>
+        <div className="text-right shrink-0">
+          <p className="text-2xl font-bold text-ink tabular-nums leading-none">{topic.total}</p>
+          <p className="text-xs text-gray-500 mt-1">則曝光</p>
+        </div>
+      </button>
+
+      {open && (
+        <div id={detailId} className="px-3 pb-3 border-t border-gray-700/60">
+          <div className="flex items-center justify-between gap-2 py-2">
+            <p className="text-xs text-gray-500">曝光明細（新到舊）</p>
+            <button onClick={onExport} className={btnCls}>
+              <Icon name="download" /> 匯出此主題
+            </button>
+          </div>
+          <div className="overflow-x-auto max-h-[420px] overflow-y-auto">
+            <table className="ir-table w-full text-sm">
+              <thead>
+                <tr className="text-gray-500">
+                  <th className="text-left pb-1.5 pr-3 font-medium whitespace-nowrap">日期</th>
+                  <th className="text-left pb-1.5 pr-3 font-medium whitespace-nowrap">媒體</th>
+                  <th className="text-left pb-1.5 pr-3 font-medium whitespace-nowrap">記者</th>
+                  <th className="text-left pb-1.5 pr-3 font-medium min-w-[220px]">新聞標題</th>
+                  <th className="text-left pb-1.5 font-medium whitespace-nowrap">類型</th>
+                </tr>
+              </thead>
+              <tbody>
+                {topic.items.map((r, i) => (
+                  <tr key={r.id || i}>
+                    <td className="py-1.5 pr-3 text-gray-400 tabular-nums whitespace-nowrap">{r.day}</td>
+                    <td className="py-1.5 pr-3 text-gray-300 whitespace-nowrap">{r.mediaName}</td>
+                    <td className="py-1.5 pr-3 text-gray-400 whitespace-nowrap">{r.reporter || '—'}</td>
+                    <td className="py-1.5 pr-3"><ExposureLink record={r} /></td>
+                    <td className="py-1.5 text-xs text-gray-500 whitespace-nowrap">{typeLabel(r.type)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+export default function ExposurePerformancePanel({
+  records = [], status = 'idle', onRetry = () => {}, maxRecords = MAX_EXPOSURE_RECORDS,
+}) {
+  const [filters, setFilters] = useState(EMPTY_FILTERS);
+  const [openKeys, setOpenKeys] = useState(() => new Set());
+  const setFilter = (name, value) => setFilters(f => ({ ...f, [name]: value }));
+
+  // 衍生資料全部 memoize：只在原始資料或篩選條件改變時重算
+  const publicRecords = useMemo(() => toPublicRecords(records), [records]);
+  const options = useMemo(() => filterOptions(publicRecords), [publicRecords]);
+  const filtered = useMemo(() => applyFilters(publicRecords, filters), [publicRecords, filters]);
+  const perf = useMemo(() => buildPerformance(filtered), [filtered]);
+  const more = useShowMore(perf.topics, TOPIC_PAGE, [filters]);
+
+  const filtering = hasActiveFilters(filters);
+  const truncated = records.length >= maxRecords;
+  const toggle = key => setOpenKeys(prev => {
+    const next = new Set(prev);
+    if (next.has(key)) next.delete(key); else next.add(key);
+    return next;
+  });
+
+  const exportAll = () => exportExposurePerformanceExcel({
+    summaryRows: buildSummaryRows(perf.topics), detailRows: buildDetailRows(perf.topics),
+  });
+  const exportTopic = topic => exportExposurePerformanceExcel({
+    detailRows: buildDetailRows([topic]), suffix: topic.name,
+  });
+
+  const loadingFirst = status === 'loading' && publicRecords.length === 0;
+  const failed = status === 'error';
+  const showData = !failed && !loadingFirst && publicRecords.length > 0;
+
+  return (
+    <Card title="新聞稿曝光成效" icon="chart"
+      actions={
+        <button onClick={exportAll} disabled={!showData || perf.total === 0} className={btnCls}>
+          <Icon name="download" /> 匯出 Excel{filtering ? '（目前篩選）' : ''}
+        </button>
+      }>
+      <p className="text-xs text-gray-500 mb-1">
+        依「新聞稿／主題」彙整人工確認的曝光。目前以標題比對分組（正規化後標題完全相同才合併），
+        尚未對應正式新聞稿編號，所以同一則新聞稿若各媒體改了標題，會分成不同主題。
+      </p>
+      <p className="text-xs text-gray-500 mb-4">
+        統計依目前已載入的 {publicRecords.length.toLocaleString()} 筆人工確認曝光
+        {truncated && (
+          <span className="text-amber-700">（已達讀取上限 {maxRecords.toLocaleString()} 筆，更早的資料未納入統計）</span>
+        )}
+        。
+      </p>
+
+      {failed && (
+        <div className="py-8 text-center text-sm text-red-400" role="alert">
+          <p><Icon name="alert" /> 新聞稿曝光成效載入失敗</p>
+          <button onClick={onRetry}
+            className="mt-2 text-sm px-3.5 py-1.5 rounded-lg border border-red-700/60 text-red-300 hover:bg-red-900/30 transition">
+            重試
+          </button>
+        </div>
+      )}
+
+      {loadingFirst && <div className="py-8 text-center text-sm text-gray-600">載入中…</div>}
+
+      {!failed && !loadingFirst && publicRecords.length === 0 && (
+        <div className="py-8 text-center text-sm text-gray-600">尚未匯入人工確認曝光資料</div>
+      )}
+
+      {showData && (
+        <div className="space-y-4">
+          {/* 篩選列 */}
+          <div className="flex flex-col lg:flex-row lg:flex-wrap lg:items-center gap-2">
+            <label className="relative flex-1 min-w-[200px]">
+              <span className="sr-only">搜尋曝光</span>
+              <input type="search" value={filters.query} onChange={e => setFilter('query', e.target.value)}
+                placeholder="搜尋標題、媒體或記者…" aria-label="搜尋曝光（標題、媒體、記者）"
+                className={`${inputCls} w-full`} />
+            </label>
+            <div className="grid grid-cols-2 sm:flex gap-2">
+              <select value={filters.media} onChange={e => setFilter('media', e.target.value)} aria-label="曝光媒體篩選"
+                className={`${inputCls} sm:max-w-[190px]`}>
+                <option value="all">所有媒體</option>
+                {options.media.map(m => <option key={m} value={m}>{m}</option>)}
+              </select>
+              <select value={filters.type} onChange={e => setFilter('type', e.target.value)} aria-label="曝光類型篩選"
+                className={inputCls}>
+                <option value="all">所有類型</option>
+                {options.types.map(t => <option key={t} value={t}>{typeLabel(t)}</option>)}
+              </select>
+            </div>
+            <div className="flex items-center gap-2">
+              <input type="date" value={filters.from} max={filters.to || undefined}
+                onChange={e => setFilter('from', e.target.value)} aria-label="曝光起始日" className={inputCls} />
+              <span className="text-gray-500 text-sm">至</span>
+              <input type="date" value={filters.to} min={filters.from || undefined}
+                onChange={e => setFilter('to', e.target.value)} aria-label="曝光結束日" className={inputCls} />
+            </div>
+            <div className="flex items-center justify-between gap-3 lg:ml-auto">
+              <span className="text-xs text-gray-500 tabular-nums">符合 {perf.total} / 共 {publicRecords.length} 筆</span>
+              {filtering && (
+                <button onClick={() => { setFilters(EMPTY_FILTERS); }} className={btnCls}>清除篩選</button>
+              )}
+            </div>
+          </div>
+
+          {perf.total === 0 ? (
+            <div className="py-8 text-center text-sm text-gray-600">
+              沒有符合篩選條件的曝光。
+              <button onClick={() => setFilters(EMPTY_FILTERS)} className="ml-2 underline text-gray-400 hover:text-gray-200">清除篩選</button>
+            </div>
+          ) : (
+            <>
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                <Kpi label="人工確認曝光" value={perf.total} hint="則" />
+                <Kpi label="涵蓋媒體" value={perf.mediaCount} hint="家" />
+                <Kpi label="新聞稿／主題" value={perf.topicCount} hint="依標題彙整" />
+                <Kpi label="最近曝光" value={fmtDay(perf.latestDate)} hint={`首次 ${fmtDay(perf.firstDate)}`} />
+              </div>
+
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                <div>
+                  <p className="text-xs text-gray-500 mb-2">曝光類型分布</p>
+                  <div className="flex h-3 rounded-full overflow-hidden bg-gray-800" role="img"
+                    aria-label={perf.typeCounts.map(c => `${c.label} ${c.count}`).join('，')}>
+                    {perf.typeCounts.map(c => (
+                      <div key={c.key} style={{ width: `${c.share * 100}%`, background: typeColor(c.key) }} />
+                    ))}
+                  </div>
+                  <ul className="flex flex-wrap gap-x-4 gap-y-1 mt-2 text-xs text-gray-400">
+                    {perf.typeCounts.map(c => (
+                      <li key={c.key} className="flex items-center gap-1.5">
+                        <span className="inline-block w-2.5 h-2.5 rounded-sm" style={{ background: typeColor(c.key) }} />
+                        {c.label} {c.count}（{pct(c.share)}）
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+                <div>
+                  <p className="text-xs text-gray-500 mb-2">曝光量最高的媒體</p>
+                  <ol className="space-y-1.5">
+                    {perf.mediaRanking.slice(0, 8).map((m, i) => (
+                      <li key={m.key} className="flex items-center gap-2 text-sm">
+                        <span className="w-4 text-xs text-gray-600 tabular-nums">{i + 1}</span>
+                        <span className="w-28 shrink-0 text-gray-300 truncate">{m.label}</span>
+                        <div className="flex-1 h-2 rounded-full bg-gray-800 overflow-hidden">
+                          <div className="h-full rounded-full" style={{ width: `${m.count / perf.mediaRanking[0].count * 100}%`, background: 'rgb(150,0,20)' }} />
+                        </div>
+                        <span className="w-8 text-right text-xs font-bold text-ink tabular-nums">{m.count}</span>
+                      </li>
+                    ))}
+                  </ol>
+                </div>
+              </div>
+
+              <div>
+                <p className="text-xs text-gray-500 mb-2">
+                  新聞稿／主題（{perf.topicCount}，依曝光數排序；點開看明細）
+                </p>
+                <div className="space-y-2">
+                  {more.shown.map(t => (
+                    <TopicRow key={t.key} topic={t} open={openKeys.has(t.key)}
+                      onToggle={() => toggle(t.key)} onExport={() => exportTopic(t)} />
+                  ))}
+                </div>
+                <ShowMoreButton remaining={more.remaining} step={TOPIC_PAGE} onMore={more.showMore} onAll={more.showAll} />
+              </div>
+            </>
+          )}
+        </div>
+      )}
+    </Card>
+  );
+}

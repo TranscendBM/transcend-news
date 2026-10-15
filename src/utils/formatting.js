@@ -85,3 +85,24 @@ export async function exportExposureInsightsExcel(ins) {
   const stamp = today.getFullYear() + String(today.getMonth() + 1).padStart(2, '0') + String(today.getDate()).padStart(2, '0');
   XLSX.writeFile(wb, '人工確認曝光分析_' + stamp + '.xlsx');
 }
+
+// 新聞稿曝光成效 → Excel。rows 由 exposurePerformance.js 的 buildDetailRows／buildSummaryRows
+// 產生（只有公開欄位，且已做公式注入防護），這裡只負責寫檔。
+// 有 summaryRows 時多一張「主題彙整」工作表；suffix 會放進檔名（已清掉不合法字元）。
+export async function exportExposurePerformanceExcel({ summaryRows = [], detailRows = [], suffix = '' }) {
+  if (!detailRows || detailRows.length === 0) return;
+  const XLSX = await import('xlsx');
+  const wb = XLSX.utils.book_new();
+  if (summaryRows.length) {
+    const sheet = XLSX.utils.json_to_sheet(summaryRows);
+    sheet['!cols'] = [{ wch: 46 }, { wch: 10 }, { wch: 12 }, { wch: 12 }, { wch: 12 }, { wch: 36 }, { wch: 28 }];
+    XLSX.utils.book_append_sheet(wb, sheet, '主題彙整');
+  }
+  const detail = XLSX.utils.json_to_sheet(detailRows);
+  detail['!cols'] = [{ wch: 46 }, { wch: 12 }, { wch: 16 }, { wch: 12 }, { wch: 60 }, { wch: 10 }, { wch: 60 }];
+  XLSX.utils.book_append_sheet(wb, detail, '曝光明細');
+  const today = new Date();
+  const stamp = today.getFullYear() + String(today.getMonth() + 1).padStart(2, '0') + String(today.getDate()).padStart(2, '0');
+  const safeSuffix = String(suffix || '').replace(/[\\/:*?"<>|\s]+/g, '_').replace(/^_+|_+$/g, '').slice(0, 24);
+  XLSX.writeFile(wb, '新聞稿曝光成效' + (safeSuffix ? '_' + safeSuffix : '') + '_' + stamp + '.xlsx');
+}
