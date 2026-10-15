@@ -1,7 +1,6 @@
-import { useCallback, useMemo } from 'react';
+import { useMemo } from 'react';
 
-import { useUrlParam } from '../../hooks/useUrlParam.js';
-import { writeParams } from '../../utils/urlState.js';
+import { useSectionNav } from '../../hooks/useSectionNav.js';
 import { PRStatsPanel } from './PRStatsPanel.jsx';
 import { KeyMediaPanel } from './KeyMediaPanel.jsx';
 import { ManualExposurePanel } from './ManualExposurePanel.jsx';
@@ -34,16 +33,10 @@ export function PRTab({
   mediaExposureStatus = 'idle',
   refreshMediaExposure = () => {},
 }) {
-  const [section] = useUrlParam('section', PR_SECTION_IDS, DEFAULT_PR_SECTION);
+  const [section, navigate] = useSectionNav('pr', PR_SECTION_IDS, DEFAULT_PR_SECTION);
 
   // 所有有效創見 PR 文章（已排除 CMoney／券商明細並去重）：總覽、新聞監測、曝光成效共用這一份
   const validTranscend = useMemo(() => selectValidTranscend(prArticles), [prArticles]);
-
-  // 切換子頁：網址寫成 ?tab=pr&section=…（pushState，上一頁／下一頁可以回到前一個子頁）並捲回頂端
-  const navigate = useCallback(next => {
-    writeParams({ tab: 'pr', section: next });
-    try { window.scrollTo(0, 0); } catch { /* 非瀏覽器環境略過 */ }
-  }, []);
 
   const content = {
     overview: (

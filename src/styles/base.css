@@ -133,3 +133,8 @@ body { font-family: 'Segoe UI', system-ui, -apple-system, sans-serif; background
     scroll-behavior: auto !important;
   }
 }
+
+/* IR：表格與摘要卡用到的 -400 文字色（黃、藍）在白底上對比不足，補上深一階的顏色 */
+.light-theme .text-yellow-400 { color:#a16207 !important; }
+.light-theme .text-blue-400,
+.light-theme .text-blue-400\/70 { color:#1d4ed8 !important; }
