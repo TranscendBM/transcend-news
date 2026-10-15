@@ -169,7 +169,8 @@ class TestScheduledEntrypoints(unittest.TestCase):
         jobs = [main.stocks_job, main.news_job,
                 main.trading_job, main.finance_job, main.finance_early_month_job,
                 main.tw_dram_digest_job, main.us_dram_digest_job,
-                main.news_cleanup_job, main.ai_worker_health_job]
+                main.news_cleanup_job, main.ai_worker_health_job,
+                main.press_release_sync_job]
         for job in jobs:
             self.assertEqual(job._schedule_opts.get('max_instances'), 1,
                              f'{job.__name__} 必須設 max_instances=1')
@@ -180,7 +181,8 @@ class TestScheduledEntrypoints(unittest.TestCase):
         ttls = {'stocks_job': 3, 'news_job': 12,
                 'trading_job': 8, 'finance_job': 12, 'finance_early_month_job': 12,
                 'tw_dram_digest_job': 5, 'us_dram_digest_job': 5,
-                'news_cleanup_job': 15, 'ai_worker_health_job': 5}
+                'news_cleanup_job': 15, 'ai_worker_health_job': 5,
+                'press_release_sync_job': 8}
         for job_name, ttl in ttls.items():
             timeout_sec = getattr(main, job_name)._schedule_opts['timeout_sec']
             self.assertGreater(ttl * 60, timeout_sec,
@@ -240,6 +242,16 @@ class TestScheduledEntrypoints(unittest.TestCase):
             main.stocks_job(None)
         mrun.assert_called_once()
         self.assertEqual(mrun.call_args[0][0], 'stocks')
+
+    def test_press_release_sync_job_lock_schedule_and_no_secrets(self):
+        with patch.object(main, '_run_locked') as mrun:
+            main.press_release_sync_job(None)
+        self.assertEqual(mrun.call_args[0][0], 'press_release_sync')
+        opts = main.press_release_sync_job._schedule_opts
+        self.assertEqual(opts['schedule'], '30 6 * * *')
+        self.assertEqual(opts['timezone'], 'Asia/Taipei')
+        self.assertEqual(opts['max_instances'], 1)
+        self.assertNotIn('secrets', opts, '只用 ADC 唯讀 Sheets，不需要任何 Secret／金鑰')
 
     def test_news_cleanup_job_routes_through_lock(self):
         with patch.object(main, '_run_locked') as mrun:

@@ -15,6 +15,7 @@
   us_dram_digest_job  平日 16:30                美國 DRAM/Flash 產業新聞摘要信
   news_cleanup_job    每天 02:30                新聞保存期限清理（只留本月＋上個月）
   ai_worker_health_job  每天 02:35              彙總本機 AI worker 積壓狀況（ai_jobs/ai_insights）
+  press_release_sync_job 每天 06:30             唯讀同步 Google Sheet 新聞稿稿單 → press_releases，並配對人工曝光
 
 HTTPS 端點：
   upload_media_exposure  網站「人工確認曝光」上傳 Excel（POST /api/media-exposure，
@@ -37,6 +38,7 @@ Cloud Logging。
 
 import datetime
 import json
+import os
 
 from firebase_functions import scheduler_fn, https_fn
 from firebase_functions.options import MemoryOption, CorsOptions
@@ -49,6 +51,7 @@ import digest
 import news_cleanup
 import ai_worker_health
 import media_exposure_upload
+import press_release_sync
 
 TZ = 'Asia/Taipei'
 REGION = 'asia-east1'
@@ -213,6 +216,21 @@ def news_cleanup_job(event: scheduler_fn.ScheduledEvent) -> None:
 def ai_worker_health_job(event: scheduler_fn.ScheduledEvent) -> None:
     _run_locked('ai_worker_health', lambda db: ai_worker_health.check_ai_worker_health(db),
                 ttl_minutes=5)
+
+# ─── 新聞稿稿單同步：每天 06:30，唯讀讀取 Google Sheet ───
+# 使用執行環境本身的 service account（ADC，scope=spreadsheets.readonly），沒有任何金鑰；
+# Sheet 需以「檢視者」分享給該 service account。讀取失敗一律 fail closed（見 press_release_sync.py）。
+@scheduler_fn.on_schedule(
+    schedule='30 6 * * *', timezone=TZ, region=REGION,
+    memory=MemoryOption.MB_256, timeout_sec=300, max_instances=1)
+def press_release_sync_job(event: scheduler_fn.ScheduledEvent) -> None:
+    spreadsheet_id = os.environ.get('PRESS_RELEASE_SPREADSHEET_ID') or press_release_sync.SPREADSHEET_ID
+    _run_locked(
+        press_release_sync.LOCK_NAME,
+        lambda db: press_release_sync.run_sync(
+            db, press_release_sync.SheetsClient(spreadsheet_id)),
+        ttl_minutes=8)
+
 
 # ─── 人工確認曝光：網站上傳 Excel（POST /api/media-exposure）───
 # 沒有登入機制的網站上開放寫入入口，必須帶上傳通行碼；解析／去重／寫入邏輯

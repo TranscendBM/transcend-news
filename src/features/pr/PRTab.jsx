@@ -32,6 +32,7 @@ export function PRTab({
   mediaExposure = [],
   mediaExposureStatus = 'idle',
   refreshMediaExposure = () => {},
+  pressSync = null,
 }) {
   const [section, navigate] = useSectionNav('pr', PR_SECTION_IDS, DEFAULT_PR_SECTION);
 
@@ -52,7 +53,7 @@ export function PRTab({
       <PRExposureSection
         validTranscend={validTranscend} prArticles={prArticles} prStatus={prStatus}
         mediaExposure={mediaExposure} mediaExposureStatus={mediaExposureStatus}
-        refreshMediaExposure={refreshMediaExposure}
+        refreshMediaExposure={refreshMediaExposure} pressSync={pressSync}
       />
     ),
   }[section];

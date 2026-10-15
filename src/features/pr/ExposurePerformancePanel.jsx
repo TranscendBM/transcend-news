@@ -10,8 +10,8 @@ import { MAX_EXPOSURE_RECORDS } from './exposureLimits.js';
 import { EVENT_KIND_LABELS } from './exposureEvents.js';
 import { usePRState } from './prState.jsx';
 import {
-  EMPTY_FILTERS, TOPIC_SORTS, applyFilters, buildDetailRows, buildPerformance, buildSummaryRows,
-  filterOptions, hasActiveFilters, sortTopics, toPublicRecords, typeLabel,
+  EMPTY_FILTERS, MATCH_FILTERS, TOPIC_SORTS, applyFilters, buildDetailRows, buildPerformance, buildSummaryRows,
+  countMatchKinds, filterOptions, filterTopicsByMatch, hasActiveFilters, sortTopics, toPublicRecords, typeLabel,
 } from './exposurePerformance.js';
 
 // 「新聞稿曝光成效」：把人工確認曝光（media_exposure 公開欄位）依「新聞稿／主題」彙整。
@@ -24,6 +24,31 @@ const typeColor = key => TYPE_COLORS[key] || TYPE_COLORS.other;
 // 分組依據標籤（只有多篇的主題才顯示）：編號＝綠、事件規則＝藍、標題相似＝琥珀、標題相同＝灰
 const BASIS_TONES = { id: 'green', event: 'blue', similar: 'amber', title: 'gray' };
 const basisText = t => t.basisLabel + (t.eventKind ? '（' + EVENT_KIND_LABELS[t.eventKind] + '）' : '');
+
+// 配對依據標籤：人工確認＝綠、稿單自動配對＝藍、稿單建議配對＝琥珀、標題推定／尚未配對＝灰
+const MATCH_TONES = { confirmed: 'green', auto: 'blue', suggested: 'amber', inferred: 'gray', none: 'gray' };
+
+const fmtDateTime = d => (d
+  ? d.toLocaleString('zh-TW', { timeZone: 'Asia/Taipei', hour12: false, year: 'numeric', month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' })
+  : '—');
+
+/** 資料來源與最後同步時間；沒有新聞稿主檔或讀取失敗時說明目前用標題推定，頁面照常運作。 */
+function SyncStatusLine({ sync, hasMatchData }) {
+  let text;
+  if (!sync) text = '新聞稿主檔同步狀態讀取中…';
+  else if (sync.error) text = '新聞稿主檔同步狀態讀取失敗，目前以標題推定分組。';
+  else if (sync.missing) text = '尚未同步 Google Sheet 新聞稿主檔，目前以標題推定分組。';
+  else text = `資料來源：Google Sheet 新聞稿主檔＋人工曝光資料・最後同步 ${fmtDateTime(sync.lastSyncAt)}`;
+  return (
+    <p className="text-xs text-gray-500 mb-1" data-testid="press-sync-status">
+      {text}
+      {sync && !sync.error && !sync.missing && !hasMatchData && '（目前尚無曝光完成配對）'}
+      {sync && sync.failedSinceSuccess && (
+        <span className="text-amber-700"> 最近一次同步失敗，沿用上次成功的資料。</span>
+      )}
+    </p>
+  );
+}
 
 const fmtDay = d => (d ? d.toLocaleDateString('zh-TW', { timeZone: 'Asia/Taipei' }) : '—');
 const pct = v => `${Math.round(v * 100)}%`;
@@ -62,11 +87,17 @@ function TopicRow({ topic, open, onToggle, onExport }) {
             {topic.mediaCount} 家媒體・首次 {fmtDay(topic.firstDate)}・最近 {fmtDay(topic.lastDate)}
           </p>
           <div className="flex flex-wrap gap-1.5 mt-2">
-            {topic.basis !== 'single' && (
+            <span className={tagClass(MATCH_TONES[topic.matchKind])} title="這個主題與 Google Sheet 新聞稿主檔的配對狀態">
+              {topic.matchLabel}{topic.matchKind === 'suggested' && topic.suggestedName ? `：${topic.suggestedName}` : ''}
+            </span>
+            {topic.basis !== 'single' && topic.matchKind !== 'auto' && topic.matchKind !== 'confirmed' && (
               <span className={tagClass(BASIS_TONES[topic.basis])} title="這些曝光被歸成同一個主題的依據（推定，可展開檢視每一則）">
                 分組依據：{basisText(topic)}
               </span>
             )}
+            <span className={tagClass('gray')} title="這個主題的資料來源">
+              來源：{topic.fromPressReleaseSheet ? 'Google Sheet 新聞稿主檔＋人工曝光資料' : '人工曝光資料'}
+            </span>
             {topic.typeCounts.map(c => (
               <span key={c.key} className={tagClass(TYPE_TONES[c.key] || 'gray')}>{c.label} {c.count}</span>
             ))}
@@ -120,11 +151,12 @@ function TopicRow({ topic, open, onToggle, onExport }) {
 }
 
 export default function ExposurePerformancePanel({
-  records = [], status = 'idle', onRetry = () => {}, maxRecords = MAX_EXPOSURE_RECORDS,
+  records = [], status = 'idle', onRetry = () => {}, maxRecords = MAX_EXPOSURE_RECORDS, sync = null,
 }) {
   // 篩選、展開的主題、排序放在 PR store：切換子頁再回來仍保留
   const [filters, setFilters] = usePRState('exposure.filters', EMPTY_FILTERS);
   const [openKeys, setOpenKeys] = usePRState('exposure.openTopics', () => new Set());
+  const [matchFilter, setMatchFilter] = usePRState('exposure.match', 'all');   // 配對狀態篩選
   const [sortMode, setSortMode] = usePRState('exposure.sort', 'recent');   // 預設：最近曝光的主題排最前面
   const setFilter = (name, value) => setFilters(f => ({ ...f, [name]: value }));
 
@@ -134,9 +166,13 @@ export default function ExposurePerformancePanel({
   const filtered = useMemo(() => applyFilters(publicRecords, filters), [publicRecords, filters]);
   const perf = useMemo(() => buildPerformance(filtered), [filtered]);
   const topics = useMemo(() => sortTopics(perf.topics, sortMode), [perf.topics, sortMode]);
-  const more = useShowMore(topics, TOPIC_PAGE, [filters, sortMode]);
+  const hasMatchData = useMemo(() => publicRecords.some(r => r.matchStatus), [publicRecords]);
+  const matchCounts = useMemo(() => countMatchKinds(perf.topics), [perf.topics]);
+  const activeMatch = hasMatchData ? matchFilter : 'all';
+  const shownTopics = useMemo(() => filterTopicsByMatch(topics, activeMatch), [topics, activeMatch]);
+  const more = useShowMore(shownTopics, TOPIC_PAGE, [filters, sortMode, activeMatch]);
 
-  const filtering = hasActiveFilters(filters);
+  const filtering = hasActiveFilters(filters) || activeMatch !== 'all';
   const truncated = records.length >= maxRecords;
   const toggle = key => setOpenKeys(prev => {
     const next = new Set(prev);
@@ -145,7 +181,7 @@ export default function ExposurePerformancePanel({
   });
 
   const exportAll = () => exportExposurePerformanceExcel({
-    summaryRows: buildSummaryRows(topics), detailRows: buildDetailRows(topics),
+    summaryRows: buildSummaryRows(shownTopics), detailRows: buildDetailRows(shownTopics),
   });
   const exportTopic = topic => exportExposurePerformanceExcel({
     detailRows: buildDetailRows([topic]), suffix: topic.name,
@@ -168,6 +204,7 @@ export default function ExposurePerformancePanel({
         ③ 標題完全相同 ④ 發布日前後 1 天內的相似標題；都不符合就各自獨立。
         這是推定而非正式新聞稿編號，每組都標示依據，可展開檢視每一則。
       </p>
+      <SyncStatusLine sync={sync} hasMatchData={hasMatchData} />
       <p className="text-xs text-gray-500 mb-4">
         統計依目前已載入的 {publicRecords.length.toLocaleString()} 筆人工確認曝光
         {truncated && (
@@ -289,7 +326,24 @@ export default function ExposurePerformancePanel({
                     ))}
                   </div>
                 </div>
+                {hasMatchData && (
+                  <div className="flex flex-wrap items-center gap-2 mb-2" data-testid="match-filter">
+                    <div className="flex flex-wrap gap-1.5" role="group" aria-label="配對狀態篩選">
+                      {Object.entries(MATCH_FILTERS).map(([id, label]) => (
+                        <TabBtn key={id} active={activeMatch === id} onClick={() => setMatchFilter(id)}>
+                          {label}{id === 'all' ? ` ${perf.topicCount}` : ` ${matchCounts[id]}`}
+                        </TabBtn>
+                      ))}
+                    </div>
+                    <span className="text-xs text-gray-500">
+                      待確認 {matchCounts.suggested}・未配對 {matchCounts.unmatched}（以主題計；未配對含標題推定分組）
+                    </span>
+                  </div>
+                )}
                 <div className="space-y-2">
+                  {shownTopics.length === 0 && (
+                    <p className="py-6 text-center text-sm text-gray-600">沒有符合「{MATCH_FILTERS[activeMatch]}」的主題</p>
+                  )}
                   {more.shown.map(t => (
                     <TopicRow key={t.key} topic={t} open={openKeys.has(t.key)}
                       onToggle={() => toggle(t.key)} onExport={() => exportTopic(t)} />

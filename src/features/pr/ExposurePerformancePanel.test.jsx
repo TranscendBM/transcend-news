@@ -253,7 +253,7 @@ describe('ExposurePerformancePanel — Excel 匯出', () => {
     fireEvent.click(screen.getByText('匯出新聞稿成效'));
     const { summaryRows, detailRows } = lastExportArgs();
     detailRows.forEach(r => expect(Object.keys(r)).toEqual(
-      ['新聞稿／主題', '日期', '媒體', '記者', '新聞標題', '曝光類型', '連結']));
+      ['新聞稿／主題', '配對依據', '日期', '媒體', '記者', '新聞標題', '曝光類型', '連結']));
     const all = JSON.stringify({ summaryRows, detailRows });
     ['內部備註', 'secret.xlsx', 'raw.example.com', '原始媒體名稱', 'noteInternal', 'sources', 'rawLink'].forEach(s =>
       expect(all, s).not.toContain(s));

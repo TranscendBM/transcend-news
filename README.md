@@ -329,6 +329,33 @@ rm /tmp/pass.txt
 規則是推定，不是正式新聞稿編號；要精準分組，最可靠的做法是匯入 Excel 時加一欄 `campaignId`。
 調整規則改 `src/features/pr/exposureEvents.js`，相似度門檻改 `SIMILAR_THRESHOLD`（`exposurePerformance.js`）。
 
+## 📋 新聞稿稿單自動同步（Google Sheet → `press_releases`，`functions/press_release_sync.py`）
+
+只維護一份 Google Sheet「新聞稿稿單」（試算表 ID `1ran1qZjie3rMnUzo-LambYaP6c_vMQ8MdVH5iCMkUqM`），
+`press_release_sync_job` 每天 06:30（Asia/Taipei）唯讀同步，並用它精準配對 `media_exposure`。
+
+- **唯讀、無金鑰**：scope 只有 `spreadsheets.readonly`，用 Cloud Functions 執行環境的 service account
+  （ADC，沒有任何 JSON 金鑰），Sheet 不需要公開；只要把 Sheet 以「檢視者」分享給該 service account，並啟用 Google Sheets API。
+  沒有權限時任務會失敗並在 `job_status/press_release_sync.lastError` 寫出要分享的 email（fail closed，不寫入任何資料）。
+- **只處理名稱為 `20xx` 的分頁**；第 1 列文件標題、第 2 列欄位標題都不會當成資料；欄位依「標題名稱」尋找，
+  支援別名（新聞稿 ID／正式標題／實際發布日／狀態／官方連結／關鍵字／英文標題…），目前沒有的欄位也能運作。
+  **「備註」欄永遠不讀、不寫、不顯示。**
+- **日期**：年份取自分頁名稱；`M/D` 轉成 Asia/Taipei 日期，`6月`、空白、不合法日期一律不猜（`actualReleaseDate=null`，
+  `datePrecision=month|unknown`），絕不補成今天。沒有「狀態」欄時狀態是 `unknown`。
+- **`press_releases`（內部集合，Firestore Rules 預設拒絕，前端不讀）**：id 為「明確新聞稿 ID」或
+  `sha1(試算表|年份|正規化標題|原始日期)`（不含備註、不含列號，插列不影響）。同一份 Sheet 重複同步不會產生重複或多餘寫入；
+  Sheet 裡消失的資料標 `active=false`（不刪除）；標題改了＝新文件＋舊文件停用，不會同時有效。
+- **fail closed**：任何讀取失敗、版面看不懂、解析結果為空、或一次要停用超過一半既有新聞稿，都不寫入、不清除既有配對。
+- **配對（`functions/press_release_match.py`）**：人工確認（`confirmed`）永不覆蓋 → 已存在的有效配對 → 明確新聞稿 ID →
+  官方連結 → 正規化標題完全相同 → 日期（日精度）＋關鍵字高信心 → 標題相似度（只寫 `suggested`）→ `unmatched`。
+  不同月份營收、不同季度、不同型號（DDR5 7200／6400）不互相配對；候選同分不任選；月份／缺日期不做日期配對。
+  結果寫回 `media_exposure`：`pressReleaseId/Title`（僅 confirmed／auto_matched）、`matchStatus/Method/Confidence/matchedAt`、
+  `suggestedPressReleaseId/Title`。網站的「曝光成效」優先用 `pressReleaseId` 分組，並顯示配對依據、最後同步時間與待確認／未配對數量；
+  公開網站沒有任何寫入或確認按鈕。
+- **dry-run（零寫入）**：`python tools/press_release_dry_run.py --api`（需要 ADC）或 `--sheet-json 檔案`；
+  會列出解析統計、日期不完整與可能重複的標題、配對統計，不輸出備註。
+- **部署**：`firebase deploy --only functions:press_release_sync_job,hosting:main --project transcend-news-tbm`。
+
 ## 🌐 上游市場新聞（`src/features/news/useUpstreamNews.js`）
 
 上游市場分頁（供應鏈＋ DRAM/Flash 市場）的統計卡片、品牌篩選、「創見最新

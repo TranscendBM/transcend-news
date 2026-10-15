@@ -13,7 +13,7 @@ import { usePRState } from './prState.jsx';
 // ═══════════════════════════════════════════════════════════
 export function PRExposureSection({
   validTranscend, prArticles, prStatus,
-  mediaExposure, mediaExposureStatus, refreshMediaExposure,
+  mediaExposure, mediaExposureStatus, refreshMediaExposure, pressSync = null,
 }) {
   const [view, setView] = usePRState('exposure.view', 'main');   // 'main'｜'insights'
   const goView = next => {
@@ -33,6 +33,7 @@ export function PRExposureSection({
         records={mediaExposure}
         status={mediaExposureStatus}
         onRetry={refreshMediaExposure}
+        sync={pressSync}
       />
 
       {/* 重點媒體曝光監控：用全部有效創見報導（不受新聞監測搜尋工具列影響） */}

@@ -36,6 +36,31 @@ export function normalizeTitleKey(title) {
 
 const collapse = s => String(s ?? '').replace(/\s+/g, ' ').trim();
 
+// ── 新聞稿主檔配對狀態 ────────────────────────────────────
+export const MATCH_STATUSES = ['confirmed', 'auto_matched', 'suggested', 'unmatched'];
+const hasOfficialMatch = raw => !['suggested', 'unmatched'].includes(raw.matchStatus);
+
+/** 主題的配對依據：人工確認／稿單自動配對／稿單建議配對／標題推定／尚未配對 */
+export const MATCH_KIND_LABELS = {
+  confirmed: '人工確認',
+  auto: '稿單自動配對',
+  suggested: '稿單建議配對',
+  inferred: '標題推定',
+  none: '尚未配對',
+};
+/** 篩選用：全部／已確認／自動配對／待確認／未配對（未配對＝標題推定＋尚未配對） */
+export const MATCH_FILTERS = { all: '全部', confirmed: '已確認', auto: '自動配對', suggested: '待確認', unmatched: '未配對' };
+const filterOfKind = kind => (kind === 'inferred' || kind === 'none' ? 'unmatched' : kind);
+
+export function filterTopicsByMatch(topics, mode = 'all') {
+  return mode === 'all' ? topics : topics.filter(t => filterOfKind(t.matchKind) === mode);
+}
+export function countMatchKinds(topics) {
+  const counts = { confirmed: 0, auto: 0, suggested: 0, unmatched: 0 };
+  topics.forEach(t => { counts[filterOfKind(t.matchKind)] += 1; });
+  return counts;
+}
+
 // ── 公開欄位白名單 ────────────────────────────────────────
 /** 把 Firestore 文件轉成「只含公開欄位」的紀錄；日期無效的紀錄回傳 null。 */
 export function toPublicRecord(raw) {
@@ -51,9 +76,13 @@ export function toPublicRecord(raw) {
     title: collapse(raw.title),
     link: safeHttpUrl(raw.link),           // 不安全網址一律變成 ''，畫面不會輸出可點擊連結
     type: str(raw.exposureType) || 'online',
-    // 若資料日後有可靠的新聞稿識別欄位，優先用它分組（標題正規化只是 fallback）
-    campaignId: str(raw.campaignId) || str(raw.pressReleaseId),
-    campaignName: collapse(raw.campaignName) || collapse(raw.pressReleaseTitle),
+    // 新聞稿編號優先用來分組（標題推定只是 fallback）。pressReleaseId 只有「人工確認」或
+    // 「稿單自動配對」才會有；建議配對（suggested）只放在 suggestedPressReleaseId，不會拿來分組。
+    campaignId: str(raw.campaignId) || (hasOfficialMatch(raw) ? str(raw.pressReleaseId) : ''),
+    campaignName: collapse(raw.campaignName) || (hasOfficialMatch(raw) ? collapse(raw.pressReleaseTitle) : ''),
+    // 新聞稿主檔配對資訊（只有狀態與標題；不含 Google Sheet 的備註）
+    matchStatus: MATCH_STATUSES.includes(raw.matchStatus) ? raw.matchStatus : '',
+    suggestedName: raw.matchStatus === 'suggested' ? collapse(raw.suggestedPressReleaseTitle) : '',
   };
 }
 
@@ -168,6 +197,8 @@ export function groupByTopic(records, { similarThreshold = SIMILAR_THRESHOLD } =
     g.items.push(r);
     if (r.campaignId) g.hasId = true;
     if (r.campaignName && !g.campaignName) g.campaignName = r.campaignName;
+    if (r.matchStatus === 'confirmed') g.confirmed = true;
+    if (r.matchStatus === 'suggested' && !g.suggestedName) g.suggestedName = r.suggestedName || '（稿單建議）';
     if (events[i]) g.events.set(events[i].key, (g.events.get(events[i].key) || { ...events[i], count: 0 }));
     if (events[i]) g.events.get(events[i].key).count += 1;
     if (r.title) g.titleCounts.set(r.title, (g.titleCounts.get(r.title) || 0) + 1);
@@ -196,7 +227,13 @@ export function groupByTopic(records, { similarThreshold = SIMILAR_THRESHOLD } =
       name = best || '（無標題）';
     }
     const sorted = [...g.items].sort(byNewest);
+    const matchKind = g.confirmed || (g.hasId && !g.items.some(r => r.matchStatus)) ? 'confirmed'
+      : g.hasId ? 'auto'
+        : g.suggestedName ? 'suggested'
+          : (basis === 'single' ? 'none' : 'inferred');
     return {
+      matchKind, matchLabel: MATCH_KIND_LABELS[matchKind], suggestedName: g.suggestedName || '',
+      fromPressReleaseSheet: g.hasId && g.items.some(r => r.matchStatus === 'auto_matched' || r.matchStatus === 'confirmed'),
       key: g.hasId ? 'id:' + g.items[0].campaignId : (basis === 'event' ? event.key : 'g:' + g.items[0].id + ':' + g.items[0].date.getTime()),
       basis, basisLabel: BASIS_LABELS[basis],
       eventKind: basis === 'event' ? event.kind : null,
@@ -274,6 +311,7 @@ const dayText = d => dayKeyOf(d);
 export function buildDetailRows(topics) {
   return topics.flatMap(t => t.items.map(r => sanitizeRow({
     '新聞稿／主題': t.name,
+    配對依據: t.matchLabel,
     日期: r.day,
     媒體: r.mediaName,
     記者: r.reporter,
@@ -286,6 +324,7 @@ export function buildDetailRows(topics) {
 export function buildSummaryRows(topics) {
   return topics.map(t => sanitizeRow({
     '新聞稿／主題': t.name,
+    配對依據: t.matchLabel + (t.matchKind === 'suggested' && t.suggestedName ? '：' + t.suggestedName : ''),
     分組依據: t.basis === 'single' ? '' : t.basisLabel + (t.eventKind ? '（' + EVENT_KIND_LABELS[t.eventKind] + '）' : ''),
     曝光總數: t.total,
     不重複媒體數: t.mediaCount,

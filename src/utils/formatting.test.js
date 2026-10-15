@@ -159,7 +159,7 @@ describe('exportExposurePerformanceExcel', () => {
 
     const detail = XLSX.utils.sheet_to_json(wb.Sheets['曝光明細']);
     expect(detail).toHaveLength(2);
-    expect(Object.keys(detail[0])).toEqual(['新聞稿／主題', '日期', '媒體', '記者', '新聞標題', '曝光類型', '連結']);
+    expect(Object.keys(detail[0])).toEqual(['新聞稿／主題', '配對依據', '日期', '媒體', '記者', '新聞標題', '曝光類型', '連結']);
     const raw = JSON.stringify(detail) + JSON.stringify(summary);
     [...PRIVATE_FIELD_NAMES, '內部備註', 'secret.xlsx', 'raw.e.com', 'javascript:'].forEach(s => expect(raw, s).not.toContain(s));
     // 公式注入：以 = 開頭的媒體名稱前面補了單引號，且儲存格是純文字（不是公式）
