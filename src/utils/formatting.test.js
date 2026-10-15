@@ -1,7 +1,8 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import * as XLSX from 'xlsx';
-import { exportNewsExcel, exportMediaExposureExcel, exportExposureInsightsExcel } from './formatting.js';
+import { exportNewsExcel, exportMediaExposureExcel, exportExposureInsightsExcel, exportExposurePerformanceExcel } from './formatting.js';
 import { buildExposureInsights } from '../features/pr/exposureInsights.js';
+import { buildDetailRows, buildSummaryRows, groupByTopic, toPublicRecords, PRIVATE_FIELD_NAMES } from '../features/pr/exposurePerformance.js';
 
 // 只 mock 真的會操作檔案系統／觸發瀏覽器下載的部分（writeFile），
 // json_to_sheet / book_new / book_append_sheet 都是 xlsx 真正的資料轉換
@@ -128,5 +129,52 @@ describe('exportExposureInsightsExcel', () => {
     expect(reporters).toHaveLength(1);                 // 未署名不列入記者表
     const monthly = XLSX.utils.sheet_to_json(wb.Sheets['月趨勢']);
     expect(monthly.map(m => m.曝光篇數)).toEqual([1, 2]);
+  });
+});
+
+describe('exportExposurePerformanceExcel', () => {
+  beforeEach(() => { vi.clearAllMocks(); });
+  const day = d => new Date(Date.UTC(2026, 8, d, 4));
+  const topics = groupByTopic(toPublicRecords([
+    { id: '1', exposureDate: day(1), mediaName: '經濟日報', reporter: '王一', title: '創見推出新品', link: 'https://e.com/1',
+      exposureType: 'online', noteInternal: '內部備註不可外流', file: 'secret.xlsx', sheet: '09', row: 7, rawLink: 'https://raw.e.com' },
+    { id: '2', exposureDate: day(2), mediaName: '=EVIL()', reporter: '', title: '創見推出新品', link: 'javascript:alert(1)',
+      exposureType: 'video' },
+  ]));
+
+  it('沒有明細時不下載', async () => {
+    await exportExposurePerformanceExcel({ summaryRows: [], detailRows: [] });
+    expect(XLSX.writeFile).not.toHaveBeenCalled();
+  });
+
+  it('全部篩選結果：兩張工作表（主題彙整、曝光明細），欄位固定且不含私人欄位與公式', async () => {
+    await exportExposurePerformanceExcel({ summaryRows: buildSummaryRows(topics), detailRows: buildDetailRows(topics) });
+    const [wb, filename] = XLSX.writeFile.mock.calls[0];
+    expect(wb.SheetNames).toEqual(['主題彙整', '曝光明細']);
+    expect(filename).toMatch(/^新聞稿曝光成效_\d{8}\.xlsx$/);
+
+    const summary = XLSX.utils.sheet_to_json(wb.Sheets['主題彙整']);
+    expect(summary).toHaveLength(1);
+    expect(summary[0]).toMatchObject({ '新聞稿／主題': '創見推出新品', 曝光總數: 2, 不重複媒體數: 2 });
+
+    const detail = XLSX.utils.sheet_to_json(wb.Sheets['曝光明細']);
+    expect(detail).toHaveLength(2);
+    expect(Object.keys(detail[0])).toEqual(['新聞稿／主題', '日期', '媒體', '記者', '新聞標題', '曝光類型', '連結']);
+    const raw = JSON.stringify(detail) + JSON.stringify(summary);
+    [...PRIVATE_FIELD_NAMES, '內部備註', 'secret.xlsx', 'raw.e.com', 'javascript:'].forEach(s => expect(raw, s).not.toContain(s));
+    // 公式注入：以 = 開頭的媒體名稱前面補了單引號，且儲存格是純文字（不是公式）
+    const evil = detail.find(r => r.媒體.includes('EVIL'));
+    expect(evil.媒體).toBe("'=EVIL()");
+    const cell = Object.values(wb.Sheets['曝光明細']).find(c => c && c.v === "'=EVIL()");
+    expect(cell.t).toBe('s');
+    expect(cell.f).toBeUndefined();
+  });
+
+  it('單一主題：只有曝光明細一張工作表，檔名帶主題名稱（不合法字元已清掉）', async () => {
+    await exportExposurePerformanceExcel({ detailRows: buildDetailRows([topics[0]]), suffix: '創見: 推出/新品?*' });
+    const [wb, filename] = XLSX.writeFile.mock.calls[0];
+    expect(wb.SheetNames).toEqual(['曝光明細']);
+    expect(filename).toMatch(/^新聞稿曝光成效_創見_推出_新品_\d{8}\.xlsx$/);
+    expect(filename).not.toMatch(/[\\/:*?"<>|]/);
   });
 });

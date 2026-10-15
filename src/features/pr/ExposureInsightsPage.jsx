@@ -6,6 +6,7 @@ import { TAG_TONES, tagClass } from '../../components/tagStyles.js';
 import TabBtn from '../../components/TabBtn.jsx';
 import CopyChartButton from '../../components/CopyChartButton.jsx';
 import { exportExposureInsightsExcel } from '../../utils/formatting.js';
+import { safeHttpUrl } from '../../utils/safeUrl.js';
 import { buildExposureInsights } from './exposureInsights.js';
 
 // 人工確認曝光分析：PR 頁面「人工確認曝光」卡片按「📊 曝光分析」進來的下一頁。
@@ -505,7 +506,9 @@ function CoverageSection({ ins }) {
             <div key={i} className="py-2 flex gap-3 items-start">
               <span className="text-xs text-gray-500 tabular-nums shrink-0 w-20">{fmtDate(m.date)}</span>
               <div className="min-w-0 flex-1">
-                <a href={m.link} target="_blank" rel="noopener noreferrer" className="text-sm text-ink hover:text-red-500 leading-snug">{m.title}</a>
+                {safeHttpUrl(m.link)
+                  ? <a href={safeHttpUrl(m.link)} target="_blank" rel="noopener noreferrer" className="text-sm text-ink hover:text-red-500 leading-snug">{m.title}</a>
+                  : <span className="text-sm text-ink leading-snug">{m.title}</span>}
                 <p className="text-xs text-gray-500 mt-0.5">{m.media}{m.reporter ? `｜${m.reporter}` : ''}</p>
               </div>
             </div>

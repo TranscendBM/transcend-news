@@ -8,6 +8,8 @@ import NewsCard from '../news/NewsCard.jsx';
 import TodayBriefing from '../intelligence/TodayBriefing.jsx';
 import MediaExposureUpload from './MediaExposureUpload.jsx';
 import ExposureInsightsPage from './ExposureInsightsPage.jsx';
+import ExposurePerformancePanel from './ExposurePerformancePanel.jsx';
+import { safeHttpUrl } from '../../utils/safeUrl.js';
 import { useNow } from '../../hooks/useNow.js';
 import { exportNewsExcel, exportMediaExposureExcel } from '../../utils/formatting.js';
 import {
@@ -241,10 +243,14 @@ export function ManualExposurePanel({
                       人工確認
                     </span>
                     <div className="min-w-0 flex-1">
-                      <a href={record.link} target="_blank" rel="noopener noreferrer"
-                        className="text-sm text-ink hover:text-red-500 leading-snug line-clamp-2">
-                        {record.title}
-                      </a>
+                      {safeHttpUrl(record.link)
+                        ? (
+                          <a href={safeHttpUrl(record.link)} target="_blank" rel="noopener noreferrer"
+                            className="text-sm text-ink hover:text-red-500 leading-snug line-clamp-2">
+                            {record.title}
+                          </a>
+                        )
+                        : <span className="text-sm text-ink leading-snug line-clamp-2">{record.title}</span>}
                       <p className="text-xs text-gray-500 mt-1">
                         {record.mediaName || '未知媒體'}
                         {record.reporter ? `｜${record.reporter}` : ''}
@@ -498,6 +504,13 @@ export function PRTab({
 
       {/* 重點媒體曝光監控：同樣套用搜尋/媒體/情緒篩選 */}
       <KeyMediaPanel articles={searchFiltered} status={prStatus} />
+
+      {/* 新聞稿曝光成效：人工確認曝光依新聞稿／主題彙整（跟自動新聞監測分開統計） */}
+      <ExposurePerformancePanel
+        records={mediaExposure}
+        status={mediaExposureStatus}
+        onRetry={refreshMediaExposure}
+      />
 
       {/* 人工確認曝光：放在頁面最下方（含 Excel 上傳）；跟自動新聞監測分開統計 */}
       <ManualExposurePanel
