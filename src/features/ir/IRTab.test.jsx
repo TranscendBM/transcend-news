@@ -1,7 +1,14 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, fireEvent, within } from '@testing-library/react';
 
-import { IRTab } from './IRTab.jsx';
+import { PanelStateProvider } from '../../hooks/usePanelState.jsx';
+import StockCardsGrid from './StockCardsGrid.jsx';
+import { DailyTrading } from './DailyTrading.jsx';
+import { CompetitorMaterial } from './CompetitorMaterial.jsx';
+import { RevenueChart } from './RevenueCharts.jsx';
+import { CompetitorRevenueChart, AnnualRevenueChart } from './CompetitorRevenue.jsx';
+import { QuarterlyPnL } from './QuarterlyPnL.jsx';
+import { DividendHistory } from './DividendHistory.jsx';
 import { copyChartImage } from '../../utils/copyChart.js';
 
 // jsdom 沒有 canvas／ClipboardItem，圖片產生與寫入剪貼簿的細節改在瀏覽器實測；
@@ -22,13 +29,39 @@ function mkStock(price, changePct, overrides = {}) {
   };
 }
 
+// 這支測試驗證「各個 IR 區塊元件」本身的行為（顏色、排序、展開、複製…）。
+// IR 頁面已拆成四個子頁，這裡把所有區塊排在同一頁，方便逐一檢查；
+// 子頁的切換、網址與狀態保存另見 IRSections.test.jsx。
+function AllIRBlocks({ stocks, revenue, financials, dividends, material, daily, compRev }) {
+  return (
+    <PanelStateProvider>
+      <div className="space-y-4">
+        <StockCardsGrid stocks={stocks} />
+        <DailyTrading daily={daily} />
+        <CompetitorMaterial material={material} />
+        <RevenueChart revenue={revenue} />
+        <CompetitorRevenueChart revenue={revenue} compRev={compRev} />
+        <AnnualRevenueChart revenue={revenue} compRev={compRev} />
+        <QuarterlyPnL financials={financials} />
+        <DividendHistory dividends={dividends} />
+      </div>
+    </PanelStateProvider>
+  );
+}
+
+function irProps(overrides) {
+  return {
+    stocks: {}, revenue: null, financials: null, dividends: null,
+    material: null, daily: null, compRev: {},
+    ...overrides,
+  };
+}
+
 function renderIR(overrides = {}) {
-  return render(<IRTab
-    news={[]} community={[]}
-    stocks={{}} revenue={null} financials={null} dividends={null}
-    material={null} daily={null} compRev={{}}
-    {...overrides}
-  />);
+  const ui = o => <AllIRBlocks {...irProps(o)} />;
+  const result = render(ui(overrides));
+  // 測試裡 rerender 只帶要改的欄位
+  return result;
 }
 
 beforeEach(() => {
@@ -62,7 +95,7 @@ describe('IRTab — 股價卡片', () => {
     const { rerender } = renderIR({ stocks: {} });
     expect(screen.getByText(/尚未取得股價/)).toBeTruthy();
 
-    rerender(<IRTab news={[]} community={[]} stocks={{ '2451': mkStock(300, 1) }}
+    rerender(<AllIRBlocks stocks={{ '2451': mkStock(300, 1) }}
       revenue={null} financials={null} dividends={null} material={null} daily={null} compRev={{}} />);
     expect(screen.queryByText(/尚未取得股價/)).toBeNull();
   });
@@ -83,7 +116,7 @@ describe('IRTab — 每日交易資訊（開收盤／外資／投信）', () => 
     const card = screen.getByText('創見 2451 每日交易資訊').closest('div.bg-gray-900');
     expect(within(card).getByText('載入中…')).toBeTruthy();
 
-    rerender(<IRTab news={[]} community={[]} stocks={{}} revenue={null} financials={null}
+    rerender(<AllIRBlocks stocks={{}} revenue={null} financials={null}
       dividends={null} material={null} daily={{}} compRev={{}} />);
     const card2 = screen.getByText('創見 2451 每日交易資訊').closest('div.bg-gray-900');
     expect(within(card2).getByText('尚無資料（Actions 跑完後自動更新）')).toBeTruthy();
@@ -94,7 +127,7 @@ describe('IRTab — 每日交易資訊（開收盤／外資／投信）', () => 
     const card = screen.getByText('創見 2451 每日交易資訊').closest('div.bg-gray-900');
     expect(within(card).getByText('+5')).toHaveClass('text-red-400');
 
-    rerender(<IRTab news={[]} community={[]} stocks={{}} revenue={null} financials={null}
+    rerender(<AllIRBlocks stocks={{}} revenue={null} financials={null}
       dividends={null} material={null}
       daily={{ open: 105, close: 100, high: 106, low: 99, volume: 500000 }} compRev={{}} />);
     const card2 = screen.getByText('創見 2451 每日交易資訊').closest('div.bg-gray-900');
@@ -160,7 +193,7 @@ describe('IRTab — 月營收 / 年度營收', () => {
     const card = screen.getByText('創見月營收（近 24 個月）').closest('div.bg-gray-900');
     expect(within(card).getByText('載入中…')).toBeTruthy();
 
-    rerender(<IRTab news={[]} community={[]} stocks={{}} revenue={[]} financials={null}
+    rerender(<AllIRBlocks stocks={{}} revenue={[]} financials={null}
       dividends={null} material={null} daily={null} compRev={{}} />);
     const card2 = screen.getByText('創見月營收（近 24 個月）').closest('div.bg-gray-900');
     expect(within(card2).getByText('尚無月營收資料（Actions 跑完後自動更新）')).toBeTruthy();

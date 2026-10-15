@@ -10,6 +10,7 @@ import { usePRNews } from './features/news/usePRNews.js';
 import { useUpstreamNews } from './features/news/useUpstreamNews.js';
 import { useMediaExposure } from './features/pr/useMediaExposure.js';
 import { useUrlParam } from './hooks/useUrlParam.js';
+import { rememberedSection } from './hooks/useSectionNav.js';
 import { writeParams } from './utils/urlState.js';
 import { sortByDate, isStockStale, fmtStockUpdated } from './utils/dates.js';
 import { COMPETITORS, STOCK_META } from './config/competitors.js';
@@ -29,8 +30,8 @@ const HealthTab = lazy(() => import('./features/health/HealthTab.jsx').then(m =>
 // ═══════════════════════════════════════════════════════════
 export default function App() {
   const [tab] = useUrlParam('tab', TAB_IDS, 'pr');
-  // 切換主分頁時移除 section（PR 子頁只屬於 PR 分頁）
-  const setTab = id => writeParams({ tab: id, section: null });
+  // 切換主分頁時 section 換成該分頁上次停留的子頁（沒有就移除 → 預設的總覽）；PR 與 IR 各記各的
+  const setTab = id => writeParams({ tab: id, section: rememberedSection(id) });
   const [stocks, setStocks] = useState({});
   const [revenue, setRevenue] = useState(null);
   const [financials, setFinancials] = useState(null);
@@ -38,6 +39,9 @@ export default function App() {
   const [material, setMaterial] = useState(null);
   const [daily, setDaily] = useState(null);
   const [compRev, setCompRev] = useState({});
+  // 各 IR 資料集是否載入失敗（失敗時資料仍是空值；用來區分「載入失敗」與「尚無資料」）
+  const [loadErrors, setLoadErrors] = useState({});
+  const markLoad = (key, failed) => setLoadErrors(prev => (prev[key] === failed ? prev : { ...prev, [key]: failed }));
   const [loading, setLoading] = useState(true);
   const [connected, setConnected] = useState(false);
   const [updated, setUpdated] = useState(null);
@@ -114,7 +118,8 @@ export default function App() {
     try {
       const snap = await getDoc(doc(getDb(), 'stocks', 'latest'));
       if (snap.exists()) setStocks(snap.data());
-    } catch (e) { console.error('Stocks:', e); }
+      markLoad('stocks', false);
+    } catch (e) { console.error('Stocks:', e); markLoad('stocks', true); }
   }
 
   async function fetchRevenue() {
@@ -122,7 +127,8 @@ export default function App() {
       const snap = await getDoc(doc(getDb(), 'revenue', '2451'));
       if (snap.exists()) setRevenue(snap.data().records || []);
       else setRevenue([]);
-    } catch (e) { console.error('Revenue:', e); setRevenue([]); }
+      markLoad('revenue', false);
+    } catch (e) { console.error('Revenue:', e); setRevenue([]); markLoad('revenue', true); }
   }
 
   async function fetchFinancials() {
@@ -130,7 +136,8 @@ export default function App() {
       const snap = await getDoc(doc(getDb(), 'financials', '2451'));
       if (snap.exists()) setFinancials(snap.data().quarters || []);
       else setFinancials([]);
-    } catch (e) { console.error('Financials:', e); setFinancials([]); }
+      markLoad('financials', false);
+    } catch (e) { console.error('Financials:', e); setFinancials([]); markLoad('financials', true); }
   }
 
   async function fetchDividends() {
@@ -138,7 +145,8 @@ export default function App() {
       const snap = await getDoc(doc(getDb(), 'dividends', '2451'));
       if (snap.exists()) setDividends(snap.data().records || []);
       else setDividends([]);
-    } catch (e) { console.error('Dividends:', e); setDividends([]); }
+      markLoad('dividends', false);
+    } catch (e) { console.error('Dividends:', e); setDividends([]); markLoad('dividends', true); }
   }
 
   async function fetchMaterial() {
@@ -146,7 +154,8 @@ export default function App() {
       const snap = await getDoc(doc(getDb(), 'material', 'competitors'));
       if (snap.exists()) setMaterial(snap.data().records || []);
       else setMaterial([]);
-    } catch (e) { console.error('Material:', e); setMaterial([]); }
+      markLoad('material', false);
+    } catch (e) { console.error('Material:', e); setMaterial([]); markLoad('material', true); }
   }
 
   async function fetchDaily() {
@@ -154,7 +163,8 @@ export default function App() {
       const snap = await getDoc(doc(getDb(), 'daily', '2451'));
       if (snap.exists()) setDaily(snap.data());
       else setDaily({});
-    } catch (e) { console.error('Daily:', e); setDaily({}); }
+      markLoad('daily', false);
+    } catch (e) { console.error('Daily:', e); setDaily({}); markLoad('daily', true); }
   }
 
   async function fetchCompRevenue() {
@@ -166,7 +176,8 @@ export default function App() {
         if (snap.exists()) results[code] = snap.data().records || [];
       }));
       setCompRev(results);
-    } catch (e) { console.error('CompRev:', e); }
+      markLoad('compRev', false);
+    } catch (e) { console.error('CompRev:', e); markLoad('compRev', true); }
   }
 
   // 社群資料（cat=community，PTT Stock 討論創見/2451）
@@ -284,7 +295,7 @@ export default function App() {
           ) : tab === 'health' ? (
             <HealthTab />
           ) : (
-            <IRTab news={news} stocks={stocks} community={community} revenue={revenue} financials={financials} dividends={dividends} material={material} daily={daily} compRev={compRev} />
+            <IRTab news={news} stocks={stocks} community={community} revenue={revenue} financials={financials} dividends={dividends} material={material} daily={daily} compRev={compRev} loadErrors={loadErrors} loading={loading} />
           )}
         </Suspense>
       </main>
