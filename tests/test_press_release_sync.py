@@ -287,6 +287,25 @@ class TestSheetsClient(unittest.TestCase):
         self.assertIn('x@y.iam.gserviceaccount.com', str(ctx.exception))
         self.assertEqual(len(sess.calls), 1)
 
+    def test_permission_error_includes_google_reason_but_no_secrets(self):
+        class R:
+            status_code = 403
+
+            def json(self):
+                return {'error': {'status': 'PERMISSION_DENIED', 'message': 'Google Sheets API has not been used in project 1 before',
+                                  'details': [{'reason': 'SERVICE_DISABLED'}]}}
+        c, _ = self.client([R()])
+        c.service_account_email = 'x@y.iam.gserviceaccount.com'
+        with self.assertRaises(ps.SheetsAccessError) as ctx:
+            c.get_metadata()
+        self.assertIn('SERVICE_DISABLED', str(ctx.exception))
+        self.assertIn('PERMISSION_DENIED', str(ctx.exception))
+
+    def test_runtime_email_ignores_default_placeholder(self):
+        class Cred:
+            service_account_email = 'real@p.iam.gserviceaccount.com'
+        self.assertEqual(ps.SheetsClient._runtime_email(Cred()), 'real@p.iam.gserviceaccount.com')
+
     def test_sheet_title_is_quoted_in_range(self):
         c, sess = self.client([self.Resp(200, {})])
         c.get_values("2026")
