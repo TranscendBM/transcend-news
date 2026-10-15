@@ -61,7 +61,7 @@ describe('ExposurePerformancePanel — 顯示狀態', () => {
   it('尚未匯入資料（ready 或 idle）：顯示空狀態，不崩潰，匯出按鈕停用', () => {
     const { unmount } = renderPanel({ records: [] });
     expect(screen.getByText('尚未匯入人工確認曝光資料')).toBeTruthy();
-    expect(screen.getByText('匯出 Excel').closest('button').disabled).toBe(true);
+    expect(screen.getByText('匯出新聞稿成效').closest('button').disabled).toBe(true);
     unmount();
     renderPanel({ records: [], status: 'idle' });
     expect(screen.getByText('尚未匯入人工確認曝光資料')).toBeTruthy();
@@ -168,7 +168,7 @@ describe('ExposurePerformancePanel — 篩選（所有數字共用同一份篩�
     expect(topicSum).toBe(total);
     expandAll();
     expect(document.querySelectorAll('tbody tr')).toHaveLength(total);
-    fireEvent.click(screen.getByText(/^匯出 Excel/));
+    fireEvent.click(screen.getByText(/^匯出新聞稿成效/));
     expect(lastExportArgs().detailRows).toHaveLength(total);
     expect(lastExportArgs().summaryRows).toHaveLength(topics);
       }
@@ -207,7 +207,7 @@ describe('ExposurePerformancePanel — 篩選（所有數字共用同一份篩�
     select('曝光媒體篩選', '經濟日報');
     fireEvent.change(screen.getByLabelText('搜尋曝光（標題、媒體、記者）'), { target: { value: '庫藏股' } });
     expect(kpi('人工確認曝光')).toContain('1');
-    expect(screen.getByText('匯出 Excel（目前篩選）')).toBeTruthy();
+    expect(screen.getByText('匯出新聞稿成效（目前篩選）')).toBeTruthy();
     fireEvent.click(screen.getByText('清除篩選'));
     expect(kpi('人工確認曝光')).toContain('6');
     expect(screen.getByLabelText('曝光媒體篩選').value).toBe('all');
@@ -220,7 +220,7 @@ describe('ExposurePerformancePanel — 篩選（所有數字共用同一份篩�
     fireEvent.change(screen.getByLabelText('搜尋曝光（標題、媒體、記者）'), { target: { value: '完全找不到的字串' } });
     expect(screen.getByText(/沒有符合篩選條件的曝光/)).toBeTruthy();
     expect(screen.queryByText('涵蓋媒體')).toBeNull();
-    expect(screen.getByText(/^匯出 Excel/).closest('button').disabled).toBe(true);
+    expect(screen.getByText(/^匯出新聞稿成效/).closest('button').disabled).toBe(true);
     fireEvent.click(screen.getAllByText('清除篩選')[0]);
     expect(kpi('人工確認曝光')).toContain('6');
   });
@@ -229,7 +229,7 @@ describe('ExposurePerformancePanel — 篩選（所有數字共用同一份篩�
 describe('ExposurePerformancePanel — Excel 匯出', () => {
   it('沒有選主題：匯出目前全部篩選結果（主題彙整＋曝光明細）', () => {
     renderPanel();
-    fireEvent.click(screen.getByText('匯出 Excel'));
+    fireEvent.click(screen.getByText('匯出新聞稿成效'));
     expect(exportExposurePerformanceExcel).toHaveBeenCalledTimes(1);
     const { summaryRows, detailRows } = lastExportArgs();
     expect(summaryRows).toHaveLength(4);
@@ -250,7 +250,7 @@ describe('ExposurePerformancePanel — Excel 匯出', () => {
 
   it('匯出資料只有白名單欄位：沒有內部備註、來源檔名、工作表、列號', () => {
     renderPanel();
-    fireEvent.click(screen.getByText('匯出 Excel'));
+    fireEvent.click(screen.getByText('匯出新聞稿成效'));
     const { summaryRows, detailRows } = lastExportArgs();
     detailRows.forEach(r => expect(Object.keys(r)).toEqual(
       ['新聞稿／主題', '日期', '媒體', '記者', '新聞標題', '曝光類型', '連結']));
@@ -263,7 +263,7 @@ describe('ExposurePerformancePanel — Excel 匯出', () => {
     renderPanel({ records: [
       raw('x1', tw(2026, 9, 1), '=HYPERLINK("http://evil")', '+王一', '@SUM(1) 惡意標題', { link: 'javascript:alert(1)' }),
     ] });
-    fireEvent.click(screen.getByText('匯出 Excel'));
+    fireEvent.click(screen.getByText('匯出新聞稿成效'));
     const [row] = lastExportArgs().detailRows;
     expect(row.媒體.startsWith("'=")).toBe(true);
     expect(row.記者.startsWith("'+")).toBe(true);
@@ -338,7 +338,7 @@ describe('ExposurePerformancePanel — 分組依據標籤', () => {
     ] });
     expect(screen.getByText('分組依據：標題相似')).toBeTruthy();
     expect(screen.getByText('分組依據：標題相同')).toBeTruthy();
-    fireEvent.click(screen.getByText('匯出 Excel'));
+    fireEvent.click(screen.getByText('匯出新聞稿成效'));
     expect(lastExportArgs().summaryRows.map(r => r['分組依據']).sort()).toEqual(['標題相似', '標題相同'].sort());
   });
 });
@@ -371,12 +371,12 @@ describe('ExposurePerformancePanel — 主題排序（依新聞時間由近到�
 
   it('篩選後仍依時間排序；Excel 匯出的主題順序跟畫面一致', () => {
     renderPanel({ records: SORT_RECORDS });
-    fireEvent.click(screen.getByText('匯出 Excel'));
+    fireEvent.click(screen.getByText('匯出新聞稿成效'));
     expect(lastExportArgs().summaryRows.map(r => r['新聞稿／主題'].slice(0, 3))).toEqual(['乙乙乙', '丙丙丙', '甲甲甲']);
     expect(lastExportArgs().detailRows.map(r => r['新聞稿／主題'].slice(0, 3))).toEqual(
       ['乙乙乙', '丙丙丙', '丙丙丙', '甲甲甲', '甲甲甲', '甲甲甲']);
     fireEvent.click(screen.getByRole('button', { name: '曝光數最多' }));
-    fireEvent.click(screen.getByText('匯出 Excel'));
+    fireEvent.click(screen.getByText('匯出新聞稿成效'));
     expect(lastExportArgs().summaryRows.map(r => r['新聞稿／主題'].slice(0, 3))).toEqual(['甲甲甲', '丙丙丙', '乙乙乙']);
     fireEvent.click(screen.getByRole('button', { name: '最新優先' }));
     select('曝光媒體篩選', 'F');

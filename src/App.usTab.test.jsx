@@ -96,13 +96,18 @@ describe('App — 上游市場分頁的篩選功能不受 PR 分頁改動影響'
 });
 
 describe('App — PR 分頁只出現一個篩選工具列', () => {
-  it('does not render the outer App-level toolbar on the PR tab (only PRTab\'s own)', async () => {
+  it('PR 預設是總覽（沒有搜尋工具列）；工具列只出現在「新聞監測」子頁，而且只有一個', async () => {
     await renderAppSettled();
     await switchTab('PR 媒體戰情');
 
-    // 整個 PR 分頁只能有一個「搜尋標題、內容、媒體或品牌…」輸入框
-    // （PRTab 自己管理的工具列），不能是 App 外層工具列 + PRTab 工具列兩個。
-    // findAllBy*：PRTab 是 lazy load，等它實際掛載後再斷言數量。
+    // PRTab 是 lazy load，等它掛載（出現子頁籤）後再斷言
+    const overviewTab = await screen.findByRole('tab', { name: '總覽' });
+    expect(overviewTab.getAttribute('aria-selected')).toBe('true');
+    expect(screen.queryByPlaceholderText('搜尋標題、內容、媒體或品牌…')).toBeNull();
+
+    await act(async () => { fireEvent.click(screen.getByRole('tab', { name: '新聞監測' })); });
+    // 整個 PR 分頁只能有一個「搜尋標題、內容、媒體或品牌…」輸入框（PRTab 自己管理的工具列），
+    // 不能是 App 外層工具列 + PRTab 工具列兩個。
     expect(await screen.findAllByPlaceholderText('搜尋標題、內容、媒體或品牌…')).toHaveLength(1);
   });
 });
