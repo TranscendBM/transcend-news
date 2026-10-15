@@ -68,10 +68,11 @@ describe('ExposurePerformancePanel — 顯示狀態', () => {
     renderPanel({ records: undefined });   // 預設值也不會崩潰
   });
 
-  it('標示目前是依「新聞稿／主題」以標題彙整，並說明統計依目前已載入資料', () => {
+  it('標示分組依據（編號、事件規則、標題相同、相似標題）與「推定」，並說明統計依目前已載入資料', () => {
     renderPanel();
     expect(screen.getByText(/依「新聞稿／主題」彙整/)).toBeTruthy();
-    expect(screen.getByText(/尚未對應正式新聞稿編號/)).toBeTruthy();
+    expect(screen.getByText(/事件規則——同一期的月營收公告、同一季的財報／獲利/)).toBeTruthy();
+    expect(screen.getByText(/這是推定而非正式新聞稿編號/)).toBeTruthy();
     expect(screen.getByText(/統計依目前已載入的 6 筆人工確認曝光/)).toBeTruthy();
     expect(screen.queryByText(/已達讀取上限/)).toBeNull();
   });
@@ -142,8 +143,9 @@ describe('ExposurePerformancePanel — 新聞稿／主題與明細', () => {
   });
 
   it('主題很多時先顯示一批，按「顯示更多」再展開', () => {
-    const many = Array.from({ length: 20 }, (_, i) =>
-      raw(`m${i}`, tw(2026, 9, 1 + (i % 20)), 'A報', '', `完全不同的新聞稿標題第${i}號`));
+    // 每個標題用不同的字，彼此不會被「相似標題」規則合併
+    const many = Array.from({ length: 20 }, (_, i) => raw(`m${i}`, tw(2026, 9, 1 + i), 'A報', '',
+      [0, 1, 2, 3].map(k => String.fromCharCode(0x4e00 + i * 37 + k * 11)).join('')));
     renderPanel({ records: many });
     expect(topicButtons()).toHaveLength(15);
     fireEvent.click(screen.getByText(/顯示更多（再 5 則）/));
@@ -300,5 +302,43 @@ describe('ExposurePerformancePanel — 隱私與連結安全', () => {
     expandAll();
     expect(document.querySelectorAll('a')).toHaveLength(0);
     expect(screen.getByText('標題三', { selector: 'td span' })).toBeTruthy();   // 標題仍以純文字顯示
+  });
+});
+
+describe('ExposurePerformancePanel — 分組依據標籤', () => {
+  const REVENUE = [
+    ['鉅亨網', '創見9月營收60.35億元年增290.42% 1—9月達485.11億元'],
+    ['聯合報', '創見9月營收60.4億元、年增290% 深化AI與工業應用布局'],
+    ['電子時報', '創見Q3營收160.7億元創次高 深化AI及工控應用'],
+    ['非凡新聞', '威剛9月營收年增2倍、Q3首破500億！創見前9月增370%創高'],
+  ];
+  const revenueRecords = REVENUE.map(([media, title], i) => raw('rv' + i, tw(2026, 10, 6, 9 + i), media, '', title));
+
+  it('事件規則分出的主題：名稱是事件名稱、標示「分組依據：依事件規則：月營收公告」，展開可看每一則', () => {
+    renderPanel({ records: [...revenueRecords, raw('solo', tw(2026, 9, 3), '經濟日報', '', '創見獲選台灣企業100強')] });
+    const buttons = topicButtons();
+    expect(buttons).toHaveLength(2);
+    const event = buttons.find(b => b.textContent.includes('2026年9月營收公告'));
+    expect(within(event).getByText('分組依據：事件規則（月營收公告）')).toBeTruthy();
+    expect(within(event).getByText('4').nextElementSibling.textContent).toBe('則曝光');
+    // 只有一篇的主題不顯示分組依據
+    const solo = buttons.find(b => b.textContent.includes('創見獲選台灣企業100強'));
+    expect(solo.textContent).not.toContain('分組依據');
+    fireEvent.click(event);
+    const detail = document.getElementById(event.getAttribute('aria-controls'));
+    expect(detail.querySelectorAll('tbody tr')).toHaveLength(4);
+  });
+
+  it('標題相似與標題相同的主題各自標示依據；匯出的主題彙整帶「分組依據」欄', () => {
+    renderPanel({ records: [
+      raw('s1', tw(2026, 9, 23), '經濟日報', '', '創見擴充嵌入式鏡頭模組陣容 攜研華加速 Edge AI 視覺應用'),
+      raw('s2', tw(2026, 9, 23), '工商時報', '', '創見推AI嵌入式鏡頭模組 攜研華搶攻Edge AI商機'),
+      raw('t1', tw(2026, 9, 1), '鉅亨網', '', '創見公告庫藏股'),
+      raw('t2', tw(2026, 9, 9), '聯合報', '', '創見 公告庫藏股！'),
+    ] });
+    expect(screen.getByText('分組依據：標題相似')).toBeTruthy();
+    expect(screen.getByText('分組依據：標題相同')).toBeTruthy();
+    fireEvent.click(screen.getByText('匯出 Excel'));
+    expect(lastExportArgs().summaryRows.map(r => r['分組依據']).sort()).toEqual(['標題相似', '標題相同'].sort());
   });
 });

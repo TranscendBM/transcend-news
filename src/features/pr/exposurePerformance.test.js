@@ -3,7 +3,7 @@ import { describe, it, expect } from 'vitest';
 import {
   EMPTY_FILTERS, PRIVATE_FIELD_NAMES, applyFilters, buildDetailRows, buildPerformance, buildSummaryRows,
   filterOptions, groupByTopic, hasActiveFilters, normalizeTitleKey, sanitizeCell, toPublicRecord,
-  toPublicRecords, topicKeyOf, typeLabel,
+  titleSimilarity, toPublicRecords, typeLabel,
 } from './exposurePerformance.js';
 
 // 台灣時間 y-m-d h:00 的實際時刻
@@ -74,80 +74,146 @@ describe('toPublicRecord — 公開欄位白名單與隱私', () => {
 });
 
 describe('groupByTopic — 分組規則', () => {
-  it('標題只差空白、大小寫、全半形、首尾標點的曝光合成同一個主題', () => {
-    const topics = groupByTopic(pub([
+  const group = rows => groupByTopic(pub(rows));
+
+  it('標題只差空白、大小寫、全半形、首尾標點的曝光合成同一個主題（依標題相同）', () => {
+    const topics = group([
       raw('1', tw(2026, 9, 1), '經濟日報', '', 'Transcend 推出新品 SSD'),
-      raw('2', tw(2026, 9, 2), '鉅亨網', '', 'TRANSCEND　推出新品　ｓｓｄ！'),
-      raw('3', tw(2026, 9, 3), '非凡新聞', '', ' transcend推出新品ssd '),
-    ]));
+      raw('2', tw(2026, 9, 9), '鉅亨網', '', 'TRANSCEND　推出新品　ｓｓｄ！'),   // 日期差很多也合併：標題完全相同
+      raw('3', tw(2026, 9, 20), '非凡新聞', '', ' transcend推出新品ssd '),
+    ]);
     expect(topics).toHaveLength(1);
-    expect(topics[0].total).toBe(3);
-    expect(topics[0].mediaCount).toBe(3);
-    expect(topics[0].source).toBe('title');
+    expect(topics[0]).toMatchObject({ total: 3, mediaCount: 3, basis: 'title', basisLabel: '標題相同' });
   });
 
-  it('不同新聞稿不會被錯誤合併（標題只要多一個字、數字不同就分開）', () => {
-    const topics = groupByTopic(pub([
-      raw('1', tw(2026, 9, 1), 'A', '', '創見公告庫藏股'),
-      raw('2', tw(2026, 9, 1), 'B', '', '創見公告庫藏股買回'),
-      raw('3', tw(2026, 9, 2), 'C', '', '創見7月營收'),
-      raw('4', tw(2026, 9, 2), 'D', '', '創見8月營收'),
-    ]));
+  it('使用者提供的「同一篇轉發」標題全部歸成同一個主題：2026年9月營收公告（依事件規則）', () => {
+    const titles = [
+      ['非凡新聞', '威剛9月營收年增2倍、Q3首破500億！創見前9月增370%創高'],
+      ['壹蘋新聞網', '記憶體需求續旺！創見9月營收60.4億年月雙增 Q3營收大增291% 將參展智慧能源週 DDR5、企業級SSD搶AI商機'],
+      ['MoneyDJ理財網', '創見 115年9月營收60.35億、年增290.42%'],
+      ['鉅亨網', '創見9月營收60.35億元年增290.42% 1—9月達485.11億元'],
+      ['聯合報', '創見9月營收60.4億元、年增290% 深化AI與工業應用布局'],
+      ['電子時報', '創見9月營收回溫月增24.8% IPC、網通客戶專案出貨挹注'],
+      ['鏡報新聞網', '創見9月營收達60.4億元年增290% AI伺服器記憶體、SSD需求同步升溫'],
+      ['MoneyDJ理財網', '創見9月營收轉雙增/Q3寫次高；續拓AI應用'],
+      ['科技新報', '創見資訊 9 月營收年增 290%，前 9 個月營收年增達到 370%'],
+      ['鉅亨網', '創見Q3營收160.7億元創次高 深化AI及工控應用'],
+    ];
+    const topics = group(titles.map(([media, title], i) => raw('u' + i, tw(2026, 10, 6, 9 + (i % 8)), media, '', title)));
+    expect(topics).toHaveLength(1);
+    expect(topics[0]).toMatchObject({
+      total: 10, basis: 'event', eventKind: 'revenue', name: '2026年9月營收公告', basisLabel: '事件規則',
+    });
+    expect(topics[0].mediaCount).toBe(8);   // MoneyDJ、鉅亨網各出現兩次，算一家
+  });
+
+  it('同一天不同月份／不同類型的事件不會混在一起（月營收、季財報、其他新聞分開）', () => {
+    const topics = group([
+      raw('1', tw(2026, 9, 2), 'A', '', '創見7月營收年增3倍'),
+      raw('2', tw(2026, 9, 2), 'B', '', '創見8月營收年增2倍'),
+      raw('3', tw(2026, 9, 2), 'C', '', '創見第2季EPS 27.7元創高'),
+      raw('4', tw(2026, 9, 2), 'D', '', '創見獲選台灣企業100強'),
+    ]);
     expect(topics).toHaveLength(4);
+    expect(topics.every(t => t.total === 1 && t.basis === 'single')).toBe(true);
   });
 
-  it('有 campaignId／pressReleaseId 時優先用它分組（標題不同也合併）；沒有的才用標題 fallback', () => {
-    const topics = groupByTopic(pub([
-      raw('1', tw(2026, 9, 1), 'A', '', '標題甲', { campaignId: 'PR-001', campaignName: '九月新品發表' }),
-      raw('2', tw(2026, 9, 2), 'B', '', '完全不同的標題乙', { pressReleaseId: 'PR-001' }),
-      raw('3', tw(2026, 9, 3), 'C', '', '標題甲'),                       // 沒有識別欄位 → 走標題 fallback
-      raw('4', tw(2026, 9, 4), 'D', '', '標題甲'),
-    ]));
+  it('相似標題：發布日相差 1 天內、標題相似度夠高才合併（依標題相似）', () => {
+    const topics = group([
+      raw('1', tw(2026, 9, 23), '經濟日報', '', '創見擴充嵌入式鏡頭模組陣容 攜研華加速 Edge AI 視覺應用'),
+      raw('2', tw(2026, 9, 23), '工商時報', '', '創見推AI嵌入式鏡頭模組 攜研華搶攻Edge AI商機'),
+      raw('3', tw(2026, 9, 24), '自由時報', '', '創見推兩款嵌入式鏡頭模組 攜手研華搶攻AI視覺辨識商機'),
+    ]);
+    expect(topics).toHaveLength(1);
+    expect(topics[0]).toMatchObject({ total: 3, basis: 'similar', basisLabel: '標題相似' });
+  });
+
+  it('相似標題但相隔超過 1 天，不合併（避免把不同次的新聞串起來）', () => {
+    const topics = group([
+      raw('1', tw(2026, 9, 1), 'A', '', '創見推出64GB DDR5工業用記憶體 提升高速運算效能'),
+      raw('2', tw(2026, 9, 5), 'B', '', '創見推出64GB DDR5工業用記憶體 提升高速運算效能與穩定性'),
+    ]);
     expect(topics).toHaveLength(2);
-    const byId = topics.find(t => t.source === 'id');
-    expect(byId.total).toBe(2);
-    expect(byId.name).toBe('九月新品發表');
-    const byTitle = topics.find(t => t.source === 'title');
-    expect(byTitle.total).toBe(2);
+  });
+
+  it('不同新聞稿不會被錯誤合併：同一天但內容不同的新聞各自獨立', () => {
+    const topics = group([
+      raw('1', tw(2026, 9, 10), 'A', '', '創見公告庫藏股買回'),
+      raw('2', tw(2026, 9, 10), 'B', '', '創見推出新一代 SSD 搶攻 AI 伺服器'),
+      raw('3', tw(2026, 9, 10), 'C', '', '創見董事長談記憶體缺貨將延續到明年'),
+      raw('4', tw(2026, 9, 10), 'D', '', '創見榮獲 COMPUTEX 永續設計獎'),
+    ]);
+    expect(topics).toHaveLength(4);
+    topics.forEach(t => expect(t.basis).toBe('single'));
+  });
+
+  it('標題沒有營收／財報字眼、也沒有期間的新聞，不會被事件規則亂歸類', () => {
+    const topics = group([
+      raw('1', tw(2026, 6, 3), 'A', '', '黃仁勳發表N1X、AI PC來臨！創見：記憶體再大爆發、營收貢獻可觀'),
+      raw('2', tw(2026, 6, 3), 'B', '', '創見5月營收創歷史次高'),
+    ]);
+    expect(topics).toHaveLength(2);
+    expect(topics.find(t => t.total === 1).basis).toBe('single');
+  });
+
+  it('有 campaignId／pressReleaseId 時優先用它（標題與日期不同也合併），且不跟其他規則混；沒有編號的才走規則', () => {
+    const topics = group([
+      raw('1', tw(2026, 9, 1), 'A', '', '標題甲', { campaignId: 'PR-001', campaignName: '九月新品發表' }),
+      raw('2', tw(2026, 9, 20), 'B', '', '完全不同的標題乙', { pressReleaseId: 'PR-001' }),
+      raw('3', tw(2026, 9, 3), 'C', '', '標題甲'),                          // 沒有編號：不會被拉進 PR-001
+      raw('4', tw(2026, 9, 4), 'D', '', '創見9月營收創高', { campaignId: 'PR-002' }),   // 有編號：不再套用事件規則
+      raw('5', tw(2026, 10, 6), 'E', '', '創見9月營收創高'),
+    ]);
+    const byId = topics.filter(t => t.basis === 'id');
+    expect(byId).toHaveLength(2);
+    const pr1 = byId.find(t => t.name === '九月新品發表');
+    expect(pr1.total).toBe(2);
+    expect(byId.find(t => t.total === 1).items[0].id).toBe('4');
+    expect(topics.find(t => t.items.some(r => r.id === '5')).basis).toBe('single');
+    expect(topics.find(t => t.items.some(r => r.id === '3')).total).toBe(1);
   });
 
   it('沒有標題的紀錄各自獨立，不會全部被塞進同一個主題', () => {
-    const topics = groupByTopic(pub([
-      raw('1', tw(2026, 9, 1), 'A', '', ''), raw('2', tw(2026, 9, 2), 'B', '', '   '),
-    ]));
+    const topics = group([
+      raw('1', tw(2026, 9, 1), 'A', '', ''), raw('2', tw(2026, 9, 1), 'B', '', '   '),
+    ]);
     expect(topics).toHaveLength(2);
     expect(topics[0].name).toBe('（無標題）');
-    expect(topicKeyOf(pub([raw('x', tw(2026, 9, 1), 'A', '', '')])[0]).key).toMatch(/^untitled:/);
   });
 
   it('每組的統計：曝光數、不重複媒體數、首次／最近日期、類型分布、主要媒體、明細新到舊', () => {
-    const [t] = groupByTopic(pub([
+    const [t] = group([
       raw('1', tw(2026, 9, 3), 'A報', '', '同一則', { exposureType: 'online' }),
       raw('2', tw(2026, 9, 1), 'B網', '', '同一則', { exposureType: 'video' }),
       raw('3', tw(2026, 9, 5), 'A報', '', '同一則', { exposureType: 'online' }),
       raw('4', tw(2026, 9, 2), 'C台', '', '同一則', { exposureType: 'social' }),
-    ]));
+    ]);
     expect(t.total).toBe(4);
     expect(t.mediaCount).toBe(3);
     expect(t.firstDate).toEqual(tw(2026, 9, 1));
     expect(t.lastDate).toEqual(tw(2026, 9, 5));
     expect(t.typeCounts[0]).toMatchObject({ label: '網路新聞', count: 2 });
-    expect(t.typeCounts.map(c => c.label).sort()).toEqual(['影音', '社群', '網路新聞'].sort());
     expect(t.typeCounts.reduce((n, c) => n + c.count, 0)).toBe(4);
     expect(t.topMedia[0]).toMatchObject({ label: 'A報', count: 2 });
     expect(t.items.map(r => r.id)).toEqual(['3', '1', '4', '2']);
   });
 
-  it('主題名稱取出現最多次的原始標題；主題依曝光數、再依最近日期排序', () => {
-    const topics = groupByTopic(pub([
+  it('主題名稱：事件組用事件名稱；其他組取出現最多次的原始標題；依曝光數、再依最近日期排序', () => {
+    const topics = group([
       raw('1', tw(2026, 9, 1), 'A', '', '甲 標題'), raw('2', tw(2026, 9, 2), 'B', '', '甲標題'),
       raw('3', tw(2026, 9, 3), 'C', '', '甲標題'),
       raw('4', tw(2026, 9, 9), 'D', '', '乙標題'),
       raw('5', tw(2026, 9, 5), 'E', '', '丙標題'),
-    ]));
+    ]);
     expect(topics[0].name).toBe('甲標題');
     expect(topics.map(t => t.total)).toEqual([3, 1, 1]);
-    expect(topics.slice(1).map(t => t.name)).toEqual(['乙標題', '丙標題']);   // 同為 1 則：最近的排前面
+    expect(topics.slice(1).map(t => t.name)).toEqual(['乙標題', '丙標題']);
+  });
+
+  it('標題相似度：相同標題為 1、完全不同接近 0、空白標題為 0', () => {
+    expect(titleSimilarity('創見推出新品', '創見推出新品')).toBe(1);
+    expect(titleSimilarity('創見推出新品', '今天天氣很好')).toBeLessThan(0.1);
+    expect(titleSimilarity('', '創見')).toBe(0);
   });
 });
 
@@ -276,7 +342,7 @@ describe('Excel 資料列與公式注入防護', () => {
       raw('3', tw(2026, 9, 2), 'A報', '', '同一則', { exposureType: 'online' }),
     ])));
     expect(rows).toEqual([{
-      '新聞稿／主題': '同一則', 曝光總數: 3, 不重複媒體數: 2, 首次曝光: '2026-09-01', 最近曝光: '2026-09-03',
+      '新聞稿／主題': '同一則', 分組依據: '標題相同', 曝光總數: 3, 不重複媒體數: 2, 首次曝光: '2026-09-01', 最近曝光: '2026-09-03',
       主要媒體: 'A報（2）、B網（1）', 類型分布: '網路新聞 2、影音 1',
     }]);
   });

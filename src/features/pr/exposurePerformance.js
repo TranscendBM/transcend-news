@@ -1,5 +1,6 @@
 import { dayKeyOf } from './exposureInsights.js';
 import { safeHttpUrl } from '../../utils/safeUrl.js';
+import { detectEvent, EVENT_KIND_LABELS } from './exposureEvents.js';
 
 // 「新聞稿曝光成效」的分組與統計（純函式，不碰畫面與 Firestore）。
 //
@@ -90,46 +91,123 @@ const countsToList = (counts, total, labelOf) => Object.entries(counts)
   .sort((a, b) => b.count - a.count || a.label.localeCompare(b.label, 'zh-Hant'));
 const bump = (obj, key) => { obj[key] = (obj[key] || 0) + 1; };
 
-/** 分組鍵：有可靠識別欄位就用它；否則用標題正規化；標題是空的就各自獨立。 */
-export function topicKeyOf(record) {
-  if (record.campaignId) return { key: `id:${record.campaignId}`, source: 'id' };
-  const title = normalizeTitleKey(record.title);
-  if (title) return { key: `title:${title}`, source: 'title' };
-  return { key: `untitled:${record.id || record.date.getTime()}`, source: 'title' };
+// ── 相似標題（同一則新聞稿、各媒體改了標題）────────────────
+/** 兩個標題的字元雙連詞 Dice 相似度（0～1）。只在發布日相差 1 天內才拿來比。 */
+export const SIMILAR_THRESHOLD = 0.4;
+const DAY_MS = 86400000;
+const dayNum = day => { const [y, m, d] = day.split('-').map(Number); return Date.UTC(y, m - 1, d); };
+
+function bigrams(title) {
+  const s = normalizeText(title).replace(/[\s\p{P}\p{S}]/gu, '');
+  const grams = new Set();
+  for (let i = 0; i < s.length - 1; i++) grams.add(s.slice(i, i + 2));
+  return grams;
+}
+export function titleSimilarity(a, b) {
+  const ga = bigrams(a); const gb = bigrams(b);
+  if (!ga.size || !gb.size) return 0;
+  let shared = 0;
+  ga.forEach(g => { if (gb.has(g)) shared += 1; });
+  return (2 * shared) / (ga.size + gb.size);
 }
 
-export function groupByTopic(records) {
+export const BASIS_LABELS = {
+  id: '新聞稿編號',
+  event: '事件規則',
+  similar: '標題相似',
+  title: '標題相同',
+  single: '單篇',
+};
+
+/**
+ * 分組（由嚴到寬，每一層都是可解釋的規則；同一組內任兩篇只要被任何一層連起來就算同組）：
+ *   1. campaignId／pressReleaseId 相同（有編號的紀錄只跟同編號的合併，不再套用下面的規則）
+ *   2. 事件規則相同（同一期的月營收公告、同一季的財報／獲利，見 exposureEvents.js）
+ *   3. 正規化後標題完全相同（不限日期）
+ *   4. 發布日相差 1 天內、標題相似度 ≥ SIMILAR_THRESHOLD（兩篇已被認成不同事件的不比）
+ * 都不符合就各自獨立。
+ */
+export function groupByTopic(records, { similarThreshold = SIMILAR_THRESHOLD } = {}) {
+  const items = [...records].sort((a, b) => a.date - b.date || a.id.localeCompare(b.id));
+  const n = items.length;
+  const parent = items.map((_, i) => i);
+  const find = i => { let r = i; while (parent[r] !== r) r = parent[r]; let c = i; while (parent[c] !== r) { const next = parent[c]; parent[c] = r; c = next; } return r; };
+  const union = (i, j) => { const ri = find(i); const rj = find(j); if (ri !== rj) parent[rj] = ri; };
+
+  const events = items.map(r => (r.campaignId ? null : detectEvent(r.title, r.day)));
+  const titleKeys = items.map(r => normalizeTitleKey(r.title));
+
+  // 1)～3)：用「鍵」合併
+  const firstByKey = new Map();
+  const link = (key, i) => { if (firstByKey.has(key)) union(i, firstByKey.get(key)); else firstByKey.set(key, i); };
+  items.forEach((r, i) => {
+    if (r.campaignId) { link('id:' + r.campaignId, i); return; }
+    if (events[i]) link(events[i].key, i);
+    if (titleKeys[i]) link('title:' + titleKeys[i], i);
+  });
+
+  // 4)：發布日相差 1 天內的相似標題
+  const grams = items.map(r => (r.campaignId ? null : bigrams(r.title)));
+  const dayNums = items.map(r => dayNum(r.day));
+  for (let i = 0; i < n; i++) {
+    if (!grams[i] || !grams[i].size) continue;
+    for (let j = i + 1; j < n && dayNums[j] - dayNums[i] <= DAY_MS; j++) {
+      if (!grams[j] || !grams[j].size || find(i) === find(j)) continue;
+      if (events[i] && events[j] && events[i].key !== events[j].key) continue;
+      let shared = 0;
+      grams[i].forEach(g => { if (grams[j].has(g)) shared += 1; });
+      if ((2 * shared) / (grams[i].size + grams[j].size) >= similarThreshold) union(i, j);
+    }
+  }
+
   const groups = new Map();
-  [...records].sort((a, b) => a.date - b.date).forEach(r => {
-    const { key, source } = topicKeyOf(r);
-    let g = groups.get(key);
-    if (!g) { g = { key, source, items: [], titleCounts: new Map(), campaignName: '' }; groups.set(key, g); }
+  items.forEach((r, i) => {
+    const root = find(i);
+    let g = groups.get(root);
+    if (!g) { g = { items: [], events: new Map(), titleCounts: new Map(), campaignName: '', titleKeys: new Set(), hasId: false }; groups.set(root, g); }
     g.items.push(r);
+    if (r.campaignId) g.hasId = true;
     if (r.campaignName && !g.campaignName) g.campaignName = r.campaignName;
+    if (events[i]) g.events.set(events[i].key, (g.events.get(events[i].key) || { ...events[i], count: 0 }));
+    if (events[i]) g.events.get(events[i].key).count += 1;
     if (r.title) g.titleCounts.set(r.title, (g.titleCounts.get(r.title) || 0) + 1);
+    g.titleKeys.add(titleKeys[i]);
   });
 
   return [...groups.values()].map(g => {
     const total = g.items.length;
     const mediaCounts = {}; const typeCounts = {};
     g.items.forEach(r => { bump(mediaCounts, r.mediaName); bump(typeCounts, r.type); });
-    // 名稱：優先用資料給的名稱；否則取出現最多次的原始標題（同數量取最早出現的）
+
+    // 主要事件（同一組若有多個事件鍵，取報導最多的）
+    const event = [...g.events.values()].sort((a, b) => b.count - a.count)[0] || null;
+
+    let basis = 'single';
+    if (g.hasId) basis = 'id';
+    else if (event && total > 1) basis = 'event';
+    else if (total > 1) basis = g.titleKeys.size === 1 ? 'title' : 'similar';
+
+    // 名稱：編號給的名稱 → 事件名稱 → 出現最多次的原始標題（同數量取最早出現的）
     let name = g.campaignName;
+    if (!name && basis === 'event') name = event.label;
     if (!name) {
-      let best = '', bestN = 0;
-      g.titleCounts.forEach((n, t) => { if (n > bestN) { best = t; bestN = n; } });
+      let best = ''; let bestN = 0;
+      g.titleCounts.forEach((count, t) => { if (count > bestN) { best = t; bestN = count; } });
       name = best || '（無標題）';
     }
-    const items = [...g.items].sort(byNewest);
+    const sorted = [...g.items].sort(byNewest);
     return {
-      key: g.key, source: g.source, name, total,
+      key: g.hasId ? 'id:' + g.items[0].campaignId : (basis === 'event' ? event.key : 'g:' + g.items[0].id + ':' + g.items[0].date.getTime()),
+      basis, basisLabel: BASIS_LABELS[basis],
+      eventKind: basis === 'event' ? event.kind : null,
+      name, total,
       mediaCount: Object.keys(mediaCounts).length,
       firstDate: g.items[0].date, lastDate: g.items[g.items.length - 1].date,
       typeCounts: countsToList(typeCounts, total, typeLabel),
       topMedia: countsToList(mediaCounts, total).slice(0, 3),
-      items,
+      items: sorted,
     };
-  }).sort((a, b) => b.total - a.total || b.lastDate - a.lastDate || a.name.localeCompare(b.name, 'zh-Hant'));
+  }).sort((x, y) => y.total - x.total || y.lastDate - x.lastDate || x.name.localeCompare(y.name, 'zh-Hant'));
 }
 
 /** 一份（已篩選的）紀錄 → 摘要、類型分布、媒體排行、主題分組。 */
@@ -190,6 +268,7 @@ export function buildDetailRows(topics) {
 export function buildSummaryRows(topics) {
   return topics.map(t => sanitizeRow({
     '新聞稿／主題': t.name,
+    分組依據: t.basis === 'single' ? '' : t.basisLabel + (t.eventKind ? '（' + EVENT_KIND_LABELS[t.eventKind] + '）' : ''),
     曝光總數: t.total,
     不重複媒體數: t.mediaCount,
     首次曝光: dayText(t.firstDate),

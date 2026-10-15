@@ -6,6 +6,7 @@ import ShowMoreButton, { useShowMore } from '../../components/ShowMore.jsx';
 import { tagClass } from '../../components/tagStyles.js';
 import { exportExposurePerformanceExcel } from '../../utils/formatting.js';
 import { MAX_EXPOSURE_RECORDS } from './exposureLimits.js';
+import { EVENT_KIND_LABELS } from './exposureEvents.js';
 import {
   EMPTY_FILTERS, applyFilters, buildDetailRows, buildPerformance, buildSummaryRows,
   filterOptions, hasActiveFilters, toPublicRecords, typeLabel,
@@ -18,6 +19,9 @@ import {
 const TYPE_COLORS = { online: '#960014', video: '#b45309', social: '#475569', other: '#94a3b8' };
 const TYPE_TONES = { online: 'blue', video: 'amber', social: 'green' };
 const typeColor = key => TYPE_COLORS[key] || TYPE_COLORS.other;
+// 分組依據標籤（只有多篇的主題才顯示）：編號＝綠、事件規則＝藍、標題相似＝琥珀、標題相同＝灰
+const BASIS_TONES = { id: 'green', event: 'blue', similar: 'amber', title: 'gray' };
+const basisText = t => t.basisLabel + (t.eventKind ? '（' + EVENT_KIND_LABELS[t.eventKind] + '）' : '');
 
 const fmtDay = d => (d ? d.toLocaleDateString('zh-TW', { timeZone: 'Asia/Taipei' }) : '—');
 const pct = v => `${Math.round(v * 100)}%`;
@@ -54,9 +58,13 @@ function TopicRow({ topic, open, onToggle, onExport }) {
           <p className="text-sm font-medium text-ink leading-snug break-words">{topic.name}</p>
           <p className="text-xs text-gray-500 mt-1">
             {topic.mediaCount} 家媒體・首次 {fmtDay(topic.firstDate)}・最近 {fmtDay(topic.lastDate)}
-            {topic.source === 'id' && '・依新聞稿編號'}
           </p>
           <div className="flex flex-wrap gap-1.5 mt-2">
+            {topic.basis !== 'single' && (
+              <span className={tagClass(BASIS_TONES[topic.basis])} title="這些曝光被歸成同一個主題的依據（推定，可展開檢視每一則）">
+                分組依據：{basisText(topic)}
+              </span>
+            )}
             {topic.typeCounts.map(c => (
               <span key={c.key} className={tagClass(TYPE_TONES[c.key] || 'gray')}>{c.label} {c.count}</span>
             ))}
@@ -150,8 +158,10 @@ export default function ExposurePerformancePanel({
         </button>
       }>
       <p className="text-xs text-gray-500 mb-1">
-        依「新聞稿／主題」彙整人工確認的曝光。目前以標題比對分組（正規化後標題完全相同才合併），
-        尚未對應正式新聞稿編號，所以同一則新聞稿若各媒體改了標題，會分成不同主題。
+        依「新聞稿／主題」彙整人工確認的曝光。同一則新聞稿各媒體標題常不一樣，所以依序用這些依據分組：
+        ① 新聞稿編號（資料有才用）② 事件規則——同一期的月營收公告、同一季的財報／獲利
+        ③ 標題完全相同 ④ 發布日前後 1 天內的相似標題；都不符合就各自獨立。
+        這是推定而非正式新聞稿編號，每組都標示依據，可展開檢視每一則。
       </p>
       <p className="text-xs text-gray-500 mb-4">
         統計依目前已載入的 {publicRecords.length.toLocaleString()} 筆人工確認曝光
