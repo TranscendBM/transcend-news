@@ -5,6 +5,7 @@ import NewsCard from '../news/NewsCard.jsx';
 import TodayBriefing from '../intelligence/TodayBriefing.jsx';
 import { sortByDate } from '../../utils/dates.js';
 import { isBriefingCandidate } from '../../utils/news.js';
+import TopEvents, { openEventCenter } from '../events/TopEvents.jsx';
 import { PRStatsPanel } from './PRStatsPanel.jsx';
 import { KeyMediaPanel } from './KeyMediaPanel.jsx';
 import PRSummaryCard from './PRSummaryCard.jsx';
@@ -81,7 +82,7 @@ function ExposureSummary({ records, status, onRetry }) {
 
 export function PROverview({
   news, validTranscend, prStatus, refreshPRNews,
-  mediaExposure, mediaExposureStatus, refreshMediaExposure, onNavigate,
+  mediaExposure, mediaExposureStatus, refreshMediaExposure, onNavigate, topics = [], topicsStatus = 'ready',
 }) {
   const briefingArticles = useMemo(() => news.filter(isBriefingCandidate), [news]);
   const latestPR = useMemo(() => sortByDate(validTranscend).slice(0, OVERVIEW_LIMIT), [validTranscend]);
@@ -89,7 +90,11 @@ export function PROverview({
 
   return (
     <div className="space-y-4">
-      <TodayBriefing articles={briefingArticles} />
+      <TodayBriefing articles={briefingArticles} topics={topics} />
+
+      <PRSummaryCard title="涉及創見的重要事件" icon="radar" onViewAll={() => openEventCenter('transcend')}>
+        <TopEvents topics={topics} status={topicsStatus} tag="transcend" limit={3} />
+      </PRSummaryCard>
 
       <PRSummaryCard title="創見媒體曝光" icon="chart" onViewAll={() => onNavigate('news')}>
         <PRStatsPanel articles={validTranscend} status={prStatus} />

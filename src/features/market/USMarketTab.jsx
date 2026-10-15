@@ -6,6 +6,8 @@ import ShowMoreButton, { useShowMore } from '../../components/ShowMore.jsx';
 import NewsFilterToolbar from '../../components/filters/NewsFilterToolbar.jsx';
 import USNewsCard from '../news/USNewsCard.jsx';
 import TodayBriefing from '../intelligence/TodayBriefing.jsx';
+import SummaryCard from '../../components/SummaryCard.jsx';
+import TopEvents, { openEventCenter } from '../events/TopEvents.jsx';
 import { useNow } from '../../hooks/useNow.js';
 import { taipeiPeriodRange, inPeriod } from '../../utils/dates.js';
 import { exportNewsExcel } from '../../utils/formatting.js';
@@ -31,7 +33,7 @@ const UPSTREAM_TIME_FILTERS = [
 // useUpstreamNews() 後往下傳（不在這裡直接呼叫 hook）：一方面讓「重新
 // 整理」按鈕能統一觸發，另一方面 enabled 開關（只在 tab==='us' 時查詢）
 // 需要知道目前分頁，放在 App() 層級才知道 tab 狀態。
-export function USMarketTab({ upstreamArticles, upstreamStatus, refreshUpstreamNews }) {
+export function USMarketTab({ upstreamArticles, upstreamStatus, refreshUpstreamNews, topics = [], topicsStatus = 'ready' }) {
   const [timeFilter, setTimeFilter] = useState('week');
   const [brandFilter, setBrandFilter] = useState('all');
   const [usQuery, setUsQuery] = useState('');
@@ -120,7 +122,12 @@ export function USMarketTab({ upstreamArticles, upstreamStatus, refreshUpstreamN
       {/* 今天重要情報（沿用「今日情報快報」規則：風險／財務／機會／市場關鍵字 + 24 小時內加權）
           跟統計卡片／新聞清單套用相同的搜尋/媒體/情緒/品牌篩選，但不受期間
           分頁影響（見上方 briefingSource），TodayBriefing 自己只挑「今天」。 */}
-      <TodayBriefing articles={briefingSource} title="上游市場今日重要情報" />
+      <TodayBriefing articles={briefingSource} title="上游市場今日重要情報" topics={topics} />
+
+      <SummaryCard title="DRAM／Flash 重要事件" icon="radar" onViewAll={() => openEventCenter('upstream')}>
+        <TopEvents topics={topics} status={topicsStatus} tag="upstream" limit={3}
+          keywords={['dram', 'nand', 'flash', 'ddr', '記憶體', 'hbm']} emptyText="近 72 小時沒有 DRAM／Flash 的重要事件" />
+      </SummaryCard>
 
       <NewsFilterToolbar
         query={usQuery} setQuery={setUsQuery}

@@ -3,8 +3,10 @@ import Card from '../../components/Card.jsx';
 import { dedupeArticlesByTitle, getBriefingMeta, getActionSuggestion } from '../../utils/news.js';
 import { fmtDate, taipeiDayStart } from '../../utils/dates.js';
 import { useNow } from '../../hooks/useNow.js';
+import { dedupeByTopic } from '../events/eventData.js';
 
-export default function TodayBriefing({ articles, title = '今日情報快報' }) {
+// topics（事件中心）有資料時，同一事件的多篇報導只列一則（排在最前面的那則）；沒有就維持原本行為。
+export default function TodayBriefing({ articles, title = '今日情報快報', topics = [] }) {
   // useNow()：「今天」必須用 Asia/Taipei 日曆邊界（taipeiDayStart），不是
   // 瀏覽器本地時區的 getFullYear/getMonth/getDate——本地時區不保證是
   // 台灣，跟後端 news_cleanup.py、usePRNews/useUpstreamNews 的期間篩選
@@ -18,15 +20,15 @@ export default function TodayBriefing({ articles, title = '今日情報快報' }
       const d = n.pubDate?.toDate ? n.pubDate.toDate() : new Date(n.pubDate || 0);
       return d.getTime() >= todayStart.getTime();
     });
-    return today
+    const ranked = today
       .map(article => {
         const meta = getBriefingMeta(article);
         return { article, meta, action: getActionSuggestion(article, meta) };
       })
       .filter(item => item.meta.kind !== 'news')
-      .sort((a, b) => b.meta.score - a.meta.score)
-      .slice(0, 6);
-  }, [articles, now]);
+      .sort((a, b) => b.meta.score - a.meta.score);
+    return dedupeByTopic(ranked, item => item.article.id, topics).slice(0, 6);
+  }, [articles, now, topics]);
 
   const summary = useMemo(() => ({
     important: items.length,

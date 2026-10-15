@@ -80,6 +80,13 @@ service cloud.firestore {
       allow write: if false;
     }
 
+    // 新聞話題（事件中心）：由 topic_cluster_job（Admin SDK）寫入，前端只讀。
+    // 內容是 news 已公開文章的聚合與快照，沒有任何內部欄位。
+    match /news_topics/{topicId} {
+      allow read: if true;
+      allow write: if false;
+    }
+
     // 其他未列出的集合一律拒絕（讀＋寫）
     match /{document=**} {
       allow read, write: if false;

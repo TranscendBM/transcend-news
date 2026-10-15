@@ -378,6 +378,26 @@ rm /tmp/pass.txt
   公開網站沒有任何修改分類的寫入功能（人工修正需要日後的安全管理介面）。
 - `tools/press_release_dry_run.py` 會列出各分類數量、代表案例與預計更新數（零寫入）。
 
+## 🧭 事件中心（新聞話題聚類，`functions/topic_cluster.py`）
+
+把不同媒體對「同一事件」的報導聚成一個話題（`news_topics`），網站新增「事件中心」頁籤；PR 總覽顯示最多 3 個涉及創見的重要事件，
+上游市場顯示最多 3 個 DRAM／Flash 事件，今日情報快報同一事件只列一則。既有新聞清單完全保留。
+
+- **排程**：`topic_cluster_job` 每 30 分鐘（Asia/Taipei，`max_instances=1`，lease lock `topic_cluster`）。只讀 `news`（不寫），
+  只處理水位線（`meta/topic_cluster_state`）之後新增／變更的文章，每次最多 500 篇；讀取失敗不寫入、不清除既有話題；寫入成功才推進水位線。
+- **演算法 `topic-v1`（透明規則，零 API 費用）**：先用倒排索引（公司＋事件類型、型號、展覽名稱、期間）找候選話題，不做全部兩兩比較；
+  分數＝標題相似度（排除 AI／記憶體／SSD 等通用詞）＋公司重疊＋事件類型＋型號＋展覽＋財務數字＋期間＋時間；沒有「錨點」不合併。
+- **硬性不合併**：超過時間窗口（一般 72 小時；價格／供需 7 天；營收／財報需同月份／季度）、月份或季度不同、公司主體不同、
+  產品型號／容量／速度不同（DDR5 7200 ≠ 6400）、展覽不同、營收金額對不上、只因同一天或只有通用詞重疊。低信心保持獨立。
+- **穩定**：話題 id＝sha1(最早那篇文章 id)；新文章加入既有話題不改 id；已分組的文章不重算（冪等）；不合併既有話題；
+  演算法升級只影響新文章，可用 `tools/topic_cluster_dry_run.py` 預覽。
+- **指標**：篇數、不重複媒體數、首次／最近報導、持續時間、情緒、24 小時聲量與前一個 24 小時的變化率、重要性（0–100，
+  每一項加分都寫在 `importanceReasons`，事件卡顯示「重要原因」）。
+- **資料與權限**：`news_topics` 由 Admin SDK 寫入，Firestore Rules 公開唯讀（`allow write: if false`）；話題文件自帶文章快照，
+  事件中心只讀 `news_topics`，不讀 `news`。查詢只有 `lastPublishedAt` 單一欄位，不需要新的複合索引。
+  新聞文件不加 `topicId`（會讓所有正在監聽最新 300 則的瀏覽器多讀一次）；對應關係在 `news_topics.articleIds`。
+- **部署順序**：`firebase deploy --only firestore:rules` → `--only functions:topic_cluster_job` → `--only hosting:main`。
+
 ## 🌐 上游市場新聞（`src/features/news/useUpstreamNews.js`）
 
 上游市場分頁（供應鏈＋ DRAM/Flash 市場）的統計卡片、品牌篩選、「創見最新
