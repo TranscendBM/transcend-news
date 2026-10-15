@@ -41,6 +41,8 @@ export default function App() {
   const [compRev, setCompRev] = useState({});
   // 各 IR 資料集是否載入失敗（失敗時資料仍是空值；用來區分「載入失敗」與「尚無資料」）
   const [loadErrors, setLoadErrors] = useState({});
+  // 新聞稿主檔同步狀態（job_status/press_release_sync，一次性讀取、沒有監聽器）：null＝尚未讀到
+  const [pressSync, setPressSync] = useState(null);
   const markLoad = (key, failed) => setLoadErrors(prev => (prev[key] === failed ? prev : { ...prev, [key]: failed }));
   const [loading, setLoading] = useState(true);
   const [connected, setConnected] = useState(false);
@@ -102,7 +104,7 @@ export default function App() {
   // 查詢），不需要在這裡另外判斷目前分頁。
   async function fetchAll(includeNewsRefresh = true) {
     setLoading(true);
-    const tasks = [fetchStocks(), fetchRevenue(), fetchFinancials(), fetchDividends(), fetchMaterial(), fetchDaily(), fetchCompRevenue()];
+    const tasks = [fetchStocks(), fetchRevenue(), fetchFinancials(), fetchDividends(), fetchMaterial(), fetchDaily(), fetchCompRevenue(), fetchPressSync()];
     if (includeNewsRefresh) {
       tasks.push(refreshNews());
       refreshPRNews();
@@ -165,6 +167,20 @@ export default function App() {
       else setDaily({});
       markLoad('daily', false);
     } catch (e) { console.error('Daily:', e); setDaily({}); markLoad('daily', true); }
+  }
+
+  async function fetchPressSync() {
+    try {
+      const snap = await getDoc(doc(getDb(), 'job_status', 'press_release_sync'));
+      if (!snap.exists()) { setPressSync({ missing: true }); return; }
+      const d = snap.data();
+      const ms = v => (v && typeof v.toDate === 'function' ? v.toDate() : null);
+      setPressSync({
+        lastSyncAt: ms(d.lastSyncAt) || ms(d.lastSuccessAt),
+        failedSinceSuccess: Boolean(ms(d.lastErrorAt) && (!ms(d.lastSuccessAt) || ms(d.lastErrorAt) > ms(d.lastSuccessAt))),
+        report: d.report && typeof d.report === 'object' ? d.report : null,
+      });
+    } catch (e) { console.error('PressSync:', e); setPressSync({ error: true }); }
   }
 
   async function fetchCompRevenue() {
@@ -285,6 +301,7 @@ export default function App() {
               mediaExposure={mediaExposure}
               mediaExposureStatus={mediaExposureStatus}
               refreshMediaExposure={refreshMediaExposure}
+              pressSync={pressSync}
             />
           ) : tab === 'us' ? (
             <USMarketTab

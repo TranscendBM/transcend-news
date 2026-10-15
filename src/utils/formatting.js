@@ -95,11 +95,11 @@ export async function exportExposurePerformanceExcel({ summaryRows = [], detailR
   const wb = XLSX.utils.book_new();
   if (summaryRows.length) {
     const sheet = XLSX.utils.json_to_sheet(summaryRows);
-    sheet['!cols'] = [{ wch: 46 }, { wch: 10 }, { wch: 12 }, { wch: 12 }, { wch: 12 }, { wch: 36 }, { wch: 28 }];
+    sheet['!cols'] = [{ wch: 46 }, { wch: 22 }, { wch: 18 }, { wch: 10 }, { wch: 12 }, { wch: 12 }, { wch: 12 }, { wch: 36 }, { wch: 28 }];
     XLSX.utils.book_append_sheet(wb, sheet, '主題彙整');
   }
   const detail = XLSX.utils.json_to_sheet(detailRows);
-  detail['!cols'] = [{ wch: 46 }, { wch: 12 }, { wch: 16 }, { wch: 12 }, { wch: 60 }, { wch: 10 }, { wch: 60 }];
+  detail['!cols'] = [{ wch: 46 }, { wch: 16 }, { wch: 12 }, { wch: 16 }, { wch: 12 }, { wch: 60 }, { wch: 10 }, { wch: 60 }];
   XLSX.utils.book_append_sheet(wb, detail, '曝光明細');
   const today = new Date();
   const stamp = today.getFullYear() + String(today.getMonth() + 1).padStart(2, '0') + String(today.getDate()).padStart(2, '0');
