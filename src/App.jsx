@@ -9,6 +9,7 @@ import { useNewsFeed } from './features/news/useNewsFeed.js';
 import { usePRNews } from './features/news/usePRNews.js';
 import { useUpstreamNews } from './features/news/useUpstreamNews.js';
 import { useMediaExposure } from './features/pr/useMediaExposure.js';
+import { useNewsTopics } from './features/events/useNewsTopics.js';
 import { useUrlParam } from './hooks/useUrlParam.js';
 import { rememberedSection } from './hooks/useSectionNav.js';
 import { writeParams } from './utils/urlState.js';
@@ -18,11 +19,12 @@ import { COMPETITORS, STOCK_META } from './config/competitors.js';
 // 三個分頁各自的程式碼／SVG 圖表都相當大，但同時只會顯示一個——lazy
 // load 讓使用者只下載目前分頁需要的程式碼，不用一次打包進主 bundle。
 // 主分頁存在網址 ?tab=（pr／ir／us／health；沒有或不認識的值 → pr），上一頁／下一頁會切換分頁。
-const TAB_IDS = ['pr', 'ir', 'us', 'health'];
+const TAB_IDS = ['pr', 'events', 'ir', 'us', 'health'];
 
 const PRTab = lazy(() => import('./features/pr/PRTab.jsx').then(m => ({ default: m.PRTab })));
 const USMarketTab = lazy(() => import('./features/market/USMarketTab.jsx').then(m => ({ default: m.USMarketTab })));
 const IRTab = lazy(() => import('./features/ir/IRTab.jsx').then(m => ({ default: m.IRTab })));
+const EventCenterTab = lazy(() => import('./features/events/EventCenterTab.jsx').then(m => ({ default: m.EventCenterTab })));
 const HealthTab = lazy(() => import('./features/health/HealthTab.jsx').then(m => ({ default: m.HealthTab })));
 
 // ═══════════════════════════════════════════════════════════
@@ -31,7 +33,7 @@ const HealthTab = lazy(() => import('./features/health/HealthTab.jsx').then(m =>
 export default function App() {
   const [tab] = useUrlParam('tab', TAB_IDS, 'pr');
   // 切換主分頁時 section 換成該分頁上次停留的子頁（沒有就移除 → 預設的總覽）；PR 與 IR 各記各的
-  const setTab = id => writeParams({ tab: id, section: rememberedSection(id) });
+  const setTab = id => writeParams({ tab: id, section: rememberedSection(id), filter: null });
   const [stocks, setStocks] = useState({});
   const [revenue, setRevenue] = useState(null);
   const [financials, setFinancials] = useState(null);
@@ -57,6 +59,8 @@ export default function App() {
     status: mediaExposureStatus,
     refresh: refreshMediaExposure,
   } = useMediaExposure({ enabled: tab === 'pr' });
+  // 事件中心（news_topics）：PR 總覽、上游市場與事件中心用得到；一次性讀取，沒有監聽器
+  const { topics, status: topicsStatus, refresh: refreshTopics } = useNewsTopics({ enabled: tab === 'pr' || tab === 'us' || tab === 'events' });
   // enabled: tab === 'us' ——使用者停留在 PR 或 IR 分頁時不建立上游市場
   // 查詢，切到「上游市場」分頁才開始訂閱，離開時立即取消監聽器。
   const { articles: upstreamArticles, status: upstreamStatus, refresh: refreshUpstreamNews } =
@@ -110,6 +114,7 @@ export default function App() {
       refreshPRNews();
       refreshUpstreamNews();
       refreshMediaExposure();
+      refreshTopics();
     }
     await Promise.all(tasks);
     setLoading(false);
@@ -211,7 +216,7 @@ export default function App() {
       {/* ─────────── HEADER ─────────── */}
       <header className="sticky top-0 z-50 shadow-2xl"
         style={{ background: 'rgb(150,0,20)' }}>
-        <div className="max-w-7xl mx-auto px-3 sm:px-4 h-14 flex items-center justify-between gap-2 sm:gap-3">
+        <div className="max-w-7xl mx-auto px-2 sm:px-4 h-14 flex items-center justify-between gap-1.5 sm:gap-3">
 
           {/* Logo */}
           <div className="flex items-center gap-3 shrink-0">
@@ -223,15 +228,16 @@ export default function App() {
           </div>
 
           {/* PR / IR / US tab switcher */}
-          <nav className="flex gap-1 p-1 rounded-xl" style={{ background: 'rgba(0,0,0,0.35)' }}>
+          <nav className="flex gap-0.5 sm:gap-1 p-1 rounded-xl" style={{ background: 'rgba(0,0,0,0.35)' }}>
             {[
               { id: 'pr', icon: 'megaphone', label: 'PR 媒體戰情' },
+              { id: 'events', icon: 'radar', label: '事件中心' },
               { id: 'ir', icon: 'trend', label: 'IR 投資情報' },
               { id: 'us', icon: 'globe', label: '上游市場' },
               { id: 'health', icon: 'activity', label: '系統健康' },
             ].map(t => (
               <button key={t.id} onClick={() => setTab(t.id)}
-                className={`flex items-center gap-1.5 px-2.5 sm:px-4 py-1.5 rounded-lg text-sm font-semibold transition-all ${tab === t.id ? 'text-white shadow' : 'text-red-200/60 hover:text-white'}`}
+                className={`flex items-center gap-1.5 px-2 sm:px-4 py-1.5 rounded-lg text-sm font-semibold transition-all ${tab === t.id ? 'text-white shadow' : 'text-red-200/60 hover:text-white'}`}
                 style={tab === t.id ? { background: 'rgba(0,0,0,0.5)' } : {}}>
                 <Icon name={t.icon} className="text-[1.25em]" />
                 <span className="hidden sm:inline">{t.label}</span>
@@ -242,7 +248,7 @@ export default function App() {
           {/* Action buttons */}
           <div className="flex items-center gap-2 shrink-0">
             <button onClick={() => fetchAll()} disabled={loading}
-              className="flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 rounded-lg text-sm font-medium transition-all"
+              className="flex items-center gap-1.5 px-2 sm:px-3 py-1.5 rounded-lg text-sm font-medium transition-all"
               style={{ background: 'rgba(255,255,255,0.15)', border: '1px solid rgba(255,255,255,0.2)', color: 'white' }}>
               {loading ? <Spinner /> : <Icon name="refresh" />}
               <span className="hidden sm:inline">{loading ? '載入中' : '重新整理'}</span>
@@ -302,12 +308,18 @@ export default function App() {
               mediaExposureStatus={mediaExposureStatus}
               refreshMediaExposure={refreshMediaExposure}
               pressSync={pressSync}
+              topics={topics}
+              topicsStatus={topicsStatus}
             />
+          ) : tab === 'events' ? (
+            <EventCenterTab topics={topics} status={topicsStatus} onRetry={refreshTopics} />
           ) : tab === 'us' ? (
             <USMarketTab
               upstreamArticles={upstreamArticles}
               upstreamStatus={upstreamStatus}
               refreshUpstreamNews={refreshUpstreamNews}
+              topics={topics}
+              topicsStatus={topicsStatus}
             />
           ) : tab === 'health' ? (
             <HealthTab />
