@@ -22,6 +22,8 @@ from __future__ import annotations
 
 import re
 import unicodedata
+
+import coverage_classify as cc
 from datetime import date
 from urllib.parse import urlsplit
 
@@ -231,6 +233,16 @@ def prepare_press_release(pr) -> dict:
     }
 
 
+def peer_led(title) -> bool:
+    """同業（威剛、美光、三星…）在標題裡比創見更前面出現：這是產業／競品比較報導，不是創見新聞稿的轉載。"""
+    text = norm_text(title)
+    peer_idx = [text.find(p) for p in cc.PEERS if p in text]
+    if not peer_idx:
+        return False
+    company_idx = [text.find(c) for c in cc.COMPANY_NAMES if c in text]
+    return not company_idx or min(peer_idx) < min(company_idx)
+
+
 def mentions_company(title) -> bool:
     text = norm_text(title)
     return any(k in text for k in ('創見', 'transcend', '2451'))
@@ -306,8 +318,9 @@ def match_exposure(exposure: dict, prs: list[dict]) -> dict:
         if len(hits) == 1:
             return _result(STATUS_AUTO, 'exact_title', 0.95, hits[0])
 
-    # 4. 日期（日精度）＋關鍵字
-    if ex_day is not None and ex_tokens:
+    # 4. 日期（日精度）＋關鍵字（同業在前的報導不算新聞稿轉載）
+    led = peer_led(title)
+    if ex_day is not None and ex_tokens and not led:
         scored = []
         for p in prs:
             gap = _days_between(ex_day, p['_date'])
@@ -350,6 +363,8 @@ def match_exposure(exposure: dict, prs: list[dict]) -> dict:
 
     # 5. 標題相似度 → 只建議
     cand = []
+    if led:
+        return _result(STATUS_UNMATCHED, reason='peer_led')
     for p in prs:
         if not compatible(p, ex_sigs, title):
             continue

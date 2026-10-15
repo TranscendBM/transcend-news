@@ -437,8 +437,11 @@ class TestMatchingWrites(unittest.TestCase):
         before = {k: dict(v) for k, v in self.db.store['media_exposure'].items() if k in ('e_conf', 'e_legacy')}
         report = self.sync()
         after = self.db.store['media_exposure']
-        self.assertEqual(after['e_conf'], before['e_conf'])
-        self.assertEqual(after['e_legacy'], before['e_legacy'])
+        # 配對欄位完全不動（分類欄位另算：confirmed 一律是新聞稿衍生曝光）
+        for key in ('e_conf', 'e_legacy'):
+            for field in ps.MATCH_FIELDS + ('title', 'link', 'campaignId'):
+                self.assertEqual(after[key].get(field), before[key].get(field), (key, field))
+            self.assertEqual(after[key]['coverageClass'], 'press_release_derived')
         self.assertEqual(report['confirmed'], 2)
 
     def test_auto_match_unmatched_and_counts(self):

@@ -36,6 +36,58 @@ export function normalizeTitleKey(title) {
 
 const collapse = s => String(s ?? '').replace(/\s+/g, ' ').trim();
 
+// ── 曝光分類（coverageClass）──────────────────────────────
+export const COVERAGE_CLASSES = ['press_release_derived', 'company_coverage', 'industry_related', 'unrelated', 'review'];
+export const COVERAGE_METHODS = ['manual', 'press_release_match', 'rule', 'fallback'];
+export const COVERAGE_LABELS = {
+  press_release_derived: '新聞稿衍生曝光',
+  company_coverage: '一般公司報導',
+  industry_related: '產業連帶報導',
+  review: '待確認',
+  unrelated: '不相關',
+};
+/** 篩選：id → 對應的分類。all＝全部。 */
+export const COVERAGE_FILTERS = {
+  all: '全部', derived: '新聞稿衍生曝光', company: '一般公司報導', industry: '產業連帶報導', review: '待確認', unrelated: '不相關',
+};
+const FILTER_CLASS = {
+  derived: 'press_release_derived', company: 'company_coverage', industry: 'industry_related', review: 'review', unrelated: 'unrelated',
+};
+export const COVERAGE_METHOD_LABELS = {
+  manual: '人工', press_release_match: '新聞稿配對', rule: '規則', fallback: '無法判定（待確認）',
+};
+export const MATCH_STATUS_LABELS = {
+  confirmed: '人工確認', auto_matched: '稿單自動配對', suggested: '稿單建議配對', unmatched: '未配對',
+};
+
+/** 一筆曝光的分類。還沒有分類欄位時：人工確認／自動配對視為新聞稿衍生曝光，其餘算「待確認」。 */
+export function coverageOf(record) {
+  if (record.coverageClass) return record.coverageClass;
+  if (record.matchStatus === 'confirmed' || record.matchStatus === 'auto_matched') return 'press_release_derived';
+  return 'review';
+}
+/** 資料裡有沒有任何分類（還沒分類過的舊資料不套用預設範圍）。 */
+export const hasCoverageData = records => records.some(r => r.coverageClass);
+/** 預設的統計範圍：有分類資料 → 只算新聞稿衍生曝光（正式的新聞稿曝光成效）；沒有 → 全部。 */
+export const defaultCoverageFilter = records => (hasCoverageData(records) ? 'derived' : 'all');
+export function filterByCoverage(records, filter = 'all') {
+  return filter === 'all' ? records : records.filter(r => coverageOf(r) === FILTER_CLASS[filter]);
+}
+export function countByCoverage(records) {
+  const counts = { derived: 0, company: 0, industry: 0, review: 0, unrelated: 0 };
+  records.forEach(r => {
+    const key = Object.keys(FILTER_CLASS).find(k => FILTER_CLASS[k] === coverageOf(r));
+    counts[key] += 1;
+  });
+  return counts;
+}
+/** 統計範圍的文字說明（顯示在數字旁）。 */
+export function coverageScopeText(filter, total) {
+  return filter === 'all' ? `範圍：全部人工確認曝光（${total} 則，含各類報導）`
+    : `範圍：${COVERAGE_FILTERS[filter]}（${total} 則）`;
+}
+const confidenceText = v => (v == null ? '' : `${Math.round(v * 100)}%（${v >= 0.85 ? '高' : v >= 0.7 ? '中' : '低'}）`);
+
 // ── 新聞稿主檔配對狀態 ────────────────────────────────────
 export const MATCH_STATUSES = ['confirmed', 'auto_matched', 'suggested', 'unmatched'];
 const hasOfficialMatch = raw => !['suggested', 'unmatched'].includes(raw.matchStatus);
@@ -82,6 +134,11 @@ export function toPublicRecord(raw) {
     campaignName: collapse(raw.campaignName) || (hasOfficialMatch(raw) ? collapse(raw.pressReleaseTitle) : ''),
     // 新聞稿主檔配對資訊（只有狀態與標題；不含 Google Sheet 的備註）
     matchStatus: MATCH_STATUSES.includes(raw.matchStatus) ? raw.matchStatus : '',
+    // 曝光分類（與配對狀態分開）：這篇報導本身屬於哪一種；只收白名單值
+    coverageClass: COVERAGE_CLASSES.includes(raw.coverageClass) ? raw.coverageClass : '',
+    coverageMethod: COVERAGE_METHODS.includes(raw.coverageClassMethod) ? raw.coverageClassMethod : '',
+    coverageConfidence: Number.isFinite(Number(raw.coverageClassConfidence)) && raw.coverageClassConfidence != null
+      ? Number(raw.coverageClassConfidence) : null,
     suggestedName: raw.matchStatus === 'suggested' ? collapse(raw.suggestedPressReleaseTitle) : '',
   };
 }
@@ -312,6 +369,10 @@ export function buildDetailRows(topics) {
   return topics.flatMap(t => t.items.map(r => sanitizeRow({
     '新聞稿／主題': t.name,
     配對依據: t.matchLabel,
+    配對狀態: MATCH_STATUS_LABELS[r.matchStatus] || '',
+    曝光分類: r.coverageClass ? COVERAGE_LABELS[r.coverageClass] : COVERAGE_LABELS[coverageOf(r)],
+    分類方法: COVERAGE_METHOD_LABELS[r.coverageMethod] || '',
+    信心程度: confidenceText(r.coverageConfidence),
     日期: r.day,
     媒體: r.mediaName,
     記者: r.reporter,

@@ -22,6 +22,7 @@ import unicodedata
 from datetime import date, datetime, timezone
 
 import press_release_match as pm
+import coverage_classify as cc
 
 SPREADSHEET_ID = '1ran1qZjie3rMnUzo-LambYaP6c_vMQ8MdVH5iCMkUqM'
 SHEETS_SCOPE = 'https://www.googleapis.com/auth/spreadsheets.readonly'
@@ -378,8 +379,7 @@ def decide_exposure(exposure, prs_by_id, prepared):
     existing_id = exposure.get('pressReleaseId')
     if status == pm.STATUS_CONFIRMED or (existing_id and not status):
         return 'skip_confirmed', None
-    if existing_id and status == pm.STATUS_AUTO and existing_id in prs_by_id:
-        return 'keep', None
+    # 自動配對（auto_matched）每次依最新規則與稿單重算——規則是確定性的，結果穩定；只有人工確認不動
     ex = {
         'title': exposure.get('title'), 'link': exposure.get('link'),
         'campaignId': exposure.get('campaignId'), 'day': _to_day(exposure.get('exposureDate')),
@@ -392,31 +392,61 @@ MATCH_FIELDS = ('pressReleaseId', 'pressReleaseTitle', 'matchStatus', 'matchMeth
 
 
 def plan_matches(exposures, press_releases):
-    """exposures：list of dict（含 id）；press_releases：同步後的有效新聞稿（list of dict）。"""
+    """
+    exposures：list of dict（含 id）；press_releases：同步後的有效新聞稿（list of dict）。
+    回傳 updates（每筆曝光最多一個，含配對欄位 fields 與分類欄位 classFields）與統計。
+    配對與分類各自獨立計算；人工確認的配對（confirmed）與人工分類（coverageClassMethod=manual）都不會被覆蓋。
+    """
     usable = [p for p in press_releases if p.get('active', True) and p.get('status') != 'cancelled']
     prepared = [pm.prepare_press_release(p) for p in usable]
     prs_by_id = {p['id']: p for p in prepared}
-    updates, counts = [], {'confirmed': 0, 'auto_matched': 0, 'suggested': 0, 'unmatched': 0, 'changed': 0}
+    updates, classified = {}, {}
+    counts = {'confirmed': 0, 'auto_matched': 0, 'suggested': 0, 'unmatched': 0, 'changed': 0,
+              'classProtected': 0, 'classChanged': 0, 'classErrors': 0,
+              'classes': {k: 0 for k in cc.CLASS_LABELS}}
     for exp in exposures:
         action, result = decide_exposure(exp, prs_by_id, prepared)
+        final_status, final_conf, reason = exp.get('matchStatus'), exp.get('matchConfidence'), None
+        match_fields = None
         if action == 'skip_confirmed':
             counts['confirmed'] += 1
-            continue
-        if action == 'keep':
+            final_status = pm.STATUS_CONFIRMED
+        elif action == 'keep':
             counts['auto_matched'] += 1
+            final_status = pm.STATUS_AUTO
             # 稿單補了完整標題：只更新顯示用的新聞稿名稱，配對本身不動
             display = prs_by_id[exp['pressReleaseId']]['_display']
             if display and display != exp.get('pressReleaseTitle'):
-                updates.append({'id': exp['id'], 'fields': {'pressReleaseTitle': display}, 'reason': 'retitle'})
+                match_fields = {'pressReleaseTitle': display}
+        else:
+            counts[result['matchStatus']] += 1
+            final_status, final_conf, reason = result['matchStatus'], result['matchConfidence'], result.get('reason')
+            new = {k: result[k] for k in MATCH_FIELDS}
+            if new != {k: exp.get(k) for k in MATCH_FIELDS}:
+                match_fields = new
+
+        class_fields = None
+        if cc.is_manual(exp):
+            counts['classProtected'] += 1
+            counts['classes'][exp['coverageClass']] = counts['classes'].get(exp['coverageClass'], 0) + 1
+        else:
+            try:
+                cls = cc.classify_exposure(exp, final_status, final_conf, reason)
+            except Exception as exc:                  # 單筆分類失敗：保留既有分類，不影響其他筆
+                print(f"⚠ 分類失敗（保留既有分類）：{exp.get('id')} {type(exc).__name__}")
+                counts['classErrors'] += 1
+                cls = None
+            if cls:
+                classified[exp['id']] = cls
+                counts['classes'][cls['coverageClass']] += 1
+                if cc.class_changed(exp, cls):
+                    class_fields = cls
+                    counts['classChanged'] += 1
+        if match_fields or class_fields:
+            updates[exp['id']] = {'id': exp['id'], 'fields': match_fields or {}, 'classFields': class_fields or {}, 'reason': reason}
+            if match_fields:
                 counts['changed'] += 1
-            continue
-        counts[result['matchStatus']] += 1
-        new = {k: result[k] for k in MATCH_FIELDS}
-        old = {k: exp.get(k) for k in MATCH_FIELDS}
-        if new != old:
-            updates.append({'id': exp['id'], 'fields': new, 'reason': result.get('reason')})
-            counts['changed'] += 1
-    return {'updates': updates, 'counts': counts}
+    return {'updates': list(updates.values()), 'counts': counts, 'classified': classified}
 
 
 def build_plan(parsed, existing, exposures):
@@ -438,6 +468,9 @@ def build_plan(parsed, existing, exposures):
             'confirmed': matches['counts']['confirmed'], 'autoMatched': matches['counts']['auto_matched'],
             'suggested': matches['counts']['suggested'], 'unmatched': matches['counts']['unmatched'],
             'matchUpdates': matches['counts']['changed'],
+            'classes': matches['counts']['classes'], 'classUpdates': matches['counts']['classChanged'],
+            'classProtected': matches['counts']['classProtected'], 'classErrors': matches['counts']['classErrors'],
+            'classificationVersion': cc.CLASSIFICATION_VERSION,
             'sheets': {k: v['rows'] for k, v in parsed['sheets'].items()},
         },
     }
@@ -459,7 +492,7 @@ def load_existing_press_releases(db):
 
 
 def load_exposures(db):
-    keep = ('title', 'link', 'campaignId', 'exposureDate') + MATCH_FIELDS + ('matchedAt',)
+    keep = ('title', 'link', 'campaignId', 'exposureDate') + MATCH_FIELDS + ('matchedAt',) + cc.CLASS_FIELDS
     out = []
     for d in db.collection(EXPOSURE_COLLECTION).stream():
         data = d.to_dict() or {}
@@ -485,7 +518,12 @@ def apply_plan(db, plan, run_id, server_ts=None, now=None):
     exp_col = db.collection(EXPOSURE_COLLECTION)
     ops = []
     for upd in plan['matches']['updates']:
-        fields = {**upd['fields'], 'matchedAt': now}
+        fields = dict(upd['fields'])
+        if fields:
+            fields['matchedAt'] = now
+        if upd.get('classFields'):
+            fields.update(upd['classFields'])
+            fields['classifiedAt'] = now
         ops.append(lambda b, i=upd['id'], f=fields: b.set(exp_col.document(i), f, merge=True))
     _commit_in_chunks(db, ops)
 
