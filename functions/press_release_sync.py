@@ -80,9 +80,36 @@ class SheetsClient:
             import google.auth
             from google.auth.transport.requests import AuthorizedSession
             credentials, _ = google.auth.default(scopes=[SHEETS_SCOPE])
-            self.service_account_email = getattr(credentials, 'service_account_email', '') or ''
+            self.service_account_email = self._runtime_email(credentials)
             self._session = AuthorizedSession(credentials)
         return self._session
+
+    @staticmethod
+    def _runtime_email(credentials):
+        """Compute／Cloud Functions 的憑證只回傳 'default'；向 metadata server 問真正的 service account email。"""
+        email = getattr(credentials, 'service_account_email', '') or ''
+        if email and email != 'default':
+            return email
+        try:
+            import requests
+            resp = requests.get(
+                'http://metadata.google.internal/computeMetadata/v1/instance/service-accounts/default/email',
+                headers={'Metadata-Flavor': 'Google'}, timeout=3)
+            if resp.status_code == 200 and resp.text.strip():
+                return resp.text.strip()
+        except Exception:
+            pass
+        return email
+
+    @staticmethod
+    def _error_detail(resp):
+        """Google API 錯誤的狀態與原因（例如 SERVICE_DISABLED／PERMISSION_DENIED）；不含任何憑證或資料內容。"""
+        try:
+            err = resp.json().get('error', {})
+        except Exception:
+            return ''
+        reasons = [d.get('reason') for d in err.get('details', []) if isinstance(d, dict) and d.get('reason')]
+        return ' '.join(x for x in [err.get('status'), ','.join(reasons), str(err.get('message', ''))[:160]] if x)
 
     def _request(self, url, params=None):
         last = None
@@ -98,7 +125,7 @@ class SheetsClient:
                 if resp.status_code in (401, 403, 404):
                     who = self.service_account_email or '（執行環境的 service account）'
                     raise SheetsAccessError(
-                        f'Sheets API 回 {resp.status_code}：沒有權限或找不到試算表。'
+                        f'Sheets API 回 {resp.status_code}（{self._error_detail(resp)}）：沒有權限、找不到試算表，或尚未啟用 Google Sheets API。'
                         f'請將 Google Sheet 以「檢視者」分享給 {who}，並確認已啟用 Google Sheets API。')
                 last = f'HTTP {resp.status_code}'
                 print(f'⚠ Sheets 請求失敗（第 {attempt}/{MAX_ATTEMPTS} 次）：{last}')
