@@ -356,6 +356,24 @@ rm /tmp/pass.txt
   會列出解析統計、日期不完整與可能重複的標題、配對統計，不輸出備註。
 - **部署**：`firebase deploy --only functions:press_release_sync_job,hosting:main --project transcend-news-tbm`。
 
+## ✅ 配對準確度與人工覆核（`press_release_match.py`、`match_review.py`）
+
+- **名詞**：「人工彙整曝光」＝同仁蒐集的曝光資料（Excel 匯入）；「人工確認配對」＝同仁確認某則曝光屬於某篇新聞稿（`matchStatus=confirmed`）。兩者不同。
+- **高信心自動配對（`high_confidence_anchors`）**：只有同時符合才會把「建議」提升為自動配對——曝光標題明確提到創見／Transcend／創見管理層；
+  曝光日期與新聞稿發布日同日或前後 1 天；不是同業主導、股價評論或混合多個事件的文章；月份／季度相容，且曝光標題的規格
+  （型號、容量、速度）都出現在新聞稿裡；至少 2 個具辨識力的錨點（規格、產品名、展覽、管理層、獎項、月份／季度、財務數字）；
+  候選唯一且最佳候選的錨點數至少多 1。理由會寫成「同日＋創見＋64GB＋DDR5＋工業記憶體」。不是調低相似度門檻。
+- **每筆曝光的配對說明**：`matchStatus`、`matchConfidence`、`matchMethod`、`matchReason`（中文說明；建議配對會說明未自動配對的原因，
+  未配對會說明未通過的原因）。網站每個主題與待確認項目都顯示。
+- **人工覆核（Google Sheet）**：公開網站只讀、不開放任何寫入。覆核在同一份 Google Sheet 的「曝光配對覆核」分頁完成，欄位
+  `exposureId`、`decision`、`pressReleaseId`、`note`（選填，程式不讀取、不寫入、不顯示）：
+  `confirm` 確認目前建議、`rematch` 另指定新聞稿（必填 pressReleaseId）、`reject` 不屬於任何新聞稿（中文：確認／改配／排除）。
+  網站「待確認配對」→「匯出待確認 Excel」的前四欄就是這個分頁的欄位（第二張工作表列出新聞稿 ID）。
+  每天排程（或手動執行 `press_release_sync_job`）同步：只接受白名單 decision 與有效 ID；未知 exposureId／pressReleaseId、
+  重複矛盾的決策、confirm 與目前建議不同……任何一項不合格，**整次同步中止、不寫入**。沒有這個分頁或分頁是空的，既有同步照常。
+  決策寫成 `matchStatus=confirmed`（`matchMethod=manual_confirm|manual_rematch`）或 `rejected`（人工排除），
+  `matchSource=google_sheet_review`，**永遠不會被後續自動排程覆蓋**。
+
 ## 🏷 曝光分類（`functions/coverage_classify.py`，`coverageClass`）
 
 `unmatched` 不等於錯誤，也不一定該配到新聞稿。每篇曝光另有獨立的分類欄位（與 `matchStatus` 分開，不影響 `pressReleaseId`／`confirmed`／`auto_matched`／`suggested`）：

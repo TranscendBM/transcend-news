@@ -12,10 +12,10 @@ import { usePRState } from './prState.jsx';
 import {
   EMPTY_FILTERS, MATCH_FILTERS, TOPIC_SORTS, applyFilters, buildDetailRows, buildPerformance, buildSummaryRows,
   COVERAGE_FILTERS, countByCoverage, coverageScopeText, defaultCoverageFilter, filterByCoverage, hasCoverageData,
-  countMatchKinds, filterOptions, filterTopicsByMatch, hasActiveFilters, sortTopics, toPublicRecords, typeLabel,
+  MATCH_STATUS_LABELS, percentText, countMatchKinds, filterOptions, filterTopicsByMatch, hasActiveFilters, sortTopics, toPublicRecords, typeLabel,
 } from './exposurePerformance.js';
 
-// 「新聞稿曝光成效」：把人工確認曝光（media_exposure 公開欄位）依「新聞稿／主題」彙整。
+// 「新聞稿曝光成效」：把人工彙整曝光（media_exposure 公開欄位）依「新聞稿／主題」彙整。
 // 篩選只做一次（filtered），摘要、類型分布、媒體排行、主題分組、明細與 Excel 匯出
 // 全部吃同一份結果，畫面上的數字才會彼此一致。
 
@@ -106,6 +106,14 @@ function TopicRow({ topic, open, onToggle, onExport }) {
               <span key={m.key} className={tagClass('gray')}>{m.label} {m.count}</span>
             ))}
           </div>
+          {(topic.matchSummary.confidence !== null || topic.matchSummary.reason) && (
+            <p className="text-xs text-gray-500 mt-2" data-testid="topic-match">
+              <span className="font-medium text-gray-400">配對：</span>{topic.matchLabel}
+              {topic.matchSummary.confidence !== null && `｜信心 ${percentText(topic.matchSummary.confidence)}`}
+              {topic.matchSummary.methods.length > 0 && `｜方式：${topic.matchSummary.methods.join('、')}`}
+              {topic.matchSummary.reason && `｜理由：${topic.matchSummary.reason}`}
+            </p>
+          )}
         </div>
         <div className="text-right shrink-0">
           <p className="text-2xl font-bold text-ink tabular-nums leading-none">{topic.total}</p>
@@ -129,6 +137,7 @@ function TopicRow({ topic, open, onToggle, onExport }) {
                   <th className="text-left pb-1.5 pr-3 font-medium whitespace-nowrap">媒體</th>
                   <th className="text-left pb-1.5 pr-3 font-medium whitespace-nowrap">記者</th>
                   <th className="text-left pb-1.5 pr-3 font-medium min-w-[220px]">新聞標題</th>
+                  <th className="text-left pb-1.5 pr-3 font-medium whitespace-nowrap">配對</th>
                   <th className="text-left pb-1.5 font-medium whitespace-nowrap">類型</th>
                 </tr>
               </thead>
@@ -139,6 +148,9 @@ function TopicRow({ topic, open, onToggle, onExport }) {
                     <td className="py-1.5 pr-3 text-gray-300 whitespace-nowrap">{r.mediaName}</td>
                     <td className="py-1.5 pr-3 text-gray-400 whitespace-nowrap">{r.reporter || '—'}</td>
                     <td className="py-1.5 pr-3"><ExposureLink record={r} /></td>
+                    <td className="py-1.5 pr-3 text-xs text-gray-500 whitespace-nowrap" title={r.matchReason || undefined}>
+                      {MATCH_STATUS_LABELS[r.matchStatus] || '—'}{r.matchConfidence !== null ? ` ${percentText(r.matchConfidence)}` : ''}
+                    </td>
                     <td className="py-1.5 text-xs text-gray-500 whitespace-nowrap">{typeLabel(r.type)}</td>
                   </tr>
                 ))}
@@ -206,10 +218,12 @@ export default function ExposurePerformancePanel({
         </button>
       }>
       <p className="text-xs text-gray-500 mb-1">
-        依「新聞稿／主題」彙整人工確認的曝光。同一則新聞稿各媒體標題常不一樣，所以依序用這些依據分組：
-        ① 新聞稿編號（資料有才用）② 事件規則——同一期的月營收公告、同一季的財報／獲利
-        ③ 標題完全相同 ④ 發布日前後 1 天內的相似標題；都不符合就各自獨立。
-        這是推定而非正式新聞稿編號，每組都標示依據，可展開檢視每一則。
+        依「新聞稿／主題」彙整同仁蒐集的曝光（人工彙整：同仁蒐集了這則曝光）。
+        「人工確認配對」才表示同仁確認過它屬於某篇新聞稿；其餘是系統自動判斷：
+        稿單自動配對（高信心規則）、稿單建議配對（待確認）、標題推定（用標題與事件規則分組）。
+        沒有新聞稿編號時，依序用這些依據分組：① 事件規則——同一期的月營收公告、同一季的財報／獲利
+        ② 標題完全相同 ③ 發布日前後 1 天內的相似標題；這是推定而非正式新聞稿編號。
+        每個主題都標示配對依據、信心與理由，可展開檢視每一則。
       </p>
       <SyncStatusLine sync={sync} hasMatchData={hasMatchData} />
       {coverageData && (
@@ -222,14 +236,14 @@ export default function ExposurePerformancePanel({
             ))}
           </div>
           <p className="text-xs text-gray-500 mt-1.5">
-            新聞稿曝光成效的正式統計預設只計算「新聞稿衍生曝光」（人工確認或稿單自動配對）；
+            新聞稿曝光成效的正式統計預設只計算「新聞稿衍生曝光」（人工確認配對或稿單自動配對）；
             一般公司報導 {coverageCounts.company}、產業連帶報導 {coverageCounts.industry}、待確認 {coverageCounts.review}（含只有建議配對的）、
             不相關 {coverageCounts.unrelated} 則另計，不含在正式成效內，可用上面的篩選查看。
           </p>
         </div>
       )}
       <p className="text-xs text-gray-500 mb-4">
-        統計依目前已載入的 {publicRecords.length.toLocaleString()} 筆人工確認曝光
+        統計依目前已載入的 {publicRecords.length.toLocaleString()} 筆人工彙整曝光
         {truncated && (
           <span className="text-amber-700">（已達讀取上限 {maxRecords.toLocaleString()} 筆，更早的資料未納入統計）</span>
         )}
@@ -249,7 +263,7 @@ export default function ExposurePerformancePanel({
       {loadingFirst && <div className="py-8 text-center text-sm text-gray-600">載入中…</div>}
 
       {!failed && !loadingFirst && publicRecords.length === 0 && (
-        <div className="py-8 text-center text-sm text-gray-600">尚未匯入人工確認曝光資料</div>
+        <div className="py-8 text-center text-sm text-gray-600">尚未匯入人工彙整曝光資料</div>
       )}
 
       {showData && (
@@ -298,7 +312,7 @@ export default function ExposurePerformancePanel({
             <>
               <p className="text-xs text-gray-500 -mb-1" data-testid="coverage-scope">{coverageScopeText(activeCoverage, perf.total)}</p>
               <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-                <Kpi label="人工確認曝光" value={perf.total} hint={coverageData ? `則・${COVERAGE_FILTERS[activeCoverage]}` : '則'} />
+                <Kpi label="人工彙整曝光" value={perf.total} hint={coverageData ? `則・${COVERAGE_FILTERS[activeCoverage]}` : '則'} />
                 <Kpi label="涵蓋媒體" value={perf.mediaCount} hint="家" />
                 <Kpi label="新聞稿／主題" value={perf.topicCount} hint="依標題彙整" />
                 <Kpi label="最近曝光" value={fmtDay(perf.latestDate)} hint={`首次 ${fmtDay(perf.firstDate)}`} />

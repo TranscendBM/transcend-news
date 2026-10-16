@@ -6,7 +6,7 @@ import {
 import { MAX_EXPOSURE_RECORDS } from './exposureLimits.js';
 
 /**
- * 人工確認曝光的獨立資料管線。
+ * 人工彙整曝光的獨立資料管線。
  *
  * 這些資料是人工剪報結果，不是 RSS 自動新聞，因此刻意放在
  * `media_exposure`，不會被 news_cleanup 清除，也不會與 PR 自動監測篇數
@@ -44,13 +44,13 @@ export function useMediaExposure({ enabled = true } = {}) {
         },
         error => {
           if (!mountedRef.current) return;
-          console.error('人工確認曝光查詢失敗:', error);
+          console.error('人工彙整曝光查詢失敗:', error);
           unsubRef.current = null;
           setStatus('error');
         },
       );
     } catch (error) {
-      console.error('人工確認曝光啟動失敗:', error);
+      console.error('人工彙整曝光啟動失敗:', error);
       if (mountedRef.current) setStatus('error');
     }
   }, [enabled]);

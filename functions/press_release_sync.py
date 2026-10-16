@@ -23,6 +23,7 @@ from datetime import date, datetime, timezone
 
 import press_release_match as pm
 import coverage_classify as cc
+import match_review as mr
 
 SPREADSHEET_ID = '1ran1qZjie3rMnUzo-LambYaP6c_vMQ8MdVH5iCMkUqM'
 SHEETS_SCOPE = 'https://www.googleapis.com/auth/spreadsheets.readonly'
@@ -308,7 +309,8 @@ def fetch_source(sheets, spreadsheet_id=SPREADSHEET_ID):
     """讀 metadata → 只處理 20xx 分頁 → 解析。任何失敗都拋 SyncAbort（呼叫端不得寫入）。"""
     props = sheets.get_metadata()
     year_sheets = [p['title'] for p in props if YEAR_SHEET.match(p.get('title', ''))]
-    ignored = [p.get('title') for p in props if not YEAR_SHEET.match(p.get('title', ''))]
+    review_title = mr.REVIEW_SHEET_TITLE if any(p.get('title') == mr.REVIEW_SHEET_TITLE for p in props) else None
+    ignored = [p.get('title') for p in props if not YEAR_SHEET.match(p.get('title', '')) and p.get('title') != review_title]
     for name in ignored:
         print(f'ℹ 忽略非年度分頁：{name}')
     if not year_sheets:
@@ -319,7 +321,9 @@ def fetch_source(sheets, spreadsheet_id=SPREADSHEET_ID):
         sheets_out[title] = {'rows': len(parsed['records']), 'headerRow': parsed['headerRow'], 'fields': parsed['fields']}
         records.extend(parsed['records'])
         skipped.extend(parsed['skipped'])
-    return {'records': records, 'skipped': skipped, 'sheets': sheets_out, 'ignoredSheets': ignored}
+    # 人工覆核分頁（可有可無）：讀取失敗要中止——不能把「讀不到」當成「沒有人工決策」
+    review_rows = sheets.get_values(review_title) if review_title else []
+    return {'records': records, 'skipped': skipped, 'sheets': sheets_out, 'ignoredSheets': ignored, 'review_rows': review_rows}
 
 
 # ═══════════════════════════════════════════════════════════
@@ -377,8 +381,8 @@ def decide_exposure(exposure, prs_by_id, prepared):
     """
     status = exposure.get('matchStatus')
     existing_id = exposure.get('pressReleaseId')
-    if status == pm.STATUS_CONFIRMED or (existing_id and not status):
-        return 'skip_confirmed', None
+    if status in (pm.STATUS_CONFIRMED, pm.STATUS_REJECTED) or (existing_id and not status):
+        return 'skip_confirmed', None          # 人工確認配對／人工排除永遠不被自動程序覆蓋
     # 自動配對（auto_matched）每次依最新規則與稿單重算——規則是確定性的，結果穩定；只有人工確認不動
     ex = {
         'title': exposure.get('title'), 'link': exposure.get('link'),
@@ -388,42 +392,49 @@ def decide_exposure(exposure, prs_by_id, prepared):
 
 
 MATCH_FIELDS = ('pressReleaseId', 'pressReleaseTitle', 'matchStatus', 'matchMethod', 'matchConfidence',
-                'suggestedPressReleaseId', 'suggestedPressReleaseTitle')
+                'suggestedPressReleaseId', 'suggestedPressReleaseTitle', 'matchReason', 'matchSource')
 
 
-def plan_matches(exposures, press_releases):
+def _match_fields_of(source):
+    return {k: source.get(k) for k in MATCH_FIELDS}
+
+
+def plan_matches(exposures, press_releases, manual=None):
     """
-    exposures：list of dict（含 id）；press_releases：同步後的有效新聞稿（list of dict）。
+    exposures：list of dict（含 id）；press_releases：同步後的有效新聞稿（list of dict）；
+    manual：{exposureId: 人工決策的配對欄位}（來自 Google Sheet「曝光配對覆核」分頁，已驗證）。
     回傳 updates（每筆曝光最多一個，含配對欄位 fields 與分類欄位 classFields）與統計。
-    配對與分類各自獨立計算；人工確認的配對（confirmed）與人工分類（coverageClassMethod=manual）都不會被覆蓋。
+    人工決策（Sheet 覆核）、人工確認配對（confirmed）、人工排除（rejected）、人工分類（coverageClassMethod=manual）都不會被自動程序覆蓋。
     """
     usable = [p for p in press_releases if p.get('active', True) and p.get('status') != 'cancelled']
     prepared = [pm.prepare_press_release(p) for p in usable]
     prs_by_id = {p['id']: p for p in prepared}
+    manual = manual or {}
     updates, classified = {}, {}
-    counts = {'confirmed': 0, 'auto_matched': 0, 'suggested': 0, 'unmatched': 0, 'changed': 0,
-              'classProtected': 0, 'classChanged': 0, 'classErrors': 0,
+    counts = {'confirmed': 0, 'auto_matched': 0, 'suggested': 0, 'unmatched': 0, 'rejected': 0, 'changed': 0,
+              'manualApplied': 0, 'classProtected': 0, 'classChanged': 0, 'classErrors': 0,
               'classes': {k: 0 for k in cc.CLASS_LABELS}}
     for exp in exposures:
-        action, result = decide_exposure(exp, prs_by_id, prepared)
         final_status, final_conf, reason = exp.get('matchStatus'), exp.get('matchConfidence'), None
         match_fields = None
-        if action == 'skip_confirmed':
-            counts['confirmed'] += 1
-            final_status = pm.STATUS_CONFIRMED
-        elif action == 'keep':
-            counts['auto_matched'] += 1
-            final_status = pm.STATUS_AUTO
-            # 稿單補了完整標題：只更新顯示用的新聞稿名稱，配對本身不動
-            display = prs_by_id[exp['pressReleaseId']]['_display']
-            if display and display != exp.get('pressReleaseTitle'):
-                match_fields = {'pressReleaseTitle': display}
+        if exp['id'] in manual:                       # Google Sheet 覆核分頁的人工決策：優先於一切自動判斷
+            fields = _match_fields_of(manual[exp['id']])
+            final_status, final_conf = fields['matchStatus'], fields['matchConfidence']
+            counts['manualApplied'] += 1
+            counts['confirmed' if final_status == pm.STATUS_CONFIRMED else 'rejected'] += 1
+            if fields != _match_fields_of(exp):
+                match_fields = fields
         else:
-            counts[result['matchStatus']] += 1
-            final_status, final_conf, reason = result['matchStatus'], result['matchConfidence'], result.get('reason')
-            new = {k: result[k] for k in MATCH_FIELDS}
-            if new != {k: exp.get(k) for k in MATCH_FIELDS}:
-                match_fields = new
+            action, result = decide_exposure(exp, prs_by_id, prepared)
+            if action == 'skip_confirmed':
+                final_status = pm.STATUS_REJECTED if exp.get('matchStatus') == pm.STATUS_REJECTED else pm.STATUS_CONFIRMED
+                counts['rejected' if final_status == pm.STATUS_REJECTED else 'confirmed'] += 1
+            else:
+                counts[result['matchStatus']] += 1
+                final_status, final_conf, reason = result['matchStatus'], result['matchConfidence'], result.get('reason')
+                fields = {k: result.get(k) for k in MATCH_FIELDS}
+                if fields != _match_fields_of(exp):
+                    match_fields = fields
 
         class_fields = None
         if cc.is_manual(exp):
@@ -449,10 +460,25 @@ def plan_matches(exposures, press_releases):
     return {'updates': list(updates.values()), 'counts': counts, 'classified': classified}
 
 
+def plan_manual_decisions(parsed, exposures):
+    """Google Sheet 覆核分頁 → 已驗證的人工決策。任何不合格都拋 SyncAbort（整次同步中止，不寫入）。"""
+    try:
+        decisions = mr.parse_review_rows(parsed.get('review_rows') or [])
+        if not decisions:
+            return {}
+        exposures_by_id = {e['id']: e for e in exposures}
+        usable = {r['id']: r for r in parsed['records'] if r.get('active', True) and r.get('status') != 'cancelled'}
+        mr.validate_decisions(decisions, exposures_by_id, usable)
+        return mr.build_manual_fields(decisions, exposures_by_id, usable)
+    except mr.ReviewError as exc:
+        raise SyncAbort(str(exc)) from exc
+
+
 def build_plan(parsed, existing, exposures):
     pr_plan = plan_press_releases(parsed['records'], existing)
     # 配對用「同步後」的狀態：本次解析出的有效新聞稿（被停用的不參與）
-    matches = plan_matches(exposures, parsed['records'])
+    manual = plan_manual_decisions(parsed, exposures)
+    matches = plan_matches(exposures, parsed['records'], manual)
     incomplete = [r for r in parsed['records'] if r['datePrecision'] != 'day']
     titles = {}
     for r in parsed['records']:
@@ -465,6 +491,7 @@ def build_plan(parsed, existing, exposures):
             'unchanged': len(pr_plan['unchanged']), 'deactivated': len(pr_plan['deactivate']),
             'dateIncomplete': len(incomplete), 'skippedRows': len(parsed['skipped']),
             'duplicateTitles': sum(1 for v in titles.values() if len(v) > 1),
+            'manualDecisions': matches['counts']['manualApplied'], 'rejected': matches['counts']['rejected'],
             'confirmed': matches['counts']['confirmed'], 'autoMatched': matches['counts']['auto_matched'],
             'suggested': matches['counts']['suggested'], 'unmatched': matches['counts']['unmatched'],
             'matchUpdates': matches['counts']['changed'],
@@ -540,9 +567,15 @@ def run_sync(db, sheets, dry_run=False, run_id=None, now=None):
     if dry_run:
         return report
     apply_plan(db, plan, run_id, now=now)
+    plan_records = sorted((r for r in parsed['records'] if r.get('status') != 'cancelled'),
+                          key=lambda r: (r.get('actualReleaseDate') or r.get('scheduledDate') or '', r['id']), reverse=True)
     from firebase_admin import firestore
     db.collection(JOB_STATUS_DOC[0]).document(JOB_STATUS_DOC[1]).set({
         'lastSyncAt': firestore.SERVER_TIMESTAMP,
+        # 供網站「待確認配對」匯出 Excel 時列出新聞稿 ID（新聞稿標題本來就是公開資訊；不含任何備註）
+        'pressReleases': [
+            {'id': r['id'], 'title': (r.get('officialTitle') or r.get('title') or '')[:120], 'date': r.get('actualReleaseDate') or r.get('scheduledDate') or ''}
+            for r in plan_records[:300]],
         'report': {k: v for k, v in report.items() if k != 'sheets'},
         'sheets': report['sheets'],
     }, merge=True)

@@ -31,6 +31,7 @@ STATUS_CONFIRMED = 'confirmed'
 STATUS_AUTO = 'auto_matched'
 STATUS_SUGGESTED = 'suggested'
 STATUS_UNMATCHED = 'unmatched'
+STATUS_REJECTED = 'rejected'        # 人工排除：確認不屬於任何新聞稿衍生曝光（只由人工覆核產生）
 
 # 曝光日相對於新聞稿日期的容許範圍（天）：媒體不會比發稿早報導，容許 1 天時差
 WINDOW_BEFORE_DAYS = 1
@@ -256,7 +257,167 @@ def compatible(p, ex_sigs, title='') -> bool:
     return periods_compatible(p['_sigs'], ex_sigs)
 
 
-def _result(status, method=None, confidence=None, pr=None, suggestion=None, reason=None):
+# ═══════════════════════════════════════════════════════════
+# 高信心自動配對（HC 規則）與配對理由
+# ═══════════════════════════════════════════════════════════
+HC_MAX_GAP_DAYS = 1            # 曝光日期與新聞稿發布日：同日或前後 1 天
+HC_MIN_ANCHORS = 2             # 至少兩個具辨識力的錨點
+HC_MARGIN = 1                  # 最佳候選要比第二候選多至少 1 個錨點
+
+EXECUTIVE_NAMES = ('束崇萬', '陳柏壽')
+# 產品類別詞（同義寫法歸成同一個標籤）；只放有辨識力的產品名詞，不放 AI／記憶體／SSD 這類通用詞
+PRODUCT_TERMS = {
+    '嵌入式鏡頭': r'嵌入式鏡頭', '鏡頭模組': r'鏡頭模組', '工業記憶體': r'工業(?:級|用)?記憶體', '固態硬碟': r'固態硬碟',
+    '企業級SSD': r'企業級\s*ssd', '記憶卡': r'記憶卡', '隨身碟': r'隨身碟', '車載': r'車用|車載', '電競記憶體': r'電競記憶體',
+}
+EXHIBITION_TERMS = {
+    'COMPUTEX': r'computex', '自動化展': r'自動化(?:工業)?(?:大)?展', '電子展': r'電子(?:產業科技)?展', '能源週': r'能源[週周]',
+    '智慧製造展': r'智慧製造展|touch taiwan', 'embedded world': r'embedded world',
+}
+AWARD_TERMS = {
+    'HBR': r'hbr|哈佛商業評論', '台灣企業領袖100強': r'台灣企業領袖\s*100\s*強', '外資精選台灣企業100強': r'外資精選台灣企業\s*100\s*強',
+    '永續設計獎': r'永續設計獎', '台北新貿獎': r'新貿獎', '台灣精品獎': r'台灣精品獎', '企業永續獎': r'企業永續獎',
+}
+_STOCK_CUES = re.compile(r'股價|漲停|跌停|盤中|急拉|急殺|急跌|大漲|大跌|買超|賣超|目標價|權證|法人買|外資買|成交量')
+_FINANCE_CUES = re.compile(r'營收|業績|獲利|財報|eps|每股盈餘|毛利|淨利')
+_EVENT_CUES = re.compile(r'參展|參加|展出|亮相|展會|大展|推出|推(?=\s*[a-z0-9])|發表|新品|登場|上市|量產|榮獲|獲選|肯定|再獲|獲獎')
+_UNIT_NUMBER = re.compile(r'(\d+(?:\.\d+)?)\s*(兆|億|萬|元|%|倍)')
+
+
+def stock_commentary(title) -> bool:
+    return bool(_STOCK_CUES.search(norm_text(title)))
+
+
+def is_mixed_article(title) -> bool:
+    """同時混合多個事件的文章（股價＋營運＋展覽…）：不是單一新聞稿的轉載，不可自動配對。"""
+    text = norm_text(title)
+    stock, finance, event = bool(_STOCK_CUES.search(text)), bool(_FINANCE_CUES.search(text)), bool(_EVENT_CUES.search(text))
+    return (stock and (finance or event)) or (finance and event)
+
+
+def _term_hits(table, text) -> set:
+    return {label for label, pattern in table.items() if re.search(pattern, text)}
+
+
+def _display_token(tok) -> str:
+    return tok.upper() if tok.isascii() else tok
+
+
+def _numbers(text) -> list:
+    return [(float(m.group(1)), m.group(2)) for m in _UNIT_NUMBER.finditer(text)]
+
+
+def anchors_between(pr, title) -> list:
+    """曝光標題與新聞稿共同具有的「具辨識力的錨點」（顯示用文字，依類別排序、去重）。"""
+    text = norm_text(title)
+    pr_text = ' '.join(norm_text(n) for n in (pr.get('topic'), pr.get('title'), pr.get('officialTitle'), pr.get('englishTitle')) if n)
+    ex_strong = strong_tokens(alnum_tokens(title))
+    pr_strong = set()
+    for tokens in pr['_sets']:
+        pr_strong |= strong_tokens(tokens)
+    out = []
+    award_labels = _term_hits(AWARD_TERMS, text) & _term_hits(AWARD_TERMS, pr_text)
+    award_digits = {d for a in award_labels for d in re.findall(r'\d+', a)}
+    for tok in sorted((ex_strong & pr_strong) - award_digits):
+        out.append(_display_token(tok))
+    out += sorted(_term_hits(PRODUCT_TERMS, text) & _term_hits(PRODUCT_TERMS, pr_text))
+    out += sorted(_term_hits(EXHIBITION_TERMS, text) & _term_hits(EXHIBITION_TERMS, pr_text))
+    out += [n for n in EXECUTIVE_NAMES if n in text and n in pr_text]
+    out += sorted(award_labels)
+    ex_sigs, pr_sigs = period_signatures(title), pr['_sigs']
+    if ex_sigs and pr_sigs and ex_sigs == pr_sigs:
+        for kind, vals in sorted(ex_sigs.items()):
+            out += [(f'{v}月' if kind == 'month' else v.upper()) for v in sorted(vals)]
+    pr_nums = _numbers(pr_text)
+    if any(abs(x - y) <= 0.03 * max(abs(x), abs(y), 1e-9) and u == v for x, u in _numbers(text) for y, v in pr_nums):
+        out.append('相同財務數字')
+    return list(dict.fromkeys(out))
+
+
+def day_phrase(gap) -> str:
+    if gap is None:
+        return '日期不明'
+    return '同日' if gap == 0 else f'前後 {abs(gap)} 天'
+
+
+def _company_mentioned(title) -> bool:
+    text = norm_text(title)
+    return mentions_company(title) or any(n in text for n in EXECUTIVE_NAMES)
+
+
+def high_confidence_match(title, ex_day, ex_sigs, prs):
+    """
+    高信心自動配對（可解釋）：必須同時符合
+      ① 曝光標題明確提到創見／Transcend／創見管理層
+      ② 曝光日期與新聞稿發布日同日或前後 1 天（沒有日精度的日期不行）
+      ③ 不是同業主導、不是股價評論、不是混合多個事件的文章
+      ④ 期間（月份／季度）相容；曝光標題的規格 token（型號、容量、速度）都出現在新聞稿裡（不忽略任何規格差異）
+      ⑤ 至少 2 個具辨識力的錨點（規格、產品名、展覽、管理層、獎項、月份／季度、財務數字）
+      ⑥ 候選唯一，且最佳候選的錨點數比第二名至少多 1
+    回傳 (結果 dict 或 None, 未通過原因的中文說明 或 None)。
+    """
+    if ex_day is None:
+        return None, '曝光日期不明，無法做日期配對'
+    if not _company_mentioned(title):
+        return None, '標題沒有明確提到創見'
+    if peer_led(title):
+        return None, '同業公司在標題前方'
+    if is_mixed_article(title):
+        return None, '同時包含股價與多個事件內容'
+    ex_strong = strong_tokens(alnum_tokens(title))
+    ranked, why_not = [], None
+    for p in prs:
+        gap = _days_between(ex_day, p['_date'])
+        if gap is None or abs(gap) > HC_MAX_GAP_DAYS:
+            continue
+        if not compatible(p, ex_sigs, title):
+            why_not = why_not or '月份或季度與新聞稿不同'
+            continue
+        union = set()
+        for tokens in p['_sets']:
+            union |= strong_tokens(tokens)
+        if not ex_strong <= union:
+            why_not = why_not or '規格（型號、容量或速度）與新聞稿不同'
+            continue
+        found = anchors_between(p, title)
+        if len(found) >= HC_MIN_ANCHORS:
+            ranked.append((len(found), found, gap, p))
+        else:
+            why_not = why_not or f'只有 {len(found)} 個明確關鍵字（需要至少 {HC_MIN_ANCHORS} 個）'
+    if not ranked:
+        return None, why_not or '前後 1 天內沒有符合的新聞稿'
+    ranked.sort(key=lambda r: (-r[0], abs(r[2]), r[3]['id']))
+    if len(ranked) > 1 and ranked[0][0] - ranked[1][0] < HC_MARGIN:
+        return None, '有多篇新聞稿同樣吻合，無法唯一判定'
+    count, found, gap, chosen = ranked[0]
+    confidence = round(min(0.95, 0.82 + 0.03 * (count - 2)), 2)
+    why = f"{day_phrase(gap)}＋創見＋{'＋'.join(found[:5])}"
+    return _result(STATUS_AUTO, 'high_confidence_anchors', confidence, chosen, why=why), None
+
+
+def shared_terms(pr, title, limit=5) -> list:
+    """一般自動配對的理由用：曝光標題與新聞稿共有的關鍵字（取前幾個）。"""
+    found = anchors_between(pr, title)
+    if found:
+        return found[:limit]
+    ex_tokens, shared = title_tokens(title), []
+    for tokens in pr['_sets']:
+        shared += sorted(tokens & ex_tokens, key=lambda t: (-len(t), t))
+    return list(dict.fromkeys(shared))[:limit]
+
+
+REASON_TEXT = {
+    'peer_led': '同業公司在標題前方，屬產業或競品報導，不當作創見新聞稿曝光',
+    'ambiguous_url': '有多篇新聞稿使用相同連結，無法唯一判定',
+    'ambiguous_title': '有多篇新聞稿標題相同，日期也無法區分',
+    'ambiguous_date_keyword': '有多篇新聞稿同樣吻合，無法唯一判定',
+    'ambiguous_specificity': '稿單中有多篇更具體的新聞稿，無法唯一判定',
+    'ambiguous_similarity': '有多篇新聞稿相似度相近，無法唯一判定',
+}
+UNMATCHED_DEFAULT_TEXT = '標題、日期與任何新聞稿的關鍵字都對不上（多半是一般報導）'
+
+
+def _result(status, method=None, confidence=None, pr=None, suggestion=None, reason=None, why=None):
     return {
         'matchStatus': status,
         'matchMethod': method,
@@ -265,6 +426,7 @@ def _result(status, method=None, confidence=None, pr=None, suggestion=None, reas
         'pressReleaseTitle': pr['_display'] if pr and status in (STATUS_AUTO, STATUS_CONFIRMED) else None,
         'suggestedPressReleaseId': suggestion['id'] if suggestion else None,
         'suggestedPressReleaseTitle': suggestion['_display'] if suggestion else None,
+        'matchReason': why or (REASON_TEXT.get(reason, UNMATCHED_DEFAULT_TEXT) if status == STATUS_UNMATCHED else None),
         'reason': reason,
     }
 
@@ -292,14 +454,14 @@ def match_exposure(exposure: dict, prs: list[dict]) -> dict:
     if cid:
         hits = [p for p in prs if p.get('explicitPressReleaseId') and norm_text(p['explicitPressReleaseId']) == cid]
         if len(hits) == 1:
-            return _result(STATUS_AUTO, 'explicit_id', 1.0, hits[0])
+            return _result(STATUS_AUTO, 'explicit_id', 1.0, hits[0], why='新聞稿編號相同')
 
     # 2. 官方連結完全相同
     url = normalize_url(exposure.get('link'))
     if url:
         hits = [p for p in prs if p['_url'] and p['_url'] == url]
         if len(hits) == 1:
-            return _result(STATUS_AUTO, 'official_url', 0.99, hits[0])
+            return _result(STATUS_AUTO, 'official_url', 0.99, hits[0], why='官方連結相同')
         if len(hits) > 1:
             return _result(STATUS_UNMATCHED, reason='ambiguous_url')
 
@@ -316,11 +478,12 @@ def match_exposure(exposure: dict, prs: list[dict]) -> dict:
                     return _result(STATUS_UNMATCHED, reason='ambiguous_title')
                 hits = [first]
         if len(hits) == 1:
-            return _result(STATUS_AUTO, 'exact_title', 0.95, hits[0])
+            return _result(STATUS_AUTO, 'exact_title', 0.95, hits[0], why='標題與新聞稿完全相同')
 
     # 4. 日期（日精度）＋關鍵字（同業在前的報導不算新聞稿轉載）
     led = peer_led(title)
-    if ex_day is not None and ex_tokens and not led:
+    mixed_stock = stock_commentary(title) and is_mixed_article(title)       # 股價評論混合營運／展覽：不自動配對
+    if ex_day is not None and ex_tokens and not led and not mixed_stock:
         scored = []
         for p in prs:
             gap = _days_between(ex_day, p['_date'])
@@ -357,9 +520,17 @@ def match_exposure(exposure: dict, prs: list[dict]) -> dict:
             if more_specific:
                 if len(more_specific) == 1:
                     return _result(STATUS_SUGGESTED, 'more_specific_candidate',
-                                   round(best[0] * 0.8, 2), suggestion=more_specific[0])
+                                   round(best[0] * 0.8, 2), suggestion=more_specific[0],
+                                   why=f"稿單另有更具體的新聞稿「{more_specific[0]['_display'][:30]}」，需人工確認")
                 return _result(STATUS_UNMATCHED, reason='ambiguous_specificity')
-            return _result(STATUS_AUTO, 'date_keyword', round(0.7 + 0.2 * best[0], 2), chosen)
+            terms = shared_terms(chosen, title)
+            why = f"{day_phrase(_days_between(ex_day, chosen['_date']))}＋" + ('＋'.join(terms) if terms else '標題關鍵字吻合')
+            return _result(STATUS_AUTO, 'date_keyword', round(0.7 + 0.2 * best[0], 2), chosen, why=why)
+
+    # 4b. 高信心自動配對（可解釋規則；看的是具辨識力的錨點，不是調低相似度門檻）
+    hc, hc_why_not = high_confidence_match(title, ex_day, ex_sigs, prs)
+    if hc is not None:
+        return hc
 
     # 5. 標題相似度 → 只建議
     cand = []
@@ -392,7 +563,9 @@ def match_exposure(exposure: dict, prs: list[dict]) -> dict:
     if cand:
         cand.sort(key=lambda c: -c[0])
         if len(cand) == 1 or cand[0][0] - cand[1][0] >= SIMILARITY_GAP:
-            return _result(STATUS_SUGGESTED, 'title_similarity', round(cand[0][0], 2), suggestion=cand[0][1])
+            sim_pct = round(cand[0][0] * 100)
+            why = f'標題與新聞稿相似度約 {sim_pct}%' + (f'；未自動配對：{hc_why_not}' if hc_why_not else '；未自動配對：明確關鍵字不足')
+            return _result(STATUS_SUGGESTED, 'title_similarity', round(cand[0][0], 2), suggestion=cand[0][1], why=why)
         return _result(STATUS_UNMATCHED, reason='ambiguous_similarity')
 
     return _result(STATUS_UNMATCHED)

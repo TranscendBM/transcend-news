@@ -184,6 +184,11 @@ export default function App() {
         lastSyncAt: ms(d.lastSyncAt) || ms(d.lastSuccessAt),
         failedSinceSuccess: Boolean(ms(d.lastErrorAt) && (!ms(d.lastSuccessAt) || ms(d.lastErrorAt) > ms(d.lastSuccessAt))),
         report: d.report && typeof d.report === 'object' ? d.report : null,
+        // 新聞稿清單（ID／標題／日期）：「待確認配對」匯出 Excel 時查 pressReleaseId 用
+        pressReleases: Array.isArray(d.pressReleases)
+          ? d.pressReleases.filter(p => p && typeof p.id === 'string' && typeof p.title === 'string')
+            .map(p => ({ id: p.id, title: p.title, date: typeof p.date === 'string' ? p.date : '' }))
+          : [],
       });
     } catch (e) { console.error('PressSync:', e); setPressSync({ error: true }); }
   }

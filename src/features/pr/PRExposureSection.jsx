@@ -1,5 +1,6 @@
 import ExposureInsightsPage from './ExposureInsightsPage.jsx';
 import ExposurePerformancePanel from './ExposurePerformancePanel.jsx';
+import MatchReviewPanel from './MatchReviewPanel.jsx';
 import { KeyMediaPanel } from './KeyMediaPanel.jsx';
 import { ManualExposurePanel } from './ManualExposurePanel.jsx';
 import { usePRState } from './prState.jsx';
@@ -8,7 +9,7 @@ import { usePRState } from './prState.jsx';
 // PR 曝光成效：把原本分散的曝光相關區塊放在同一頁——
 //   新聞稿曝光成效（摘要、類型分布、媒體排行、新聞稿／主題展開明細、篩選、匯出新聞稿成效）
 //   重點媒體曝光監控
-//   人工確認曝光（Excel 上傳、匯出曝光明細、最新清單、曝光分析）
+//   人工彙整曝光（Excel 上傳、匯出曝光明細、最新清單、曝光分析）
 // 曝光分析是這個子頁內的「下一頁」：進去後子頁籤仍在上方，按返回回到這裡。
 // ═══════════════════════════════════════════════════════════
 export function PRExposureSection({
@@ -35,6 +36,9 @@ export function PRExposureSection({
         onRetry={refreshMediaExposure}
         sync={pressSync}
       />
+
+      {/* 待確認配對：建議配對／未配對／已人工確認／已人工排除（覆核在 Google Sheet 完成，公開網站只讀） */}
+      <MatchReviewPanel records={mediaExposure} status={mediaExposureStatus} sync={pressSync} />
 
       {/* 重點媒體曝光監控：用全部有效創見報導（不受新聞監測搜尋工具列影響） */}
       <KeyMediaPanel articles={validTranscend} status={prStatus} />

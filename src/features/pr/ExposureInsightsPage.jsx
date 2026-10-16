@@ -9,7 +9,7 @@ import { exportExposureInsightsExcel } from '../../utils/formatting.js';
 import { safeHttpUrl } from '../../utils/safeUrl.js';
 import { buildExposureInsights } from './exposureInsights.js';
 
-// 人工確認曝光分析：PR 頁面「人工確認曝光」卡片按「📊 曝光分析」進來的下一頁。
+// 人工彙整曝光分析：PR 頁面「人工彙整曝光」卡片按「📊 曝光分析」進來的下一頁。
 // 資訊分成幾個分頁，避免一次塞滿：總覽／媒體／記者／關係變化／題材／自動監測比對。
 
 const SECTIONS = [
@@ -132,7 +132,7 @@ function Overview({ ins }) {
       </div>
 
       <Card title="每月曝光篇數" icon="chart"
-        actions={<CopyChartButton containerRef={chartRef} title="人工確認曝光：每月篇數" note="資料來源：人工確認曝光" />}>
+        actions={<CopyChartButton containerRef={chartRef} title="人工彙整曝光：每月篇數" note="資料來源：人工彙整曝光" />}>
         <div ref={chartRef}><MonthlyChart monthly={ins.monthly} /></div>
         <div className="overflow-x-auto mt-3">
           <table className="ir-table w-full text-sm">
@@ -492,7 +492,7 @@ function CoverageSection({ ins }) {
   return (
     <div className="space-y-4">
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-        <Kpi label="人工確認（比對範圍內）" value={cov.manual} hint={`${fmtDate(cov.windowStart)} 起`} />
+        <Kpi label="人工彙整（比對範圍內）" value={cov.manual} hint={`${fmtDate(cov.windowStart)} 起`} />
         <Kpi label="自動監測也抓到" value={cov.matched} />
         <Kpi label="自動監測漏掉" value={cov.missed.length} />
         <Kpi label="自動監測涵蓋率" value={pct(cov.rate)} hint={`自動監測共 ${cov.autoCount} 篇`} />
@@ -534,7 +534,7 @@ export default function ExposureInsightsPage({ records = [], autoArticles = [], 
           <Icon name="arrowleft" /> 返回 PR 媒體戰情
         </button>
         <div className="min-w-0">
-          <h2 className="text-lg font-semibold text-gray-200">人工確認曝光分析</h2>
+          <h2 className="text-lg font-semibold text-gray-200">人工彙整曝光分析</h2>
           {!ins.empty && (
             <p className="text-xs text-gray-500">
               {fmtDate(ins.firstDate)} – {fmtDate(ins.lastDate)}・共 {ins.total} 篇・{ins.media.length} 家媒體・{ins.reporters.length} 位記者
@@ -549,7 +549,7 @@ export default function ExposureInsightsPage({ records = [], autoArticles = [], 
 
       {ins.empty ? (
         <Card title="尚無資料" icon="inbox">
-          <p className="text-sm text-gray-600">還沒有人工確認曝光，先在上一頁用「上傳 Excel」匯入。</p>
+          <p className="text-sm text-gray-600">還沒有人工彙整曝光，先在上一頁用「上傳 Excel」匯入。</p>
         </Card>
       ) : (
         <>

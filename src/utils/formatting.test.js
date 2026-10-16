@@ -78,7 +78,7 @@ describe('exportMediaExposureExcel', () => {
 
   it('exports only public exposure fields and never includes an internal note', async () => {
     await exportMediaExposureExcel([{
-      title: '創見新品人工確認曝光',
+      title: '創見新品人工彙整曝光',
       mediaName: '經濟日報',
       reporter: '王記者',
       exposureDate: new Date('2026-08-03T03:00:00Z'),
@@ -89,17 +89,17 @@ describe('exportMediaExposureExcel', () => {
 
     expect(XLSX.writeFile).toHaveBeenCalledTimes(1);
     const [wb, filename] = XLSX.writeFile.mock.calls[0];
-    const rows = XLSX.utils.sheet_to_json(wb.Sheets['人工確認曝光']);
+    const rows = XLSX.utils.sheet_to_json(wb.Sheets['人工彙整曝光']);
     expect(rows).toEqual([{
       日期: expect.any(String),
       媒體: '經濟日報',
       記者: '王記者',
-      新聞標題: '創見新品人工確認曝光',
+      新聞標題: '創見新品人工彙整曝光',
       曝光類型: 'online',
       連結: 'https://example.com/manual',
     }]);
     expect(JSON.stringify(rows)).not.toContain('不可公開的內部備註');
-    expect(filename).toMatch(/^人工確認曝光_\d{8}\.xlsx$/);
+    expect(filename).toMatch(/^人工彙整曝光_\d{8}\.xlsx$/);
   });
 });
 
@@ -121,7 +121,7 @@ describe('exportExposureInsightsExcel', () => {
     await exportExposureInsightsExcel(ins);
     const [wb, filename] = XLSX.writeFile.mock.calls[0];
     expect(wb.SheetNames).toEqual(['月趨勢', '媒體×月', '記者×月', '題材×月']);
-    expect(filename).toMatch(/^人工確認曝光分析_\d{8}\.xlsx$/);
+    expect(filename).toMatch(/^人工彙整曝光分析_\d{8}\.xlsx$/);
 
     const media = XLSX.utils.sheet_to_json(wb.Sheets['媒體×月']);
     expect(media[0]).toMatchObject({ 媒體: '經濟日報', '2026-07': 1, '2026-08': 1, 合計: 2, 主力記者: '王一' });
@@ -159,7 +159,7 @@ describe('exportExposurePerformanceExcel', () => {
 
     const detail = XLSX.utils.sheet_to_json(wb.Sheets['曝光明細']);
     expect(detail).toHaveLength(2);
-    expect(Object.keys(detail[0])).toEqual(['新聞稿／主題', '配對依據', '配對狀態', '曝光分類', '分類方法', '信心程度', '日期', '媒體', '記者', '新聞標題', '曝光類型', '連結']);
+    expect(Object.keys(detail[0])).toEqual(['新聞稿／主題', '配對依據', '配對狀態', '配對信心', '配對理由', '曝光分類', '分類方法', '信心程度', '日期', '媒體', '記者', '新聞標題', '曝光類型', '連結']);
     const raw = JSON.stringify(detail) + JSON.stringify(summary);
     [...PRIVATE_FIELD_NAMES, '內部備註', 'secret.xlsx', 'raw.e.com', 'javascript:'].forEach(s => expect(raw, s).not.toContain(s));
     // 公式注入：以 = 開頭的媒體名稱前面補了單引號，且儲存格是純文字（不是公式）

@@ -115,7 +115,7 @@ export default function MediaExposureUpload({ onImported = () => {} }) {
   return (
     <div className="rounded-xl border border-gray-700/60 bg-gray-900 p-4 mb-4 space-y-3">
       <div>
-        <p className="text-sm font-semibold text-gray-200">上傳 Excel 匯入人工確認曝光</p>
+        <p className="text-sm font-semibold text-gray-200">上傳 Excel 匯入人工彙整曝光</p>
         <p className="text-xs text-gray-500 mt-1">
           欄位需包含「日期、媒體、新聞標題（或標題）、連結（或網址）」，「記者」「備註」可有可無；備註只存在後台，不會顯示在網站。
           重複上傳同一批檔案不會產生重複資料。
@@ -186,7 +186,7 @@ export default function MediaExposureUpload({ onImported = () => {} }) {
 
       {phase === 'done' && result && (
         <p role="status" className="text-sm text-green-500">
-          ✓ 已匯入 {result.written} 筆人工確認曝光（略過 {invalidCount} 列無效資料），列表會自動更新。
+          ✓ 已匯入 {result.written} 筆人工彙整曝光（略過 {invalidCount} 列無效資料），列表會自動更新。
         </p>
       )}
     </div>
