@@ -153,14 +153,16 @@ describe('prData — 總覽與各子頁共用的資料選取', () => {
       { id: 'c4', title: '股市爆料', cat: 'competitor', brand: 'ADATA', mediaName: '股市爆料同學會', pubDate: day(9, 12) },
       { id: 'c5', title: 'CMoney 文章', cat: 'competitor', brand: 'ADATA', mediaName: 'CMoney 投資網誌', pubDate: day(9, 12) },
       { id: 'c6', title: '去年的舊聞', cat: 'competitor', brand: 'ADATA', mediaName: 'D', pubDate: day(1, 1, 2025) },
+      { id: 'c7', title: '宜鼎上月新品', cat: 'competitor', brand: 'Innodisk', mediaName: 'F', pubDate: day(8, 15) },        // 上個月
       { id: 't1', title: '創見新聞', cat: 'transcend', mediaName: 'E', pubDate: day(9, 12) },
     ];
     const now = day(9, 20);
-    expect(selectCompetitorNews(news, { now }).map(n => n.id)).toEqual(['c2', 'c3', 'c6']);   // 新到舊
-    expect(selectCompetitorNews(news, { brand: 'Innodisk', now }).map(n => n.id)).toEqual(['c2']);
+    expect(selectCompetitorNews(news, { now }).map(n => n.id)).toEqual(['c2', 'c3', 'c7', 'c6']);   // 新到舊
+    expect(selectCompetitorNews(news, { brand: 'Innodisk', now }).map(n => n.id)).toEqual(['c2', 'c7']);
     expect(selectCompetitorNews(news, { timeFilter: 'month', now }).map(n => n.id)).toEqual(['c2', 'c3']);
-    expect(selectCompetitorNews(news, { timeFilter: 'year', now }).map(n => n.id)).toEqual(['c2', 'c3']);   // 去年的排除
-    expect(selectCompetitorNews(news, { timeFilter: 'all', now }).map(n => n.id)).toEqual(['c2', 'c3', 'c6']);
+    expect(selectCompetitorNews(news, { timeFilter: 'lastMonth', now }).map(n => n.id)).toEqual(['c7']);   // 上月：本月與更早的都不含
+    expect(selectCompetitorNews(news, { timeFilter: 'year', now }).map(n => n.id)).toEqual(selectCompetitorNews(news, { now }).map(n => n.id));   // 已移除的選項不會讓清單變空
+    expect(selectCompetitorNews(news, { timeFilter: 'all', now }).map(n => n.id)).toEqual(['c2', 'c3', 'c7', 'c6']);
     expect(selectCompetitorNews(undefined)).toEqual([]);
   });
 

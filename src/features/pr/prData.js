@@ -1,4 +1,4 @@
-import { sortByDate } from '../../utils/dates.js';
+import { inPeriod, sortByDate, taipeiPeriodRange } from '../../utils/dates.js';
 import { dedupeArticlesByTitle, isValidTranscendPR } from '../../utils/news.js';
 
 // PR 媒體戰情各子頁共用的「資料選取」規則。總覽、新聞監測、競品動態都用這裡的函式，
@@ -11,12 +11,12 @@ import { dedupeArticlesByTitle, isValidTranscendPR } from '../../utils/news.js';
  */
 export const selectValidTranscend = prArticles => dedupeArticlesByTitle((prArticles || []).filter(isValidTranscendPR));
 
-/** 時間篩選：競品動態用的 5 個選項（今天／本週／本月／本年／已載入資料）。 */
+/** 時間篩選：競品動態用的 5 個選項（今天／本週／本月／上月／已載入資料）。新聞只保留本月＋上個月，所以沒有「本年」。 */
 export const COMPETITOR_TIME_FILTERS = [
   { id: 'today', label: '今天' },
   { id: 'week', label: '本週' },
   { id: 'month', label: '本月' },
-  { id: 'year', label: '本年' },
+  { id: 'lastMonth', label: '上月' },
   { id: 'all', label: '已載入資料' },
 ];
 
@@ -40,10 +40,11 @@ export function selectCompetitorNews(news, { brand = 'all', timeFilter = 'all', 
     today: new Date(now.getFullYear(), now.getMonth(), now.getDate()),
     week: new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000),
     month: new Date(now.getFullYear(), now.getMonth(), 1),
-    year: new Date(now.getFullYear(), 0, 1),
     all: null,
   };
   const cutoff = cutoffs[timeFilter];
+  // 上月：台灣時間上個月 1 日 ≤ 發布時間 < 本月 1 日（本月的新聞不會混進來）
+  const lastMonth = timeFilter === 'lastMonth' ? taipeiPeriodRange('lastMonth', now) : null;
   return dedupeArticlesByTitle(sortByDate(
     (news || []).filter(n => {
       if (n.cat !== 'competitor') return false;
@@ -51,6 +52,7 @@ export function selectCompetitorNews(news, { brand = 'all', timeFilter = 'all', 
       const link = (n.link || '').toLowerCase();
       const media = (n.mediaName || n.sourceName || '').toLowerCase();
       if (link.includes('cmoney') || media.includes('cmoney') || media.includes('爆料')) return false;
+      if (lastMonth) return inPeriod(n, lastMonth);
       if (!cutoff) return true;
       return pubDateOf(n) >= cutoff;
     })

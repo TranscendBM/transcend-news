@@ -144,7 +144,8 @@ describe('PR 子頁籤 — 每個功能只出現在正確的子頁', () => {
     const card = cardOf('競品動態監測');
     ['全部', 'ADATA 威剛', 'Innodisk 宜鼎', 'Teamgroup 十銓', 'Apacer 宇瞻', 'Silicon Power 廣穎'].forEach(t =>
       expect(within(card).getByText(t), t).toBeTruthy());
-    ['今天', '本週', '本月', '本年', '已載入資料'].forEach(t => expect(within(card).getByText(t)).toBeTruthy());
+    ['今天', '本週', '本月', '上月', '已載入資料'].forEach(t => expect(within(card).getByText(t)).toBeTruthy());
+    expect(within(card).queryByText('本年')).toBeNull();      // 新聞只保留本月＋上個月，沒有本年
     expect(screen.queryByPlaceholderText(NEWS_TOOLBAR)).toBeNull();
     expect(screen.queryByLabelText('依媒體篩選')).toBeNull();
     expect(screen.queryByText('新聞稿曝光成效')).toBeNull();
@@ -232,7 +233,7 @@ describe('PR 子頁籤 — 狀態保存', () => {
     setUrl('?section=competitors');
     renderPR();
     fireEvent.click(within(cardOf('競品動態監測')).getByText('Innodisk 宜鼎'));
-    fireEvent.click(within(cardOf('競品動態監測')).getByText('本年'));
+    fireEvent.click(within(cardOf('競品動態監測')).getByText('上月'));
 
     clickTab('曝光成效');
     type(screen.getByLabelText('曝光媒體篩選'), '經濟日報');
@@ -243,7 +244,7 @@ describe('PR 子頁籤 — 狀態保存', () => {
     clickTab('總覽');
     clickTab('競品動態');
     expect(within(cardOf('競品動態監測')).getByText('Innodisk 宜鼎').className).toContain('text-white');
-    expect(within(cardOf('競品動態監測')).getByText('本年').className).toContain('text-white');
+    expect(within(cardOf('競品動態監測')).getByText('上月').className).toContain('text-white');
 
     clickTab('曝光成效');
     expect(screen.getByLabelText('曝光媒體篩選').value).toBe('經濟日報');
