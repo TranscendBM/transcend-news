@@ -218,6 +218,36 @@ class TestRun(unittest.TestCase):
         self.assertGreater(report['topicWrites'], 0)
 
 
+class TestRepairExistingTopics(unittest.TestCase):
+    def test_wrongly_tagged_topics_are_rewritten_once_and_real_ones_kept(self):
+        db = FakeDb()
+        db.add_news(1, '千葉火鍋炸雞皮吃到飽', 3, 3)
+        db.add_news(2, '創見推出 DDR5 7200 工業記憶體模組', 2, 2)
+        job.run_topic_cluster(db, NOW, server_ts='TS')
+        topics = db.store['news_topics']
+        bad = next(i for i, t in topics.items() if t['title'].startswith('千葉'))
+        good = next(i for i, t in topics.items() if t['title'].startswith('創見'))
+        # 模擬舊版寫下的錯誤資料：來源分類 transcend 就被標成創見，且是舊演算法版本
+        topics[bad].update({'tags': ['transcend'], 'category': 'transcend', 'algorithmVersion': 'topic-v1'})
+        topics[good]['algorithmVersion'] = 'topic-v1'
+        db.store['meta'].pop('topic_cluster_state', None)
+        writes = len(db.writes)
+        report, _ = job.run_topic_cluster(db, NOW + timedelta(minutes=30), server_ts='TS')
+        self.assertNotIn('transcend', db.store['news_topics'][bad]['tags'])
+        self.assertEqual(db.store['news_topics'][bad]['category'], 'industry')
+        self.assertIn('transcend', db.store['news_topics'][good]['tags'])
+        self.assertEqual({db.store['news_topics'][i]['algorithmVersion'] for i in (bad, good)}, {tc.ALGORITHM_VERSION})
+        self.assertEqual(len(db.store['news_topics']), 2)                  # 沒有刪除、沒有新增
+        self.assertEqual(len(db.store['news']), 2)
+        # 再跑一次：沒有任何話題需要寫入（冪等）
+        n = len(db.writes)
+        again, _ = job.run_topic_cluster(db, NOW + timedelta(minutes=60), server_ts='TS')
+        self.assertEqual(again['topicWrites'], 0)
+        self.assertEqual([w for w in db.writes[n:] if w[0] == 'news_topics'], [])
+        self.assertGreaterEqual(report['topicWrites'], 2)
+        _ = writes
+
+
 class TestHygiene(unittest.TestCase):
     def test_job_module_never_deletes_or_writes_news(self):
         text = (Path(__file__).resolve().parent.parent / 'functions' / 'topic_cluster_store.py').read_text(encoding='utf-8')

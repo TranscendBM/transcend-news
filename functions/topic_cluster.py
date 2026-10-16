@@ -24,7 +24,7 @@ from datetime import datetime, timedelta, timezone
 
 import press_release_match as pm
 
-ALGORITHM_VERSION = 'topic-v1'
+ALGORITHM_VERSION = 'topic-v2'      # v2：嚴格判定「涉及創見」（只看標題實際提到的公司，不看新聞來源分類）；版本不同的既有話題會被重新計算一次
 
 WINDOW_DEFAULT = timedelta(hours=72)
 WINDOW_PERSISTENT = timedelta(days=7)
@@ -116,15 +116,26 @@ def to_dt(value):
     return None
 
 
+# 同名但不是創見資訊的組織（創見文化、創見出版…）：比對前先遮掉，避免誤判成創見
+_SAME_NAME_ORG = re.compile(r'創見(?:文化|出版|國際文教|文教|教育|藝術|建設)')
+# 股票代號 2451 只有「獨立出現」才算：前後不能緊鄰數字、小數點、千分位逗號，後面也不能接金額／數量單位
+_TICKER_2451 = re.compile(r'(?<![a-z0-9.,])2451(?![a-z0-9.,]|\s*(?:億|萬|千|元|%|點|張|檔|件|人|年|月|日|季|倍|層|gb|tb|mb|mhz|nm))', re.I)
+
+
 def find_companies(text: str) -> set:
     found = set()
+    masked = _SAME_NAME_ORG.sub(' ', text)
     for name, aliases in COMPANIES.items():
         for alias in aliases:
-            if alias.isascii():
+            if alias == '2451':
+                if _TICKER_2451.search(masked):
+                    found.add(name)
+                    break
+            elif alias.isascii():
                 if re.search(r'(?<![a-z0-9])' + re.escape(alias) + r'(?![a-z0-9])', text):
                     found.add(name)
                     break
-            elif alias in text:
+            elif alias in masked:
                 found.add(name)
                 break
     return found
@@ -462,7 +473,8 @@ def compute_importance(stats: dict) -> tuple[int, list[str]]:
 
 def tags_for(companies, event_type, cats) -> list[str]:
     tags = []
-    if TRANSCEND in companies or 'transcend' in cats:
+    # 「涉及創見」只看標題實際提到的公司；新聞來源的 cat 分類（transcend）不可靠，不能單獨拿來判定
+    if TRANSCEND in companies:
         tags.append('transcend')
     if COMPETITORS & set(companies) or 'competitor' in cats:
         tags.append('competitor')

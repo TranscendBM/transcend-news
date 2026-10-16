@@ -304,6 +304,67 @@ describe('事件中心頁籤', () => {
   });
 });
 
+describe('涉及創見：第二層嚴格判定', () => {
+  // 後端（舊版）把來源分類 transcend 的事件全標成創見：前端不能相信 tags
+  const WRONG = [
+    rawTopic('w1', '合庫人壽攜手警政署刑事警察局簽署反詐騙合作意向書', 1, { tags: ['transcend'], companies: [], importanceScore: 99 }),
+    rawTopic('w2', '電展室決標衛星影像 AI 自動辨識系統', 2, { tags: ['transcend', 'product'], companies: [], importanceScore: 98 }),
+    rawTopic('w3', '千葉火鍋炸雞皮吃到飽', 3, { tags: ['transcend'], companies: ['威剛'], importanceScore: 97 }),
+  ];
+  const REAL = [
+    rawTopic('r1', '創見推出 DDR5 7200 工業記憶體模組', 1, { tags: ['transcend', 'product'], companies: ['創見'], importanceScore: 60 }),
+    rawTopic('r2', '創見9月營收創高', 2, { tags: ['transcend', 'finance'], companies: ['創見', '威剛'], importanceScore: 55 }),
+    rawTopic('r3', '創見參展台北國際電子展', 3, { tags: ['transcend'], companies: ['創見'], importanceScore: 50 }),
+    rawTopic('r4', '創見遭罰 違反貿易法', 4, { tags: ['transcend', 'risk'], companies: ['創見'], importanceScore: 45 }),
+  ];
+  const MIXED = normalizeTopics([...WRONG, ...REAL]);
+
+  it('companies 不含創見的話題，即使 tags 有 transcend 也會被拿掉；真正提到創見的保留', () => {
+    for (const t of MIXED.filter(x => x.id.startsWith('w'))) expect(t.tags, t.title).not.toContain('transcend');
+    for (const t of MIXED.filter(x => x.id.startsWith('r'))) expect(t.tags, t.title).toContain('transcend');
+    expect(MIXED.find(t => t.id === 'w2').tags).toContain('product');          // 其他標籤不受影響
+  });
+
+  it('entities 含創見也算；companies 含創見但 tags 漏了也補上（判定只看公司）', () => {
+    const viaEntities = normalizeTopic({ ...rawTopic('e1', '某事件', 1, { tags: ['transcend'], companies: [], entities: ['創見'] }) });
+    expect(viaEntities.tags).toContain('transcend');
+    const missing = normalizeTopic(rawTopic('e2', '創見事件', 1, { tags: [], companies: ['創見'] }));
+    expect(missing.tags).toContain('transcend');
+  });
+
+  it('事件篩選、統計與 topEvents 使用同一個判定', () => {
+    expect(filterTopics(MIXED, { tag: 'transcend' }).map(t => t.id).sort()).toEqual(['r1', 'r2', 'r3', 'r4']);
+    expect(topicStats(MIXED, new Date()).transcend).toBe(4);
+    expect(topEvents(MIXED, { tag: 'transcend', limit: 10 }).map(t => t.id)).toEqual(['r1', 'r2', 'r3', 'r4']);
+    expect(filterTopics(MIXED, { tag: 'transcend' })).toHaveLength(topicStats(MIXED, new Date()).transcend);
+  });
+
+  it('PR 總覽的「涉及創見的重要事件」只列真正提到創見的，最多 3 則', () => {
+    render(<TopEvents topics={MIXED} status="ready" tag="transcend" limit={3} />);
+    const items = within(screen.getByTestId('top-events')).getAllByRole('listitem');
+    expect(items).toHaveLength(3);
+    const text = items.map(i => i.textContent).join(' ');
+    for (const bad of ['合庫人壽', '電展室', '千葉火鍋']) expect(text).not.toContain(bad);
+    expect(items[0].textContent).toContain('創見推出 DDR5 7200');
+  });
+
+  it('全部都是誤判時，PR 總覽顯示空狀態而不是錯誤事件', () => {
+    render(<TopEvents topics={normalizeTopics(WRONG)} status="ready" tag="transcend" limit={3} />);
+    expect(screen.queryByTestId('top-events')).toBeNull();
+    expect(screen.getByText(/沒有符合的重要事件/)).toBeTruthy();
+  });
+
+  it('事件中心：「創見」篩選與「涉及創見」統計都不含誤判事件', () => {
+    setUrl('?tab=events&filter=transcend');
+    render(<EventCenterTab topics={MIXED} status="ready" onRetry={vi.fn()} />);
+    const titles = screen.getAllByTestId('event-card').map(c => c.querySelector('h3').textContent);
+    expect(titles).toHaveLength(4);
+    expect(titles.join(' ')).not.toMatch(/合庫人壽|電展室|千葉火鍋/);
+    const stat = within(screen.getByTestId('event-stats')).getByText('涉及創見').nextElementSibling;
+    expect(stat.textContent).toBe('4');
+  });
+});
+
 describe('摘要與今日情報整合', () => {
   it('TopEvents 最多 3 個，點擊帶篩選條件前往事件中心', () => {
     setUrl('?tab=pr');
