@@ -15,6 +15,7 @@ export const EVENT_TYPE_LABELS = {
   risk: '風險', stock: '股市', corporate: '公司', other: '其他',
 };
 const HOUR = 3600e3;
+export const TRANSCEND_NAME = '創見';
 
 const toDate = v => {
   if (!v) return null;
@@ -31,6 +32,12 @@ export function normalizeTopic(raw) {
   const title = typeof raw.title === 'string' ? raw.title.trim() : '';
   const last = toDate(raw.lastPublishedAt);
   if (!id || !title || !last) return null;
+  const companies = strList(raw.companies);
+  // 「涉及創見」只認 companies／entities 明確包含創見；後端的 tags 即使有 transcend 也要再確認一次（第二層保護）。
+  // 篩選、統計、PR 總覽與事件中心都讀正規化後的 tags，判定只有這一處，數字與清單才會一致。
+  const mentionsTranscend = [...companies, ...strList(raw.entities)].includes(TRANSCEND_NAME);
+  const tags = strList(raw.tags).filter(tag => tag !== 'transcend' || mentionsTranscend);
+  if (mentionsTranscend && !tags.includes('transcend')) tags.push('transcend');
   const articles = (Array.isArray(raw.articles) ? raw.articles : []).map(a => ({
     id: String(a?.id ?? ''),
     title: String(a?.title ?? '').trim(),
@@ -43,8 +50,8 @@ export function normalizeTopic(raw) {
     id, title,
     summary: typeof raw.summary === 'string' ? raw.summary : '',
     eventType: typeof raw.eventType === 'string' ? raw.eventType : 'other',
-    tags: strList(raw.tags),
-    companies: strList(raw.companies),
+    tags,
+    companies,
     products: strList(raw.products),
     mediaNames: strList(raw.mediaNames),
     articleCount: num(raw.articleCount, articles.length),

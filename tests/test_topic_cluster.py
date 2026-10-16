@@ -212,6 +212,56 @@ class TestMetrics(unittest.TestCase):
         self.assertEqual((clusters, assignments), ([], {}))
 
 
+class TestStrictTranscendTag(unittest.TestCase):
+    def topic(self, title, cat='transcend'):
+        clusters, _ = cluster([art(1, title, 0, cat=cat)])
+        return tc.build_topic_doc(clusters[0], BASE + timedelta(hours=1))
+
+    def test_cat_transcend_alone_never_tags_transcend(self):
+        for title in ('合庫人壽攜手警政署刑事警察局簽署反詐騙合作意向書', '電展室決標衛星影像 AI 自動辨識系統', '千葉火鍋炸雞皮吃到飽'):
+            doc = self.topic(title, cat='transcend')
+            self.assertNotIn('transcend', doc['tags'], title)
+            self.assertNotEqual(doc['category'], 'transcend', title)
+            self.assertNotIn('創見', doc['companies'], title)
+
+    def test_explicit_company_mentions_are_tagged(self):
+        for title in ('創見推出 DDR5 7200 工業記憶體模組', 'Transcend Information launches industrial DDR5 module',
+                      '個股：2451 創見 股價大漲', '股市焦點 2451 今日急拉', '創見資訊 9 月營收創高'):
+            doc = self.topic(title, cat='usMarket')            # 來源分類不是 transcend 也一樣
+            self.assertIn('transcend', doc['tags'], title)
+            self.assertEqual(doc['category'], 'transcend', title)
+
+    def test_standalone_ticker_2451_only(self):
+        for title in ('創見(2451)大漲', '2451 創見', '盤中速報 - 2451 急跌'):
+            self.assertIn('創見', tc.find_companies(tc._strip_title(title)), title)
+        for title in ('標案金額 12451 萬元', '台北市 24510 戶受影響', '價格 2,451 元', '市值 2451億元', '指數 2451.5 點', '編號 AB2451 設備'):
+            self.assertNotIn('創見', tc.find_companies(tc._strip_title(title)), title)
+            self.assertNotIn('transcend', self.topic(title)['tags'], title)
+
+    def test_same_name_organisations_are_not_transcend_information(self):
+        for title in ('創見文化事業推出新書', '創見出版社舉辦發表會', '創見教育集團開設新課程', '創見藝術基金會展覽', '創見建設推出新案'):
+            doc = self.topic(title, cat='transcend')
+            self.assertNotIn('transcend', doc['tags'], title)
+            self.assertNotIn('創見', doc['companies'], title)
+        # 同一標題裡真的提到創見資訊（記憶體）仍然算
+        self.assertIn('創見', tc.find_companies(tc._strip_title('創見文化事業與創見資訊合作')))
+
+    def test_category_uses_the_same_strict_rule(self):
+        self.assertEqual(self.topic('威剛推出新品', cat='transcend')['category'], 'competitor')
+        self.assertEqual(self.topic('千葉火鍋炸雞皮吃到飽', cat='transcend')['category'], 'industry')
+
+    def test_algorithm_version_bump_makes_old_topics_recompute_once_and_idempotently(self):
+        clusters, _ = cluster([art(1, '千葉火鍋炸雞皮吃到飽', 0, cat='transcend')])
+        old = tc.build_topic_doc(clusters[0], BASE + timedelta(hours=1))
+        old.update({'tags': ['transcend'], 'category': 'transcend', 'algorithmVersion': 'topic-v1'})     # 舊版寫下的錯誤資料
+        rebuilt = tc.clusters_from_topics([old])
+        fixed = tc.build_topic_doc(rebuilt[0], BASE + timedelta(hours=1), old)
+        self.assertTrue(tc.doc_changed(old, fixed))
+        self.assertNotIn('transcend', fixed['tags'])
+        again = tc.build_topic_doc(tc.clusters_from_topics([fixed])[0], BASE + timedelta(hours=1), fixed)
+        self.assertFalse(tc.doc_changed(fixed, again))                    # 修正後再跑不會重複寫入
+
+
 class TestCandidateGeneration(unittest.TestCase):
     def test_does_not_compare_every_pair(self):
         calls = {'n': 0}
