@@ -2,7 +2,7 @@
 import { EXPOSURE_TOPICS, mediaCategoryOf } from '../../config/exposureTopics.js';
 import { taipeiPrevMonthStart } from '../../utils/dates.js';
 
-// 人工確認曝光的分析計算（純函式，不碰畫面與 Firestore）。
+// 人工彙整曝光的分析計算（純函式，不碰畫面與 Firestore）。
 // 所有「月」「日」都用 Asia/Taipei 日曆（固定 UTC+8），跟網站其他地方一致。
 
 const TAIPEI_MS = 8 * 60 * 60 * 1000;
@@ -59,7 +59,7 @@ function sameTitle(a, b) {
 }
 
 /**
- * 人工確認曝光 vs 自動新聞監測：同一段期間內，人工確認的曝光有多少也被自動監測
+ * 人工彙整曝光 vs 自動新聞監測：同一段期間內，人工彙整的曝光有多少也被自動監測
  * 抓到（網址相同或標題相同）。沒被抓到的就是自動監測的漏網之魚。
  * 自動監測只保留「本月＋上個月」，所以只比對這個範圍內的人工紀錄。
  */

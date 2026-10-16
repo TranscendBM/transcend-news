@@ -75,7 +75,7 @@ describe('groupByTopic — 配對依據', () => {
     const conf = topics.find(t => t.name === '人工確認的新聞稿');
     expect(conf.total).toBe(2);
     expect(conf.matchKind).toBe('confirmed');
-    expect(conf.matchLabel).toBe('人工確認');
+    expect(conf.matchLabel).toBe('人工確認配對');
     const auto = topics.find(t => t.name === '8月營收');
     expect(auto.total).toBe(2);
     expect(auto.matchKind).toBe('auto');
@@ -142,13 +142,13 @@ describe('ExposurePerformancePanel — 新聞稿主檔配對', () => {
     const filter = screen.getByTestId('match-filter');
     expect(filter.textContent).toContain('待確認 1');
     expect(filter.textContent).toContain('未配對 2');
-    expect(within(filter).getByRole('button', { name: '已確認 1' })).toBeTruthy();
+    expect(within(filter).getByRole('button', { name: '人工確認配對 1' })).toBeTruthy();
     expect(within(filter).getByRole('button', { name: '自動配對 1' })).toBeTruthy();
   });
 
   it('每個主題標示配對依據與資料來源', () => {
     renderPanel();
-    const labels = ['人工確認', '稿單自動配對', '稿單建議配對：COMPUTEX', '標題推定', '尚未配對'];
+    const labels = ['人工確認配對', '稿單自動配對', '稿單建議配對：COMPUTEX', '標題推定', '尚未配對'];
     labels.forEach(l => expect(screen.getAllByText(l).length).toBeGreaterThan(0));
     expect(screen.getAllByText(/^來源：Google Sheet 新聞稿主檔＋人工曝光資料/).length).toBe(2);   // 人工確認＋自動
     expect(screen.getAllByText('來源：人工曝光資料').length).toBeGreaterThan(0);
@@ -205,7 +205,7 @@ describe('ExposurePerformancePanel — 新聞稿主檔配對', () => {
 
   it('公開網站沒有任何確認／修改配對的按鈕', () => {
     renderPanel();
-    expect(screen.queryByRole('button', { name: /確認配對|修改配對|套用建議|接受建議/ })).toBeNull();
+    expect(screen.queryByRole('button', { name: /^(確認配對|修改配對|套用建議|接受建議|確認|修改)/ })).toBeNull();
   });
 
   it('不安全的連結不會變成可點擊連結', () => {

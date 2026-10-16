@@ -53,18 +53,18 @@ describe('ExposurePerformancePanel — 顯示狀態', () => {
     const onRetry = vi.fn();
     renderPanel({ records: [], status: 'error', onRetry });
     expect(screen.getByRole('alert').textContent).toContain('新聞稿曝光成效載入失敗');
-    expect(screen.queryByText('尚未匯入人工確認曝光資料')).toBeNull();
+    expect(screen.queryByText('尚未匯入人工彙整曝光資料')).toBeNull();
     fireEvent.click(screen.getByText('重試'));
     expect(onRetry).toHaveBeenCalledTimes(1);
   });
 
   it('尚未匯入資料（ready 或 idle）：顯示空狀態，不崩潰，匯出按鈕停用', () => {
     const { unmount } = renderPanel({ records: [] });
-    expect(screen.getByText('尚未匯入人工確認曝光資料')).toBeTruthy();
+    expect(screen.getByText('尚未匯入人工彙整曝光資料')).toBeTruthy();
     expect(screen.getByText('匯出新聞稿成效').closest('button').disabled).toBe(true);
     unmount();
     renderPanel({ records: [], status: 'idle' });
-    expect(screen.getByText('尚未匯入人工確認曝光資料')).toBeTruthy();
+    expect(screen.getByText('尚未匯入人工彙整曝光資料')).toBeTruthy();
     renderPanel({ records: undefined });   // 預設值也不會崩潰
   });
 
@@ -73,7 +73,7 @@ describe('ExposurePerformancePanel — 顯示狀態', () => {
     expect(screen.getByText(/依「新聞稿／主題」彙整/)).toBeTruthy();
     expect(screen.getByText(/事件規則——同一期的月營收公告、同一季的財報／獲利/)).toBeTruthy();
     expect(screen.getByText(/這是推定而非正式新聞稿編號/)).toBeTruthy();
-    expect(screen.getByText(/統計依目前已載入的 6 筆人工確認曝光/)).toBeTruthy();
+    expect(screen.getByText(/統計依目前已載入的 6 筆人工彙整曝光/)).toBeTruthy();
     expect(screen.queryByText(/已達讀取上限/)).toBeNull();
   });
 
@@ -86,7 +86,7 @@ describe('ExposurePerformancePanel — 顯示狀態', () => {
 describe('ExposurePerformancePanel — 整體摘要', () => {
   it('曝光總數、涵蓋媒體、新聞稿／主題數、最近曝光日期', () => {
     renderPanel();
-    expect(kpi('人工確認曝光')).toContain('6');
+    expect(kpi('人工彙整曝光')).toContain('6');
     expect(kpi('涵蓋媒體')).toContain('4');
     expect(kpi('新聞稿／主題')).toContain('4');
     expect(kpi('最近曝光')).toContain('2026/9/20');
@@ -131,9 +131,9 @@ describe('ExposurePerformancePanel — 新聞稿／主題與明細', () => {
     const detail = document.getElementById(ssd.getAttribute('aria-controls'));
     const rows = [...detail.querySelectorAll('tbody tr')].map(tr => [...tr.querySelectorAll('td')].map(td => td.textContent));
     expect(rows).toEqual([                                                 // 新到舊
-      ['2026-09-03', '非凡新聞', '張三', '創見推出新品SSD', '影音'],
-      ['2026-09-02', '鉅亨網', '—', '創見推出新品 ssd！', '網路新聞'],
-      ['2026-09-01', '經濟日報', '王一', '創見推出新品 SSD', '網路新聞'],
+      ['2026-09-03', '非凡新聞', '張三', '創見推出新品SSD', '—', '影音'],
+      ['2026-09-02', '鉅亨網', '—', '創見推出新品 ssd！', '—', '網路新聞'],
+      ['2026-09-01', '經濟日報', '王一', '創見推出新品 SSD', '—', '網路新聞'],
     ]);
     expect(within(detail).getByText('創見推出新品SSD').closest('a').getAttribute('href')).toBe('https://example.com/3');
 
@@ -156,7 +156,7 @@ describe('ExposurePerformancePanel — 新聞稿／主題與明細', () => {
 describe('ExposurePerformancePanel — 篩選（所有數字共用同一份篩選結果）', () => {
   // 檢查畫面上每個區塊的數字都來自同一份篩選結果
   function expectConsistent(total, media, topics) {
-    expect(kpi('人工確認曝光')).toContain(String(total));
+    expect(kpi('人工彙整曝光')).toContain(String(total));
     expect(kpi('涵蓋媒體')).toContain(String(media));
     expect(kpi('新聞稿／主題')).toContain(String(topics));
     expect(screen.getByText(`符合 ${total} / 共 6 筆`)).toBeTruthy();
@@ -206,10 +206,10 @@ describe('ExposurePerformancePanel — 篩選（所有數字共用同一份篩�
     expect(screen.queryByText('清除篩選')).toBeNull();
     select('曝光媒體篩選', '經濟日報');
     fireEvent.change(screen.getByLabelText('搜尋曝光（標題、媒體、記者）'), { target: { value: '庫藏股' } });
-    expect(kpi('人工確認曝光')).toContain('1');
+    expect(kpi('人工彙整曝光')).toContain('1');
     expect(screen.getByText('匯出新聞稿成效（目前篩選）')).toBeTruthy();
     fireEvent.click(screen.getByText('清除篩選'));
-    expect(kpi('人工確認曝光')).toContain('6');
+    expect(kpi('人工彙整曝光')).toContain('6');
     expect(screen.getByLabelText('曝光媒體篩選').value).toBe('all');
     expect(screen.getByLabelText('搜尋曝光（標題、媒體、記者）').value).toBe('');
     expect(screen.queryByText('清除篩選')).toBeNull();
@@ -222,7 +222,7 @@ describe('ExposurePerformancePanel — 篩選（所有數字共用同一份篩�
     expect(screen.queryByText('涵蓋媒體')).toBeNull();
     expect(screen.getByText(/^匯出新聞稿成效/).closest('button').disabled).toBe(true);
     fireEvent.click(screen.getAllByText('清除篩選')[0]);
-    expect(kpi('人工確認曝光')).toContain('6');
+    expect(kpi('人工彙整曝光')).toContain('6');
   });
 });
 
@@ -253,7 +253,7 @@ describe('ExposurePerformancePanel — Excel 匯出', () => {
     fireEvent.click(screen.getByText('匯出新聞稿成效'));
     const { summaryRows, detailRows } = lastExportArgs();
     detailRows.forEach(r => expect(Object.keys(r)).toEqual(
-      ['新聞稿／主題', '配對依據', '配對狀態', '曝光分類', '分類方法', '信心程度', '日期', '媒體', '記者', '新聞標題', '曝光類型', '連結']));
+      ['新聞稿／主題', '配對依據', '配對狀態', '配對信心', '配對理由', '曝光分類', '分類方法', '信心程度', '日期', '媒體', '記者', '新聞標題', '曝光類型', '連結']));
     const all = JSON.stringify({ summaryRows, detailRows });
     ['內部備註', 'secret.xlsx', 'raw.example.com', '原始媒體名稱', 'noteInternal', 'sources', 'rawLink'].forEach(s =>
       expect(all, s).not.toContain(s));

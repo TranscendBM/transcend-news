@@ -50,13 +50,13 @@ export async function exportMediaExposureExcel(records) {
     { wch: 12 }, { wch: 16 }, { wch: 12 }, { wch: 54 }, { wch: 12 }, { wch: 64 },
   ];
   const wb = XLSX.utils.book_new();
-  XLSX.utils.book_append_sheet(wb, sheet, '人工確認曝光');
+  XLSX.utils.book_append_sheet(wb, sheet, '人工彙整曝光');
   const today = new Date();
   const stamp = `${today.getFullYear()}${String(today.getMonth() + 1).padStart(2, '0')}${String(today.getDate()).padStart(2, '0')}`;
-  XLSX.writeFile(wb, `人工確認曝光_${stamp}.xlsx`);
+  XLSX.writeFile(wb, `人工彙整曝光_${stamp}.xlsx`);
 }
 
-// 人工確認曝光分析 → Excel：月趨勢／媒體×月／記者×月／題材×月，各一張工作表。
+// 人工彙整曝光分析 → Excel：月趨勢／媒體×月／記者×月／題材×月，各一張工作表。
 export async function exportExposureInsightsExcel(ins) {
   if (!ins || ins.empty) return;
   const XLSX = await import('xlsx');
@@ -83,23 +83,44 @@ export async function exportExposureInsightsExcel(ins) {
   })), [16]);
   const today = new Date();
   const stamp = today.getFullYear() + String(today.getMonth() + 1).padStart(2, '0') + String(today.getDate()).padStart(2, '0');
-  XLSX.writeFile(wb, '人工確認曝光分析_' + stamp + '.xlsx');
+  XLSX.writeFile(wb, '人工彙整曝光分析_' + stamp + '.xlsx');
 }
 
 // 新聞稿曝光成效 → Excel。rows 由 exposurePerformance.js 的 buildDetailRows／buildSummaryRows
 // 產生（只有公開欄位，且已做公式注入防護），這裡只負責寫檔。
 // 有 summaryRows 時多一張「主題彙整」工作表；suffix 會放進檔名（已清掉不合法字元）。
+/**
+ * 待確認配對 → Excel：第一張「曝光配對覆核」前四欄（exposureId、decision、pressReleaseId、note）直接對應 Google Sheet 的同名分頁；
+ * 第二張「新聞稿清單」列出新聞稿 ID，rematch 時查詢用。公開網站不寫任何資料，覆核結果由 Google Sheet 同步。
+ */
+export async function exportMatchReviewExcel({ rows = [], pressReleases = [] }) {
+  if (!rows.length) return;
+  const XLSX = await import('xlsx');
+  const wb = XLSX.utils.book_new();
+  const sheet = XLSX.utils.json_to_sheet(rows);
+  sheet['!cols'] = [{ wch: 38 }, { wch: 12 }, { wch: 30 }, { wch: 20 }, { wch: 12 }, { wch: 16 }, { wch: 60 }, { wch: 40 }, { wch: 12 }, { wch: 40 }, { wch: 34 }, { wch: 10 }, { wch: 50 }];
+  XLSX.utils.book_append_sheet(wb, sheet, '曝光配對覆核');
+  if (pressReleases.length) {
+    const list = XLSX.utils.json_to_sheet(pressReleases);
+    list['!cols'] = [{ wch: 30 }, { wch: 12 }, { wch: 70 }];
+    XLSX.utils.book_append_sheet(wb, list, '新聞稿清單');
+  }
+  const today = new Date();
+  const stamp = today.getFullYear() + String(today.getMonth() + 1).padStart(2, '0') + String(today.getDate()).padStart(2, '0');
+  XLSX.writeFile(wb, '待確認配對_' + stamp + '.xlsx');
+}
+
 export async function exportExposurePerformanceExcel({ summaryRows = [], detailRows = [], suffix = '' }) {
   if (!detailRows || detailRows.length === 0) return;
   const XLSX = await import('xlsx');
   const wb = XLSX.utils.book_new();
   if (summaryRows.length) {
     const sheet = XLSX.utils.json_to_sheet(summaryRows);
-    sheet['!cols'] = [{ wch: 46 }, { wch: 22 }, { wch: 18 }, { wch: 10 }, { wch: 12 }, { wch: 12 }, { wch: 12 }, { wch: 36 }, { wch: 28 }];
+    sheet['!cols'] = [{ wch: 46 }, { wch: 22 }, { wch: 10 }, { wch: 44 }, { wch: 18 }, { wch: 10 }, { wch: 12 }, { wch: 12 }, { wch: 12 }, { wch: 36 }, { wch: 28 }];
     XLSX.utils.book_append_sheet(wb, sheet, '主題彙整');
   }
   const detail = XLSX.utils.json_to_sheet(detailRows);
-  detail['!cols'] = [{ wch: 46 }, { wch: 16 }, { wch: 16 }, { wch: 16 }, { wch: 18 }, { wch: 12 }, { wch: 12 }, { wch: 16 }, { wch: 12 }, { wch: 60 }, { wch: 10 }, { wch: 60 }];
+  detail['!cols'] = [{ wch: 46 }, { wch: 16 }, { wch: 16 }, { wch: 10 }, { wch: 44 }, { wch: 16 }, { wch: 18 }, { wch: 12 }, { wch: 12 }, { wch: 16 }, { wch: 12 }, { wch: 60 }, { wch: 10 }, { wch: 60 }];
   XLSX.utils.book_append_sheet(wb, detail, '曝光明細');
   const today = new Date();
   const stamp = today.getFullYear() + String(today.getMonth() + 1).padStart(2, '0') + String(today.getDate()).padStart(2, '0');

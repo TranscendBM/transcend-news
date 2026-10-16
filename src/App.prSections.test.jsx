@@ -117,7 +117,7 @@ describe('PR 子頁籤 — 每個功能只出現在正確的子頁', () => {
       expect(screen.getByText(t, { selector: 'h3' }), t).toBeTruthy());
     expect(screen.queryByPlaceholderText(NEWS_TOOLBAR)).toBeNull();
     expect(screen.queryByText('競品動態監測')).toBeNull();
-    expect(screen.queryByText('人工確認曝光', { selector: 'h3' })).toBeNull();
+    expect(screen.queryByText('人工彙整曝光', { selector: 'h3' })).toBeNull();
     expect(screen.queryByText('上傳 Excel')).toBeNull();
     expect(screen.queryByText(/匯出/)).toBeNull();
   });
@@ -150,10 +150,10 @@ describe('PR 子頁籤 — 每個功能只出現在正確的子頁', () => {
     expect(screen.queryByText('新聞稿曝光成效')).toBeNull();
   });
 
-  it('曝光成效：新聞稿曝光成效、重點媒體曝光監控、人工確認曝光（上傳、匯出）、曝光分析', () => {
+  it('曝光成效：新聞稿曝光成效、重點媒體曝光監控、人工彙整曝光（上傳、匯出）、曝光分析', () => {
     setUrl('?section=exposure');
     renderPR();
-    ['新聞稿曝光成效', '重點媒體曝光監控', '人工確認曝光'].forEach(t => expect(screen.getByText(t, { selector: 'h3' }), t).toBeTruthy());
+    ['新聞稿曝光成效', '重點媒體曝光監控', '人工彙整曝光'].forEach(t => expect(screen.getByText(t, { selector: 'h3' }), t).toBeTruthy());
     expect(screen.getByText('上傳 Excel')).toBeTruthy();
     expect(screen.getByText('曝光分析')).toBeTruthy();
     expect(screen.getByLabelText('曝光媒體篩選')).toBeTruthy();
@@ -187,7 +187,7 @@ describe('PR 總覽 — 摘要與「查看全部」', () => {
   it('新聞稿曝光成效摘要：總數、媒體數、主題數、最近曝光，以及最近的主題（最多 3 則）', () => {
     renderPR();
     const card = cardOf('新聞稿曝光成效');
-    expect(within(card).getByText('人工確認曝光').nextElementSibling.textContent).toBe('3');
+    expect(within(card).getByText('人工彙整曝光').nextElementSibling.textContent).toBe('3');
     expect(within(card).getByText('涵蓋媒體').nextElementSibling.textContent).toBe('2');
     expect(within(card).getByText('新聞稿／主題').nextElementSibling.textContent).toBe('3');
     expect(within(card).getByText(/創見榮獲 COMPUTEX 永續設計獎/)).toBeTruthy();   // 最新的一則
@@ -394,7 +394,7 @@ describe('PR 子頁 — 載入、錯誤、空資料與重試', () => {
     loading.unmount();
 
     renderPR({ mediaExposure: [], mediaExposureStatus: 'ready' });
-    expect(within(cardOf('新聞稿曝光成效')).getByText('尚未匯入人工確認曝光資料')).toBeTruthy();
+    expect(within(cardOf('新聞稿曝光成效')).getByText('尚未匯入人工彙整曝光資料')).toBeTruthy();
   });
 
   it('總覽：沒有競品報導、沒有創見報導時顯示空狀態，頁面不崩潰', () => {
@@ -421,7 +421,7 @@ describe('PR 子頁 — 載入、錯誤、空資料與重試', () => {
     const refreshMediaExposure = vi.fn();
     renderPR({ mediaExposure: [], mediaExposureStatus: 'error', refreshMediaExposure });
     fireEvent.click(within(cardOf('新聞稿曝光成效')).getByText('重試'));
-    fireEvent.click(within(cardOf('人工確認曝光')).getByText('重試'));
+    fireEvent.click(within(cardOf('人工彙整曝光')).getByText('重試'));
     expect(refreshMediaExposure).toHaveBeenCalledTimes(2);
   });
 });
@@ -461,7 +461,7 @@ describe('PR 曝光成效頁 — 上傳、匯出與隱私', () => {
   it('曝光分析是曝光成效頁內的下一頁，子頁籤仍在上方；返回回到曝光成效', () => {
     renderPR();
     fireEvent.click(screen.getByText('曝光分析'));
-    expect(screen.getByText('人工確認曝光分析')).toBeTruthy();
+    expect(screen.getByText('人工彙整曝光分析')).toBeTruthy();
     expect(selectedTab()).toBe('曝光成效');
     expect(screen.queryByText('重點媒體曝光監控')).toBeNull();
     fireEvent.click(screen.getByText('返回 PR 媒體戰情'));

@@ -48,13 +48,13 @@ function ExposureSummary({ records, status, onRetry }) {
 
   if (status === 'error') return <RetryMessage onRetry={onRetry}>新聞稿曝光成效載入失敗</RetryMessage>;
   if (status === 'loading' && perf.total === 0) return <ListMessage>載入中…</ListMessage>;
-  if (perf.total === 0) return <ListMessage>尚未匯入人工確認曝光資料</ListMessage>;
+  if (perf.total === 0) return <ListMessage>尚未匯入人工彙整曝光資料</ListMessage>;
 
   return (
     <div>
       <div className="grid grid-cols-2 gap-2">
         {[
-          ['人工確認曝光', perf.total, '則'],
+          ['人工彙整曝光', perf.total, '則'],
           ['涵蓋媒體', perf.mediaCount, '家'],
           ['新聞稿／主題', perf.topicCount, '依標題彙整'],
           ['最近曝光', fmtDay(perf.latestDate), ''],

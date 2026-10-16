@@ -127,7 +127,7 @@ def main():
         e = ex_by_id[upd['id']]
         target = f['pressReleaseTitle'] or f['suggestedPressReleaseTitle'] or '-'
         if args.verbose or f['matchStatus'] != 'unmatched':
-            print(f"  [{f['matchStatus']:12}] {f['matchMethod'] or upd['reason'] or '':24} {str(e.get('title'))[:40]!r} -> {target[:40]!r}")
+            print(f"  [{f['matchStatus']:12}] {f['matchMethod'] or upd['reason'] or '':24} {str(e.get('title'))[:40]!r} -> {target[:30]!r} | {f.get('matchReason') or ''}")
     unmatched = [u for u in plan['matches']['updates'] if u['fields']['matchStatus'] == 'unmatched']
     print(f'  （未配對 {len(unmatched)} 筆；加 --verbose 全部列出）')
     _ = by_id, timezone

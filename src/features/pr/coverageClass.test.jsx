@@ -104,7 +104,7 @@ const kpi = label => screen.getByText(label, { selector: 'p' }).nextElementSibli
 describe('曝光分類 — 曝光成效面板', () => {
   it('預設只計算新聞稿衍生曝光，並明確標示統計範圍與其他分類數量', () => {
     renderPanel();
-    expect(kpi('人工確認曝光')).toBe('3');
+    expect(kpi('人工彙整曝光')).toBe('3');
     expect(screen.getByTestId('coverage-scope').textContent).toBe('範圍：新聞稿衍生曝光（3 則）');
     const box = screen.getByTestId('coverage-filter');
     expect(box.textContent).toContain('只計算「新聞稿衍生曝光」');
@@ -125,7 +125,7 @@ describe('曝光分類 — 曝光成效面板', () => {
       '全部 9', '新聞稿衍生曝光 3', '一般公司報導 2', '產業連帶報導 2', '待確認 1', '不相關 1']);
     const expectKpi = (name, total) => {
       fireEvent.click(within(group).getByRole('button', { name }));
-      expect(kpi('人工確認曝光')).toBe(String(total));
+      expect(kpi('人工彙整曝光')).toBe(String(total));
     };
     expectKpi('全部 9', 9);
     expect(screen.getByTestId('coverage-scope').textContent).toContain('含各類報導');
@@ -151,7 +151,7 @@ describe('曝光分類 — 曝光成效面板', () => {
     const old = RECORDS.map(r => ({ ...r, coverageClass: undefined, coverageClassMethod: undefined, coverageClassConfidence: undefined }));
     renderPanel({ records: old });
     expect(screen.queryByTestId('coverage-filter')).toBeNull();
-    expect(kpi('人工確認曝光')).toBe('9');
+    expect(kpi('人工彙整曝光')).toBe('9');
   });
 
   it('備註、來源檔名不會出現在畫面；沒有修改分類的按鈕', () => {
@@ -171,7 +171,7 @@ describe('曝光分類 — PR 總覽', () => {
     const scope = screen.getByTestId('overview-exposure-scope');
     expect(scope.textContent).toBe('範圍：新聞稿衍生曝光（3 則）');
     const card = scope.closest('.bg-gray-900');
-    expect(within(card).getByText('人工確認曝光').nextElementSibling.textContent).toBe('3');
+    expect(within(card).getByText('人工彙整曝光').nextElementSibling.textContent).toBe('3');
   });
 });
 

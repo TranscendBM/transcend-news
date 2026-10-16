@@ -162,7 +162,8 @@ class TestMatchRules(unittest.TestCase):
         r = pm.match_exposure(ex('創見參加台北國際電子產業科技展 展出嵌入式鏡頭與DDR5記憶體', '2026-10-13'), prs)
         self.assertEqual((r['matchStatus'], r['pressReleaseId']), ('auto_matched', 'e'))
         r = pm.match_exposure(ex('創見搶攻邊緣 AI 嵌入式鏡頭、DDR5高速記憶體雙線出擊', '2026-10-13'), prs)
-        self.assertNotEqual(r['matchStatus'], 'auto_matched')      # 只有部分相同：最多建議
+        # 同日＋創見＋嵌入式鏡頭＋DDR5：符合高信心規則（見 test_high_confidence_*）
+        self.assertEqual((r['matchStatus'], r['matchMethod']), ('auto_matched', 'high_confidence_anchors'))
 
     def test_revenue_article_without_company_name_still_matches_by_month_and_date(self):
         prs = [pr('r9', '9月營收', '2026-10-06', topic='9月營收')]
@@ -216,6 +217,109 @@ class TestMatchRules(unittest.TestCase):
         prs = [pr('p1', 'DDR5 7200 電競記憶體', '2026-05-10')]
         r = pm.match_exposure(ex('創見資訊股價今日上漲', '2026-05-11'), prs)
         self.assertEqual(r['matchStatus'], 'unmatched')
+
+
+HBR = '創見資訊董事長束崇萬再度榮獲2026《哈佛商業評論》「台灣企業領袖100強」肯定'
+EXPO = '創見資訊參展2026台北國際電子產業科技展，展出嵌入式鏡頭與DDR5記憶體，拓展Edge AI應用'
+D64 = '創見推出64GB DDR5工業用記憶體，提升高速運算效能與系統穩定性'
+
+
+class TestHighConfidence(unittest.TestCase):
+    """可解釋的高信心規則：同日／前後 1 天＋明確提到創見＋至少 2 個錨點＋候選唯一＋規格相容。"""
+
+    def prs(self):
+        return [pr('hbr', HBR, '2026-08-05', topic='2026《哈佛商業評論》「台灣企業領袖100強」肯定'),
+                pr('expo', EXPO, '2026-10-13', topic='電子展'),
+                pr('d64', D64, '2026-09-14', topic='DDR5 6400 64GB'),
+                pr('d72', '創見推出全系列DDR5-7200工業用記憶體模組', '2026-08-20', topic='DDR5 7200'),
+                pr('r7', '7月營收', '2026-08-06', topic='7月營收'), pr('r8', '8月營收', '2026-09-03', topic='8月營收')]
+
+    def test_three_reported_cases_are_auto_matched_with_explainable_reasons(self):
+        cases = [('創見搶攻邊緣 AI 嵌入式鏡頭、DDR5高速記憶體雙線出擊', '2026-10-13', 'expo', ('同日', '嵌入式鏡頭', 'DDR5')),
+                 ('創見推64GB DDR5工業記憶體 搶攻邊緣AI應用', '2026-09-13', 'd64', ('前後 1 天', '64GB', 'DDR5', '工業記憶體')),
+                 ('創見董事長束崇萬 再獲HBR台灣企業領袖100強', '2026-08-04', 'hbr', ('束崇萬', 'HBR', '台灣企業領袖100強'))]
+        for title, day, expected, parts in cases:
+            r = pm.match_exposure(ex(title, day), self.prs())
+            self.assertEqual((r['matchStatus'], r['matchMethod'], r['pressReleaseId']), ('auto_matched', 'high_confidence_anchors', expected), title)
+            self.assertGreaterEqual(r['matchConfidence'], 0.82)
+            self.assertTrue(r['matchReason'].startswith(('同日＋創見＋', '前後 1 天＋創見＋')), r['matchReason'])
+            for part in parts:
+                self.assertIn(part, r['matchReason'])
+
+    def test_mixed_stock_exhibition_article_stays_suggested(self):
+        prs = [pr('auto', '創見資訊參展2026台北國際自動化工業大展， 聚焦AI視覺辨識應用', '2026-08-12', topic='自動化展')]
+        r = pm.match_exposure(ex('創見業績爆表加上參加自動化展新品齊發 早盤股價急拉漲停', '2026-08-12'), prs)
+        self.assertEqual(r['matchStatus'], 'suggested')
+        self.assertIsNone(r['pressReleaseId'])
+        self.assertIn('同時包含股價與多個事件內容', r['matchReason'])
+        self.assertEqual(r['suggestedPressReleaseId'], 'auto')
+
+    def test_date_must_be_same_day_or_one_day_apart(self):
+        r = pm.match_exposure(ex('創見推64GB DDR5工業記憶體 搶攻邊緣AI應用', '2026-09-16'), self.prs())
+        self.assertNotEqual(r['matchMethod'], 'high_confidence_anchors')
+        r = pm.match_exposure(ex('創見推64GB DDR5工業記憶體 搶攻邊緣AI應用', '2026-09-15'), self.prs())
+        self.assertEqual(r['pressReleaseId'], 'd64')
+
+    def test_company_must_be_named(self):
+        r = pm.match_exposure(ex('推64GB DDR5工業記憶體 搶攻邊緣AI應用', '2026-09-14'), self.prs())
+        self.assertNotEqual(r['matchStatus'], 'auto_matched')
+
+    def test_single_anchor_is_not_enough(self):
+        r = pm.match_exposure(ex('創見最新動態 嵌入式鏡頭', '2026-10-13'), self.prs())
+        self.assertNotEqual(r['matchMethod'], 'high_confidence_anchors')
+
+    def test_speed_and_capacity_differences_are_never_ignored(self):
+        r = pm.match_exposure(ex('創見推64GB DDR5-7200工業記憶體 搶攻邊緣AI', '2026-09-14'), self.prs())
+        self.assertNotEqual(r['pressReleaseId'], 'd64')                      # 7200 不在這篇（6400）新聞稿裡
+        r = pm.match_exposure(ex('創見推32GB DDR5工業記憶體 搶攻邊緣AI', '2026-09-14'), self.prs())
+        self.assertNotEqual(r['pressReleaseId'], 'd64')                      # 32GB ≠ 64GB
+        r = pm.match_exposure(ex('創見推DDR5-6400工業記憶體', '2026-08-20'), self.prs())
+        self.assertNotEqual(r['pressReleaseId'], 'd72')                      # 7200 的新聞稿不能算給 6400
+        r = pm.match_exposure(ex('創見推出全系列DDR5-7200工業記憶體', '2026-08-20'), self.prs())
+        self.assertEqual(r['pressReleaseId'], 'd72')
+
+    def test_month_and_quarter_must_match(self):
+        r = pm.match_exposure(ex('創見7月營收年增308% 提前改寫全年紀錄', '2026-09-03'), self.prs())
+        self.assertNotEqual(r['pressReleaseId'], 'r8')
+        r = pm.match_exposure(ex('創見8月營收48.4億元 年增275%', '2026-09-03'), self.prs())
+        self.assertEqual(r['pressReleaseId'], 'r8')
+        q = [pr('q1', '2026 Q1 財報 EPS 18.93', '2026-05-06', topic='2026 Q1 財報')]
+        r = pm.match_exposure(ex('創見 2026 Q3 財報 每股賺27.7元', '2026-05-06'), q)
+        self.assertNotEqual(r['matchStatus'], 'auto_matched')
+
+    def test_peer_led_comparison_and_anonymous_articles_are_never_auto(self):
+        for title in ('威剛推出64GB DDR5工業記憶體 創見跟進 搶攻邊緣AI應用', '「模組廠」推64GB DDR5工業記憶體 搶攻邊緣AI應用',
+                      '威剛與創見 64GB DDR5 工業記憶體齊發', '記憶體大廠這檔推64GB DDR5工業記憶體'):
+            r = pm.match_exposure(ex(title, '2026-09-14'), self.prs())
+            self.assertNotEqual(r['matchStatus'], 'auto_matched', title)
+
+    def test_equal_candidates_are_not_picked(self):
+        prs = [pr('a', '創見推出64GB DDR5工業用記憶體 A版', '2026-09-14', topic='DDR5 64GB'),
+               pr('b', '創見推出64GB DDR5工業用記憶體 B版', '2026-09-14', topic='DDR5 64GB')]
+        r = pm.match_exposure(ex('創見推64GB DDR5工業記憶體 搶攻邊緣AI', '2026-09-14'), prs)
+        self.assertIsNone(r['pressReleaseId'])
+        self.assertNotEqual(r['matchStatus'], 'auto_matched')
+
+    def test_reasons_are_plain_chinese_without_technical_codes(self):
+        prs = self.prs()
+        titles = [('創見參展 embedded world 2026 展出工控新品', '2026-03-20'), ('創見董事長談產業', '2026-08-04'),
+                  ('威剛9月營收創新高 創見跟進', '2026-09-04'), ('創見公告股東會重要決議', '2026-06-17')]
+        for title, day in titles:
+            r = pm.match_exposure(ex(title, day), prs)
+            if r['matchStatus'] in ('unmatched', 'suggested'):
+                self.assertTrue(r['matchReason'], title)
+                self.assertNotRegex(r['matchReason'], r'ambiguous_|peer_led|no_anchor')
+        unmatched = pm.match_exposure(ex('完全無關的新聞', '2026-03-20'), prs)
+        self.assertIn('對不上', unmatched['matchReason'])
+        peer = pm.match_exposure(ex('威剛9月營收創新高 創見跟進', '2026-09-04'), prs)
+        self.assertIn('同業公司在標題前方', peer['matchReason'])
+
+    def test_older_rules_now_carry_reasons_too(self):
+        exact = pm.match_exposure(ex(HBR, '2026-08-06'), self.prs())
+        self.assertEqual((exact['matchMethod'], exact['matchReason']), ('exact_title', '標題與新聞稿完全相同'))
+        explicit = pm.match_exposure(ex('隨便', '2026-08-06', campaignId='X1'), [pr('p', 'T', '2026-08-06', explicitPressReleaseId='x1')])
+        self.assertEqual(explicit['matchReason'], '新聞稿編號相同')
+
 
 
 if __name__ == '__main__':

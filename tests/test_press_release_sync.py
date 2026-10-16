@@ -528,7 +528,8 @@ class TestMatchingWrites(unittest.TestCase):
         doc = self.db.store['job_status']['press_release_sync']
         self.assertIn('lastSyncAt', doc)
         self.assertEqual(doc['report']['read'], 8)
-        self.assertNotIn('title', json.dumps(doc, ensure_ascii=False, default=str))
+        self.assertNotIn('title', json.dumps(doc['report'], ensure_ascii=False, default=str))      # 統計只有數字
+        self.assertTrue(all(set(r) == {'id', 'title', 'date'} for r in doc['pressReleases']))      # 新聞稿清單：只有 ID／標題／日期
 
 
 class TestSourceHygiene(unittest.TestCase):

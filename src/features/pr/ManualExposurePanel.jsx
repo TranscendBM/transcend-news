@@ -9,7 +9,7 @@ import MediaExposureUpload from './MediaExposureUpload.jsx';
 import { usePRState } from './prState.jsx';
 
 // ═══════════════════════════════════════════════════════════
-// PR — 人工確認曝光（與自動新聞監測分開計算）：Excel 上傳、曝光分析入口、匯出曝光明細、最新清單
+// PR — 人工彙整曝光（與自動新聞監測分開計算）：Excel 上傳、曝光分析入口、匯出曝光明細、最新清單
 // ═══════════════════════════════════════════════════════════
 function exposureDate(record) {
   return record.exposureDate?.toDate
@@ -28,7 +28,7 @@ export function ManualExposurePanel({
   const latest = records.slice(0, 12);
 
   return (
-    <Card title="人工確認曝光" icon="checkcircle"
+    <Card title="人工彙整曝光" icon="checkcircle"
       actions={
         <div className="flex gap-1.5 max-w-full flex-wrap justify-end">
           <button onClick={onOpenInsights} disabled={records.length === 0}
@@ -39,7 +39,7 @@ export function ManualExposurePanel({
             className="text-sm px-3.5 py-1.5 rounded-lg border border-gray-700/60 text-gray-400 hover:text-gray-200 hover:bg-gray-800 transition">
             {uploadOpen ? '收合上傳' : <><Icon name="upload" /> 上傳 Excel</>}
           </button>
-          {/* 這顆匯出「全部已載入的人工確認曝光」原始清單（不受上面新聞稿成效的篩選影響），
+          {/* 這顆匯出「全部已載入的人工彙整曝光」原始清單（不受上面新聞稿成效的篩選影響），
               跟「新聞稿曝光成效」的匯出（目前篩選結果＋主題彙整）內容不同，所以按鈕名稱分開標示。 */}
           <button onClick={() => exportMediaExposureExcel(records)}
             disabled={records.length === 0}
@@ -66,7 +66,7 @@ export function ManualExposurePanel({
         <>
           <div className="grid grid-cols-3 gap-3 mb-4">
             {[
-              ['本月人工確認', monthRecords.length],
+              ['本月人工彙整', monthRecords.length],
               ['已載入曝光', records.length],
               ['涵蓋媒體', uniqueMedia],
             ].map(([label, value]) => (
@@ -110,7 +110,7 @@ export function ManualExposurePanel({
               })}
             </div>
           ) : status === 'ready' ? (
-            <div className="py-8 text-center text-sm text-gray-600">尚未匯入人工確認曝光</div>
+            <div className="py-8 text-center text-sm text-gray-600">尚未匯入人工彙整曝光</div>
           ) : null}
           {records.length > latest.length && (
             <p className="text-xs text-gray-600 text-right mt-3">顯示最新 {latest.length} 筆，共 {records.length} 筆</p>

@@ -51,7 +51,7 @@ describe('toPublicRecord — 公開欄位白名單與隱私', () => {
   it('只保留白名單欄位，沒有任何私人欄位', () => {
     const r = toPublicRecord(dirty);
     expect(Object.keys(r).sort()).toEqual(
-      ['campaignId', 'campaignName', 'coverageClass', 'coverageConfidence', 'coverageMethod', 'date', 'day', 'id', 'link', 'matchStatus', 'mediaName', 'reporter', 'suggestedName', 'title', 'type'].sort());
+      ['campaignId', 'campaignName', 'coverageClass', 'coverageConfidence', 'coverageMethod', 'date', 'day', 'exposureId', 'id', 'link', 'matchConfidence', 'matchMethod', 'matchReason', 'matchStatus', 'mediaName', 'reporter', 'suggestedId', 'suggestedName', 'title', 'type'].sort());
     PRIVATE_FIELD_NAMES.forEach(f => expect(r, f).not.toHaveProperty(f));
     const serialized = JSON.stringify(r);
     ['內部備註', 'secret.xlsx', 'Media exposure_09', 'raw.example.com', '經濟日報記者'].forEach(s => expect(serialized).not.toContain(s));
@@ -319,7 +319,7 @@ describe('Excel 資料列與公式注入防護', () => {
   it('明細列只含白名單欄位，且文字欄位都已防公式注入', () => {
     const rows = buildDetailRows(topics);
     expect(rows).toHaveLength(2);
-    rows.forEach(r => expect(Object.keys(r)).toEqual(['新聞稿／主題', '配對依據', '配對狀態', '曝光分類', '分類方法', '信心程度', '日期', '媒體', '記者', '新聞標題', '曝光類型', '連結']));
+    rows.forEach(r => expect(Object.keys(r)).toEqual(['新聞稿／主題', '配對依據', '配對狀態', '配對信心', '配對理由', '曝光分類', '分類方法', '信心程度', '日期', '媒體', '記者', '新聞標題', '曝光類型', '連結']));
     const all = JSON.stringify(rows);
     ['內部備註', 'noteInternal', 'javascript:'].forEach(s => expect(all).not.toContain(s));
     rows.forEach(r => Object.values(r).forEach(v => expect(typeof v === 'string' && /^[=+\-@]/.test(v), String(v)).toBe(false)));
@@ -342,7 +342,7 @@ describe('Excel 資料列與公式注入防護', () => {
       raw('3', tw(2026, 9, 2), 'A報', '', '同一則', { exposureType: 'online' }),
     ])));
     expect(rows).toEqual([{
-      '新聞稿／主題': '同一則', 配對依據: '標題推定', 分組依據: '標題相同', 曝光總數: 3, 不重複媒體數: 2, 首次曝光: '2026-09-01', 最近曝光: '2026-09-03',
+      '新聞稿／主題': '同一則', 配對依據: '標題推定', 配對信心: '', 配對理由: '', 分組依據: '標題相同', 曝光總數: 3, 不重複媒體數: 2, 首次曝光: '2026-09-01', 最近曝光: '2026-09-03',
       主要媒體: 'A報（2）、B網（1）', 類型分布: '網路新聞 2、影音 1',
     }]);
   });

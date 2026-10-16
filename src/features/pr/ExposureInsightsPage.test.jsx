@@ -36,7 +36,7 @@ describe('ExposureInsightsPage', () => {
   it('標頭顯示期間與規模，並有返回與匯出按鈕', () => {
     const onBack = vi.fn();
     renderPage({ onBack });
-    expect(screen.getByText('人工確認曝光分析')).toBeTruthy();
+    expect(screen.getByText('人工彙整曝光分析')).toBeTruthy();
     expect(screen.getByText(/共 10 篇・5 家媒體・5 位記者/)).toBeTruthy();
     fireEvent.click(screen.getByText('返回 PR 媒體戰情'));
     expect(onBack).toHaveBeenCalledTimes(1);
