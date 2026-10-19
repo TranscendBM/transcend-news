@@ -30,7 +30,9 @@ function mkUpstream(id, title, pubDate, extra = {}) {
   };
 }
 
-function renderUSMarketTab({ upstreamArticles = [], upstreamStatus = 'ready', refreshUpstreamNews = vi.fn() } = {}) {
+// 這些測試驗證的是「新聞清單」子頁（工具列、統計卡片、清單、今日重要情報都在這一頁）
+function renderUSMarketTab({ upstreamArticles = [], upstreamStatus = 'ready', refreshUpstreamNews = vi.fn(), section = 'news' } = {}) {
+  window.history.replaceState(null, '', `/?tab=us&section=${section}`);
   return render(
     <USMarketTab
       upstreamArticles={upstreamArticles}
@@ -102,6 +104,7 @@ describe('USMarketTab — 查詢失敗顯示明確錯誤，可重試', () => {
   });
 
   it('does not show a plain 0 in the stats cards while loading or on error', () => {
+    window.history.replaceState(null, '', '/?tab=us&section=news');
     const { rerender } = render(
       <USMarketTab upstreamArticles={[]} upstreamStatus="loading" refreshUpstreamNews={vi.fn()} />);
     const card = statCard('本期新聞');

@@ -5,6 +5,11 @@ import Icon from '../../components/Icon.jsx';
 import ShowMoreButton, { useShowMore } from '../../components/ShowMore.jsx';
 import NewsFilterToolbar from '../../components/filters/NewsFilterToolbar.jsx';
 import USNewsCard from '../news/USNewsCard.jsx';
+import { PanelStateProvider } from '../../hooks/usePanelState.jsx';
+import { useSectionNav } from '../../hooks/useSectionNav.js';
+import SubNavigation, { subPanelId, subTabId } from '../../components/SubNavigation.jsx';
+import { EventCenter } from '../events/EventCenterTab.jsx';
+import { DEFAULT_US_SECTION, US_SECTIONS, US_SECTION_IDS } from './usSections.js';
 import TodayBriefing from '../intelligence/TodayBriefing.jsx';
 import SummaryCard from '../../components/SummaryCard.jsx';
 import TopEvents, { openEventCenter } from '../events/TopEvents.jsx';
@@ -33,7 +38,10 @@ const UPSTREAM_TIME_FILTERS = [
 // useUpstreamNews() 後往下傳（不在這裡直接呼叫 hook）：一方面讓「重新
 // 整理」按鈕能統一觸發，另一方面 enabled 開關（只在 tab==='us' 時查詢）
 // 需要知道目前分頁，放在 App() 層級才知道 tab 狀態。
-export function USMarketTab({ upstreamArticles, upstreamStatus, refreshUpstreamNews, topics = [], topicsStatus = 'ready' }) {
+export function USMarketTab({ upstreamArticles, upstreamStatus, refreshUpstreamNews, topics = [], topicsStatus = 'ready', refreshTopics }) {
+  const [section, goSection] = useSectionNav('us', US_SECTION_IDS, DEFAULT_US_SECTION);
+  // 離開「事件」子頁時清掉事件類別篩選（?filter=），不讓它殘留在其他子頁的網址上
+  const navigate = id => goSection(id, id === 'events' ? undefined : { filter: null });
   const [timeFilter, setTimeFilter] = useState('week');
   const [brandFilter, setBrandFilter] = useState('all');
   const [usQuery, setUsQuery] = useState('');
@@ -117,8 +125,8 @@ export function USMarketTab({ upstreamArticles, upstreamStatus, refreshUpstreamN
     { label: '品牌數量', val: brandCountStat, sub: '含品牌資訊', cls: 'text-purple-300' },
   ];
 
-  return (
-    <div className="space-y-4 fade-in">
+  const overview = (
+    <div className="space-y-4">
       {/* 今天重要情報（沿用「今日情報快報」規則：風險／財務／機會／市場關鍵字 + 24 小時內加權）
           跟統計卡片／新聞清單套用相同的搜尋/媒體/情緒/品牌篩選，但不受期間
           分頁影響（見上方 briefingSource），TodayBriefing 自己只挑「今天」。 */}
@@ -128,6 +136,13 @@ export function USMarketTab({ upstreamArticles, upstreamStatus, refreshUpstreamN
         <TopEvents topics={topics} status={topicsStatus} tag="upstream" limit={3}
           keywords={['dram', 'nand', 'flash', 'ddr', '記憶體', 'hbm']} emptyText="近 72 小時沒有 DRAM／Flash 的重要事件" />
       </SummaryCard>
+    </div>
+  );
+
+  const newsList = (
+    <div className="space-y-4">
+      {/* 今日重要情報受下方工具列的篩選影響，所以新聞清單子頁也放一份；總覽子頁顯示同一份資料 */}
+      <TodayBriefing articles={briefingSource} title="上游市場今日重要情報" topics={topics} />
 
       <NewsFilterToolbar
         query={usQuery} setQuery={setUsQuery}
@@ -220,5 +235,26 @@ export function USMarketTab({ upstreamArticles, upstreamStatus, refreshUpstreamN
         }
       </div>
     </div>
+  );
+
+  const content = {
+    overview,
+    events: <EventCenter topics={topics} status={topicsStatus} onRetry={refreshTopics} defaultTag="upstream" />,
+    news: newsList,
+  }[section];
+
+  return (
+    <PanelStateProvider>
+      <div className="space-y-4 fade-in">
+        <SubNavigation sections={US_SECTIONS} active={section} onChange={navigate} prefix="us" label="上游市場子頁" />
+        {US_SECTIONS.map(x => (
+          <div key={x.id} role="tabpanel" id={subPanelId('us', x.id)} aria-labelledby={subTabId('us', x.id)}
+            hidden={x.id !== section} tabIndex={x.id === section ? 0 : undefined}
+            className="outline-none focus-visible:ring-2 focus-visible:ring-red-700 rounded-xl">
+            {x.id === section ? content : null}
+          </div>
+        ))}
+      </div>
+    </PanelStateProvider>
   );
 }

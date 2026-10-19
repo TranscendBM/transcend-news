@@ -23,9 +23,10 @@ function Stat({ label, value, tone = '' }) {
   );
 }
 
-function EventCenter({ topics, status, onRetry }) {
+// defaultTag：網址沒有 ?filter= 時預設的類別（上游市場的「事件」子頁預設看「上游市場」；明確選「全部」會寫成 ?filter=all）
+export function EventCenter({ topics, status, onRetry, defaultTag = 'all' }) {
   const now = useNow();
-  const [tag, setTag] = useUrlParam('filter', TAG_IDS, 'all');            // 網址 ?filter=：重新整理與上一頁／下一頁都保留
+  const [tag, setTag] = useUrlParam('filter', TAG_IDS, defaultTag);            // 網址 ?filter=：重新整理與上一頁／下一頁都保留
   const [sentiment, setSentiment] = usePanelState('events.sentiment', 'all');
   const [query, setQuery] = usePanelState('events.query', '');
   const [from, setFrom] = usePanelState('events.from', '');
@@ -39,14 +40,14 @@ function EventCenter({ topics, status, onRetry }) {
   const sorted = useMemo(() => sortTopics(filtered, sortMode), [filtered, sortMode]);
   const more = useShowMore(sorted, PAGE, [tag, sentiment, query, from, to, sortMode]);
 
-  const filtering = tag !== 'all' || sentiment !== 'all' || query.trim() || from || to;
+  const filtering = tag !== defaultTag || sentiment !== 'all' || query.trim() || from || to;
   const toggle = (setter, id) => setter(prev => {
     const next = new Set(prev);
     if (next.has(id)) next.delete(id); else next.add(id);
     return next;
   });
   const clear = () => {
-    setTag('all', { replace: true }); setSentiment('all'); setQuery(''); setFrom(''); setTo('');
+    setTag(defaultTag, { replace: true }); setSentiment('all'); setQuery(''); setFrom(''); setTo('');
   };
 
   const loadingFirst = status === 'loading' && topics.length === 0;

@@ -2,9 +2,9 @@ import { tagClass } from '../../components/tagStyles.js';
 import { sentimentText, topEvents, velocityText } from './eventData.js';
 import { writeParams } from '../../utils/urlState.js';
 
-/** 到事件中心（可指定類別篩選）。網址 ?tab=events&filter=…，上一頁可以回來。 */
+/** 到「上游市場 → 事件」（可指定類別篩選）。網址 ?tab=us&section=events&filter=…，上一頁可以回來。 */
 export function openEventCenter(filter = 'all') {
-  writeParams({ tab: 'events', section: null, filter: filter === 'all' ? null : filter });
+  writeParams({ tab: 'us', section: 'events', filter });
   try { window.scrollTo(0, 0); } catch { /* 非瀏覽器環境略過 */ }
 }
 

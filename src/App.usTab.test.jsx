@@ -67,6 +67,8 @@ describe('App — 上游市場分頁的篩選功能不受 PR 分頁改動影響'
   it('shows the shared toolbar on the US tab and search/media filters the US news list', async () => {
     await renderAppSettled();
     await switchTab('上游市場');
+    const newsTab = await screen.findByRole('tab', { name: '新聞清單' }, { timeout: 4000 });
+    await act(async () => { fireEvent.click(newsTab); });
 
     // 三個分頁都是 React.lazy 動態載入，切換分頁後元件要等 import()
     // 的 Promise resolve 才會實際掛載——用 findBy*（會輪詢等待）取代
@@ -85,6 +87,8 @@ describe('App — 上游市場分頁的篩選功能不受 PR 分頁改動影響'
   it('media filter on the US tab only affects US news, using the un-capped-looking news feed as before', async () => {
     await renderAppSettled();
     await switchTab('上游市場');
+    const newsTab = await screen.findByRole('tab', { name: '新聞清單' }, { timeout: 4000 });
+    await act(async () => { fireEvent.click(newsTab); });
 
     const mediaFilter = await screen.findByLabelText('依媒體篩選');
     await act(async () => {
