@@ -374,7 +374,7 @@ describe('摘要與今日情報整合', () => {
     expect(within(list).getAllByRole('listitem')).toHaveLength(3);
     expect(within(list).getAllByRole('listitem')[0].textContent).toContain('創見事件0');
     fireEvent.click(screen.getByRole('button', { name: '查看事件：創見事件0' }));
-    expect(window.location.search).toBe('?tab=events&filter=transcend');
+    expect(Object.fromEntries(new URLSearchParams(window.location.search))).toEqual({ tab: 'us', section: 'events', filter: 'transcend' });
   });
 
   it('TopEvents 的空狀態與失敗狀態不崩潰', () => {
@@ -452,12 +452,26 @@ describe('App 整合：事件中心頁籤', () => {
   }
   const clickTop = async name => { await act(async () => { fireEvent.click(screen.getAllByText(name)[0]); }); await act(async () => {}); };
 
-  it('?tab=events 顯示事件中心；導覽列有「事件中心」', async () => {
-    setUrl('?tab=events');
+  it('舊網址 ?tab=events 導向 上游市場 → 事件；導覽列不再有獨立的「事件中心」', async () => {
+    setUrl('?tab=events&filter=transcend');
     await renderApp();
     expect(await screen.findByText('事件中心', { selector: 'h3' }, { timeout: 5000 })).toBeTruthy();
-    expect(await screen.findAllByTestId('event-card', {}, { timeout: 5000 })).toHaveLength(5);
-    expect(screen.getAllByText('事件中心').length).toBeGreaterThan(0);
+    await waitFor(() => expect(Object.fromEntries(new URLSearchParams(window.location.search))).toEqual({ tab: 'us', section: 'events', filter: 'transcend' }));
+    expect(screen.getByRole('tab', { name: '事件' }).getAttribute('aria-selected')).toBe('true');
+    expect(screen.queryByRole('button', { name: /事件中心/ })).toBeNull();
+    expect(await screen.findAllByTestId('event-card', {}, { timeout: 5000 })).toHaveLength(3);
+  });
+
+  it('上游市場 → 事件 預設只看「上游市場」類別，可切到全部；離開事件子頁會清掉 filter', async () => {
+    setUrl('?tab=us&section=events');
+    await renderApp();
+    await screen.findAllByTestId('event-card', {}, { timeout: 5000 });
+    const group = screen.getByRole('group', { name: '事件類別篩選' });
+    expect(within(group).getByRole('button', { name: '上游市場' }).getAttribute('aria-pressed')).toBe('true');
+    fireEvent.click(within(group).getByRole('button', { name: '全部' }));
+    expect(window.location.search).toContain('filter=all');
+    await act(async () => { fireEvent.click(screen.getByRole('tab', { name: '新聞清單' })); });
+    expect(new URLSearchParams(window.location.search).has('filter')).toBe(false);
   });
 
   it('切換 PR／事件中心／IR／上游市場不會重複讀取 news_topics，也沒有新的監聽器或資料 hook 重新掛載', async () => {
@@ -466,7 +480,8 @@ describe('App 整合：事件中心頁籤', () => {
     await screen.findByRole('tab', { name: '總覽' }, { timeout: 5000 });
     await waitFor(() => expect(fire.getDocs).toBe(1));
     const snapshots = fire.onSnapshot;
-    for (const name of ['事件中心', 'IR 投資情報', '上游市場', 'PR 媒體戰情', '事件中心']) await clickTop(name);
+    for (const name of ['IR 投資情報', '上游市場', 'PR 媒體戰情', '上游市場']) await clickTop(name);
+    await act(async () => { fireEvent.click(await screen.findByRole('tab', { name: '事件' })); });
     await screen.findAllByTestId('event-card', {}, { timeout: 5000 });
     expect(fire.getDocs).toBe(1);
     expect(fire.onSnapshot).toBe(snapshots);

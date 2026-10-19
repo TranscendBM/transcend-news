@@ -398,7 +398,7 @@ rm /tmp/pass.txt
 
 ## 🧭 事件中心（新聞話題聚類，`functions/topic_cluster.py`）
 
-把不同媒體對「同一事件」的報導聚成一個話題（`news_topics`），網站新增「事件中心」頁籤；PR 總覽顯示最多 3 個涉及創見的重要事件，
+把不同媒體對「同一事件」的報導聚成一個話題（`news_topics`），事件顯示在「上游市場 → 事件」子頁（網址 `?tab=us&section=events`，預設類別「上游市場」，可切創見／競品／財務…；舊網址 `?tab=events` 會自動導向）；PR 總覽顯示最多 3 個涉及創見的重要事件，
 上游市場顯示最多 3 個 DRAM／Flash 事件，今日情報快報同一事件只列一則。既有新聞清單完全保留。
 
 - **排程**：`topic_cluster_job` 每 30 分鐘（Asia/Taipei，`max_instances=1`，lease lock `topic_cluster`）。只讀 `news`（不寫），

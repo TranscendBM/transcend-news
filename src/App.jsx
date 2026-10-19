@@ -12,19 +12,19 @@ import { useMediaExposure } from './features/pr/useMediaExposure.js';
 import { useNewsTopics } from './features/events/useNewsTopics.js';
 import { useUrlParam } from './hooks/useUrlParam.js';
 import { rememberedSection } from './hooks/useSectionNav.js';
-import { writeParams } from './utils/urlState.js';
+import { writeParams, readParam } from './utils/urlState.js';
 import { sortByDate, isStockStale, fmtStockUpdated } from './utils/dates.js';
 import { COMPETITORS, STOCK_META } from './config/competitors.js';
 
 // 三個分頁各自的程式碼／SVG 圖表都相當大，但同時只會顯示一個——lazy
 // load 讓使用者只下載目前分頁需要的程式碼，不用一次打包進主 bundle。
 // 主分頁存在網址 ?tab=（pr／ir／us／health；沒有或不認識的值 → pr），上一頁／下一頁會切換分頁。
+// 'events' 只是舊網址的別名：事件已整合進「上游市場 → 事件」，見下方的導向
 const TAB_IDS = ['pr', 'events', 'ir', 'us', 'health'];
 
 const PRTab = lazy(() => import('./features/pr/PRTab.jsx').then(m => ({ default: m.PRTab })));
 const USMarketTab = lazy(() => import('./features/market/USMarketTab.jsx').then(m => ({ default: m.USMarketTab })));
 const IRTab = lazy(() => import('./features/ir/IRTab.jsx').then(m => ({ default: m.IRTab })));
-const EventCenterTab = lazy(() => import('./features/events/EventCenterTab.jsx').then(m => ({ default: m.EventCenterTab })));
 const HealthTab = lazy(() => import('./features/health/HealthTab.jsx').then(m => ({ default: m.HealthTab })));
 
 // ═══════════════════════════════════════════════════════════
@@ -61,6 +61,10 @@ export default function App() {
   } = useMediaExposure({ enabled: tab === 'pr' });
   // 事件中心（news_topics）：PR 總覽、上游市場與事件中心用得到；一次性讀取，沒有監聽器
   const { topics, status: topicsStatus, refresh: refreshTopics } = useNewsTopics({ enabled: tab === 'pr' || tab === 'us' || tab === 'events' });
+  // 舊網址 ?tab=events[&filter=…] → 上游市場的「事件」子頁（用 replace，不留下無效的歷史紀錄）
+  useEffect(() => {
+    if (tab === 'events') writeParams({ tab: 'us', section: 'events', filter: readParam('filter') }, { replace: true });
+  }, [tab]);
   // enabled: tab === 'us' ——使用者停留在 PR 或 IR 分頁時不建立上游市場
   // 查詢，切到「上游市場」分頁才開始訂閱，離開時立即取消監聽器。
   const { articles: upstreamArticles, status: upstreamStatus, refresh: refreshUpstreamNews } =
@@ -236,7 +240,6 @@ export default function App() {
           <nav className="flex gap-0.5 sm:gap-1 p-1 rounded-xl" style={{ background: 'rgba(0,0,0,0.35)' }}>
             {[
               { id: 'pr', icon: 'megaphone', label: 'PR 媒體戰情' },
-              { id: 'events', icon: 'radar', label: '事件中心' },
               { id: 'ir', icon: 'trend', label: 'IR 投資情報' },
               { id: 'us', icon: 'globe', label: '上游市場' },
               { id: 'health', icon: 'activity', label: '系統健康' },
@@ -316,15 +319,14 @@ export default function App() {
               topics={topics}
               topicsStatus={topicsStatus}
             />
-          ) : tab === 'events' ? (
-            <EventCenterTab topics={topics} status={topicsStatus} onRetry={refreshTopics} />
-          ) : tab === 'us' ? (
+          ) : tab === 'events' ? null : tab === 'us' ? (
             <USMarketTab
               upstreamArticles={upstreamArticles}
               upstreamStatus={upstreamStatus}
               refreshUpstreamNews={refreshUpstreamNews}
               topics={topics}
               topicsStatus={topicsStatus}
+              refreshTopics={refreshTopics}
             />
           ) : tab === 'health' ? (
             <HealthTab />

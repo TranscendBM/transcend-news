@@ -18,9 +18,10 @@ export function resetRememberedSections() {
 export function useSectionNav(tab, ids, fallback) {
   const [section] = useUrlParam('section', ids, fallback);
   lastSection[tab] = section === fallback ? null : section;
-  const navigate = useCallback(next => {
+  // extra：換子頁時一併改的其他網址參數（例如離開「事件」子頁時清掉 filter）
+  const navigate = useCallback((next, extra) => {
     lastSection[tab] = next === fallback ? null : next;
-    writeParams({ tab, section: next });
+    writeParams({ tab, section: next, ...extra });
     try { window.scrollTo(0, 0); } catch { /* 非瀏覽器環境略過 */ }
   }, [tab, fallback]);
   return [section, navigate];
