@@ -40,7 +40,7 @@ export default function EventCard({ topic, open, onToggle, allArticles, onShowAl
   const detailId = `event-${topic.id}`;
   const rising = isRising(topic);
   return (
-    <article className="rounded-xl border border-gray-700/40 bg-gray-800/40" data-testid="event-card">
+    <article className="list-row rounded-xl border border-gray-700/40 bg-gray-800/40" data-testid="event-card">
       <button onClick={onToggle} aria-expanded={open} aria-controls={detailId}
         className="w-full text-left p-3 flex items-start gap-3 hover:bg-gray-800 rounded-xl transition">
         <Icon name="chevronright" className={`mt-1 text-gray-500 transition-transform shrink-0 ${open ? 'rotate-90' : ''}`} />

@@ -101,7 +101,7 @@ export default function MatchReviewPanel({ records = [], status = 'ready', sync 
       ) : (
         <ul className="space-y-2" data-testid="review-list">
           {more.shown.map(({ record: r, status: st }) => (
-            <li key={r.id} className="rounded-xl border border-gray-700/40 bg-gray-800/40 p-3" data-testid="review-item">
+            <li key={r.id} className="list-row rounded-xl border border-gray-700/40 bg-gray-800/40 p-3" data-testid="review-item">
               <div className="flex flex-wrap items-center gap-1.5 mb-1">
                 <span className={tagClass(STATUS_TONES[st])}>{REVIEW_STATUSES[st]}</span>
                 {r.matchConfidence !== null && <span className={tagClass('gray')}>信心 {percentText(r.matchConfidence)}</span>}

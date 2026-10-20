@@ -10,7 +10,7 @@ export default function NewsCard({ article, showBrand = false }) {
   const media = article.mediaName || article.sourceName || '媒體';
   return (
     <a href={article.link || '#'} target="_blank" rel="noreferrer"
-      className="flex items-start gap-2.5 p-3 rounded-xl bg-gray-800/40 hover:bg-gray-800 border border-gray-700/40 hover:border-gray-600 transition-all group cursor-pointer">
+      className="list-row flex items-start gap-2.5 p-3 rounded-xl bg-gray-800/40 hover:bg-gray-800 border border-gray-700/40 hover:border-gray-600 transition-all group cursor-pointer">
       <div className="flex-1 min-w-0">
         {showBrand && (
           <span data-testid="brand-tag" className="inline-block mb-1 mr-1.5 px-2 py-0.5 rounded-full text-xs font-semibold text-white align-middle"

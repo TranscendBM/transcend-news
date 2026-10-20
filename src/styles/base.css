@@ -37,6 +37,8 @@ body { font-family: 'Segoe UI', system-ui, -apple-system, sans-serif; background
 .light-theme .border-gray-600,
 .light-theme .border-gray-600\/50,
 .light-theme .border-gray-600\/60 { border-color:transparent !important; }
+/* 列表項目的分隔：淺色主題下 border-gray-700/* 是透明的，列表項目用 list-row 才看得出邊界 */
+.light-theme .list-row { border-color:#d5dde6 !important; }
 .light-theme .text-gray-200,
 .light-theme .text-gray-300 { color:#334155 !important; }
 .light-theme .text-gray-400 { color:#475569 !important; }
