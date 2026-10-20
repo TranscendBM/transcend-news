@@ -1,4 +1,5 @@
 import { inPeriod, sortByDate, taipeiPeriodRange } from '../../utils/dates.js';
+import { COMPETITORS } from '../../config/competitors.js';
 import { dedupeArticlesByTitle, isValidTranscendPR } from '../../utils/news.js';
 
 // PR 媒體戰情各子頁共用的「資料選取」規則。總覽、新聞監測、競品動態都用這裡的函式，
@@ -19,6 +20,22 @@ export const COMPETITOR_TIME_FILTERS = [
   { id: 'lastMonth', label: '上月' },
   { id: 'all', label: '已載入資料' },
 ];
+
+/** 品牌曝光量表的期間欄（不含「已載入資料」）。 */
+export const BRAND_COUNT_PERIODS = COMPETITOR_TIME_FILTERS.filter(f => f.id !== 'all');
+
+/**
+ * 各競品品牌的新聞曝光則數：每個品牌 × 今天／本週／本月／上月。
+ * 與下方清單共用 selectCompetitorNews（同樣的去重、排除 CMoney 規則），數字一定對得上清單筆數。
+ * 回傳 [{ id, name, color, counts: { today, week, month, lastMonth } }]，最後一列 id='all' 為全部品牌合計（跨品牌去重後）。
+ */
+export function brandExposureCounts(news, now = new Date()) {
+  const row = brand => Object.fromEntries(BRAND_COUNT_PERIODS.map(p => [p.id, selectCompetitorNews(news, { brand, timeFilter: p.id, now }).length]));
+  return [
+    ...COMPETITORS.map(c => ({ id: c.id, name: c.name, color: c.color, counts: row(c.id) })),
+    { id: 'all', name: '全部品牌', color: null, counts: row('all') },
+  ];
+}
 
 /** 時間篩選：創見最新報導用的 4 個選項（今天／本週／本月／上月）。 */
 export const PR_LIST_TIME_FILTERS = [
