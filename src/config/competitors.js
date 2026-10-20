@@ -1,11 +1,12 @@
+// newsUrl：該公司官網的最新消息頁（競品動態表格的外部連結；宜鼎繁中站沒有新聞頁，連到英文站）
 // 創見與競品的共用設定：跨 PR/IR 分頁與 App 本身（頁首股價 ticker）
 // 共用，避免同一份資料在多個檔案各自宣告一份、日後改一邊漏改另一邊。
 export const COMPETITORS = [
-  { id: 'ADATA', name: 'ADATA 威剛', stock: '3260', color: '#ef4444' },
-  { id: 'Innodisk', name: 'Innodisk 宜鼎', stock: '5289', color: '#eab308' },
-  { id: 'Teamgroup', name: 'Teamgroup 十銓', stock: '4967', color: '#f97316' },
-  { id: 'Apacer', name: 'Apacer 宇瞻', stock: '8271', color: '#22c55e' },
-  { id: 'Silicon Power', name: 'Silicon Power 廣穎', stock: '4973', color: '#3b82f6' },
+  { id: 'ADATA', name: 'ADATA 威剛', stock: '3260', color: '#ef4444', newsUrl: 'https://www.adata.com/tw/news/' },
+  { id: 'Innodisk', name: 'Innodisk 宜鼎', stock: '5289', color: '#eab308', newsUrl: 'https://www.innodisk.com/en/news' },
+  { id: 'Teamgroup', name: 'Teamgroup 十銓', stock: '4967', color: '#f97316', newsUrl: 'https://www.teamgroupinc.com/tw/news/' },
+  { id: 'Apacer', name: 'Apacer 宇瞻', stock: '8271', color: '#22c55e', newsUrl: 'https://www.apacer.com/zh-tw/news/news-and-events' },
+  { id: 'Silicon Power', name: 'Silicon Power 廣穎', stock: '4973', color: '#3b82f6', newsUrl: 'https://www.silicon-power.com/tw/news/' },
 ];
 
 // 統一的競品顯示順序（威剛／宜鼎／十銓／宇瞻／廣穎）。
