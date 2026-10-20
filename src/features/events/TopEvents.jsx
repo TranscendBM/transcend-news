@@ -19,7 +19,7 @@ export default function TopEvents({ topics, status, tag, keywords, limit = 3, em
       {list.map(t => (
         <li key={t.id}>
           <button onClick={() => openEventCenter(tag || 'all')} aria-label={`查看事件：${t.title}`}
-            className="w-full text-left rounded-xl border border-gray-700/40 bg-gray-800/40 hover:bg-gray-800 p-2.5 transition">
+            className="list-row w-full text-left rounded-xl border border-gray-700/40 bg-gray-800/40 hover:bg-gray-800 p-2.5 transition">
             <p className="text-sm font-medium text-ink leading-snug line-clamp-2">{t.title}</p>
             <div className="flex flex-wrap items-center gap-1.5 mt-1.5 text-xs text-gray-500">
               <span>{t.articleCount} 篇｜{t.mediaCount} 家媒體</span>

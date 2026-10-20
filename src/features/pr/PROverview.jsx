@@ -59,7 +59,7 @@ function ExposureSummary({ records, status, onRetry }) {
           ['新聞稿／主題', perf.topicCount, '依標題彙整'],
           ['最近曝光', fmtDay(perf.latestDate), ''],
         ].map(([label, value, hint]) => (
-          <div key={label} className="rounded-xl border border-gray-700/40 bg-gray-800/40 p-2.5 text-center">
+          <div key={label} className="list-row rounded-xl border border-gray-700/40 bg-gray-800/40 p-2.5 text-center">
             <p className="text-xs text-gray-500">{label}</p>
             <p className="text-lg font-bold text-ink mt-0.5 tabular-nums">{value}</p>
             {hint && <p className="text-xs text-gray-600">{hint}</p>}

@@ -60,7 +60,7 @@ const btnCls = 'text-sm px-3.5 py-1.5 rounded-lg border border-gray-700/60 text-
 
 function Kpi({ label, value, hint }) {
   return (
-    <div className="rounded-xl border border-gray-700/40 bg-gray-800/40 p-3 text-center">
+    <div className="list-row rounded-xl border border-gray-700/40 bg-gray-800/40 p-3 text-center">
       <p className="text-xs text-gray-500">{label}</p>
       <p className="text-2xl font-bold text-ink mt-1 tabular-nums">{value}</p>
       {hint && <p className="text-xs text-gray-600 mt-0.5">{hint}</p>}
@@ -78,7 +78,7 @@ function ExposureLink({ record }) {
 function TopicRow({ topic, open, onToggle, onExport }) {
   const detailId = `exposure-topic-${topic.key.replace(/[^a-z0-9]/gi, '').slice(0, 24)}-${topic.total}`;
   return (
-    <div className="rounded-xl border border-gray-700/40 bg-gray-800/40">
+    <div className="list-row rounded-xl border border-gray-700/40 bg-gray-800/40">
       <button onClick={onToggle} aria-expanded={open} aria-controls={detailId}
         className="w-full text-left p-3 flex items-start gap-3 hover:bg-gray-800 rounded-xl transition">
         <Icon name="chevronright" className={`mt-1 text-gray-500 transition-transform ${open ? 'rotate-90' : ''}`} />
