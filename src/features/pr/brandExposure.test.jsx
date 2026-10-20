@@ -48,3 +48,13 @@ describe('競品官網最新消息連結', () => {
     }
   });
 });
+
+describe('競品新聞列表的公司標籤', () => {
+  it('每則競品新聞前顯示品牌名稱標籤', () => {
+    const now = Date.now();
+    const news = [art('t1', 'ADATA', new Date(now).toISOString()), art('t2', 'Innodisk', new Date(now).toISOString())];
+    render(<PRStateProvider><CompetitorNews news={news} /></PRStateProvider>);
+    const tags = screen.getAllByTestId('brand-tag').map(t => t.textContent);
+    expect(tags.sort()).toEqual(['ADATA 威剛', 'Innodisk 宜鼎']);
+  });
+});
