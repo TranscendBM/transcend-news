@@ -74,7 +74,7 @@ describe('文案：人工彙整曝光 vs 人工確認配對', () => {
     const confirmedTopic = screen.getAllByText('人工確認配對').length;
     expect(confirmedTopic).toBeGreaterThan(0);
     // 自動配對的主題不會被標成人工確認配對
-    const auto = screen.getByText('創見推出64GB DDR5工業用記憶體', { selector: 'p' }).closest('.bg-gray-900');
+    const auto = screen.getByText('創見推出64GB DDR5工業用記憶體', { selector: 'p' }).closest('[class~="bg-gray-800/40"]');
     expect(within(auto).queryByText('人工確認配對')).toBeNull();
     expect(within(auto).getByText('稿單自動配對')).toBeTruthy();
   });
@@ -83,7 +83,7 @@ describe('文案：人工彙整曝光 vs 人工確認配對', () => {
 describe('配對信心與理由（畫面）', () => {
   it('自動配對主題顯示信心（最低值）、配對方式與理由', () => {
     render(<ExposurePerformancePanel records={RECORDS} status="ready" onRetry={vi.fn()} sync={SYNC} />);
-    const auto = screen.getByText('創見推出64GB DDR5工業用記憶體', { selector: 'p' }).closest('.bg-gray-900');
+    const auto = screen.getByText('創見推出64GB DDR5工業用記憶體', { selector: 'p' }).closest('[class~="bg-gray-800/40"]');
     const line = within(auto).getByTestId('topic-match').textContent;
     expect(line).toContain('信心 88%');                                                    // 兩則裡最低的 88%
     expect(line).toContain('高信心規則（日期＋多個關鍵詞）');
