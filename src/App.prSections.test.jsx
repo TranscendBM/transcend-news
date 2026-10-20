@@ -143,8 +143,9 @@ describe('PR 子頁籤 — 每個功能只出現在正確的子頁', () => {
     renderPR();
     const card = cardOf('競品動態監測');
     ['全部', 'ADATA 威剛', 'Innodisk 宜鼎', 'Teamgroup 十銓', 'Apacer 宇瞻', 'Silicon Power 廣穎'].forEach(t =>
-      expect(within(card).getByText(t), t).toBeTruthy());
-    ['今天', '本週', '本月', '上月', '已載入資料'].forEach(t => expect(within(card).getByText(t)).toBeTruthy());
+      expect(within(card).getAllByText(t).length, t).toBeGreaterThan(0));
+    ['今天', '本週', '本月', '上月', '已載入資料'].forEach(t => expect(within(card).getAllByText(t).length).toBeGreaterThan(0));
+    expect(within(card).getByTestId('brand-exposure')).toBeTruthy();        // 各品牌新聞曝光數量表
     expect(within(card).queryByText('本年')).toBeNull();      // 新聞只保留本月＋上個月，沒有本年
     expect(screen.queryByPlaceholderText(NEWS_TOOLBAR)).toBeNull();
     expect(screen.queryByLabelText('依媒體篩選')).toBeNull();
@@ -232,8 +233,8 @@ describe('PR 子頁籤 — 狀態保存', () => {
   it('競品動態的品牌與期間、曝光成效的篩選與展開狀態，切換子頁後都保留', () => {
     setUrl('?section=competitors');
     renderPR();
-    fireEvent.click(within(cardOf('競品動態監測')).getByText('Innodisk 宜鼎'));
-    fireEvent.click(within(cardOf('競品動態監測')).getByText('上月'));
+    fireEvent.click(within(cardOf('競品動態監測')).getAllByText('Innodisk 宜鼎').at(-1));
+    fireEvent.click(within(cardOf('競品動態監測')).getAllByText('上月').at(-1));
 
     clickTab('曝光成效');
     type(screen.getByLabelText('曝光媒體篩選'), '經濟日報');
@@ -243,8 +244,8 @@ describe('PR 子頁籤 — 狀態保存', () => {
 
     clickTab('總覽');
     clickTab('競品動態');
-    expect(within(cardOf('競品動態監測')).getByText('Innodisk 宜鼎').className).toContain('text-white');
-    expect(within(cardOf('競品動態監測')).getByText('上月').className).toContain('text-white');
+    expect(within(cardOf('競品動態監測')).getAllByText('Innodisk 宜鼎').at(-1).className).toContain('text-white');
+    expect(within(cardOf('競品動態監測')).getAllByText('上月').at(-1).className).toContain('text-white');
 
     clickTab('曝光成效');
     expect(screen.getByLabelText('曝光媒體篩選').value).toBe('經濟日報');
@@ -258,7 +259,7 @@ describe('PR 子頁籤 — 狀態保存', () => {
     renderPR();
     type(screen.getByLabelText('依媒體篩選'), '經濟日報');
     clickTab('競品動態');
-    fireEvent.click(within(cardOf('競品動態監測')).getByText('ADATA 威剛'));
+    fireEvent.click(within(cardOf('競品動態監測')).getAllByText('ADATA 威剛').at(-1));
     expect(screen.queryByLabelText('依媒體篩選')).toBeNull();
     clickTab('新聞監測');
     expect(screen.getByLabelText('依媒體篩選').value).toBe('經濟日報');
