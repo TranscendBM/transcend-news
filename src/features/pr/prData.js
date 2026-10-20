@@ -32,7 +32,7 @@ export const BRAND_COUNT_PERIODS = COMPETITOR_TIME_FILTERS.filter(f => f.id !== 
 export function brandExposureCounts(news, now = new Date()) {
   const row = brand => Object.fromEntries(BRAND_COUNT_PERIODS.map(p => [p.id, selectCompetitorNews(news, { brand, timeFilter: p.id, now }).length]));
   return [
-    ...COMPETITORS.map(c => ({ id: c.id, name: c.name, color: c.color, counts: row(c.id) })),
+    ...COMPETITORS.map(c => ({ id: c.id, name: c.name, color: c.color, newsUrl: c.newsUrl, counts: row(c.id) })),
     { id: 'all', name: '全部品牌', color: null, counts: row('all') },
   ];
 }

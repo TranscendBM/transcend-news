@@ -1,5 +1,6 @@
 import { useMemo } from 'react';
 
+import Icon from '../../components/Icon.jsx';
 import Card from '../../components/Card.jsx';
 import TabBtn from '../../components/TabBtn.jsx';
 import ShowMoreButton, { useShowMore } from '../../components/ShowMore.jsx';
@@ -22,7 +23,7 @@ function BrandExposureTable({ news, active, timeFilter, onBrand, onPeriod }) {
     <div className="mb-4" data-testid="brand-exposure">
       <p className="text-xs text-gray-500 mb-1.5">各品牌新聞曝光數量（點品牌或期間可套用到下方清單）</p>
       <div className="overflow-x-auto rounded-xl border border-gray-700/60">
-        <table className="w-full text-sm min-w-[360px]">
+        <table className="w-full text-sm min-w-[440px]">
           <thead>
             <tr className="text-xs text-gray-500 bg-gray-800/40">
               <th scope="col" className="text-left font-medium px-3 py-2">品牌</th>
@@ -32,6 +33,7 @@ function BrandExposureTable({ news, active, timeFilter, onBrand, onPeriod }) {
                     className={`px-1.5 rounded ${timeFilter === p.id ? 'text-red-700 font-bold' : 'hover:text-gray-200'}`}>{p.label}</button>
                 </th>
               ))}
+              <th scope="col" className="px-3 py-2 text-right font-medium">官方消息</th>
             </tr>
           </thead>
           <tbody>
@@ -51,6 +53,12 @@ function BrandExposureTable({ news, active, timeFilter, onBrand, onPeriod }) {
                     )}
                   </td>
                 ))}
+                <td className="px-3 py-1.5 text-right">
+                  {r.newsUrl && (
+                    <a href={r.newsUrl} target="_blank" rel="noopener noreferrer" aria-label={`${r.name} 官網最新消息（另開新分頁）`}
+                      className="text-xs text-blue-600 hover:underline whitespace-nowrap">最新消息 <Icon name="external" /></a>
+                  )}
+                </td>
               </tr>
             ))}
           </tbody>

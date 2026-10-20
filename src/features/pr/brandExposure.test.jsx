@@ -35,3 +35,16 @@ describe('各品牌新聞曝光數量', () => {
     expect(within(table).getByRole('button', { name: '上月' }).getAttribute('aria-pressed')).toBe('true');
   });
 });
+
+describe('競品官網最新消息連結', () => {
+  it('每個競品列都有另開分頁的官網最新消息連結，合計列沒有', () => {
+    render(<PRStateProvider><CompetitorNews news={[]} /></PRStateProvider>);
+    const links = within(screen.getByTestId('brand-exposure')).getAllByRole('link');
+    expect(links).toHaveLength(5);
+    for (const a of links) {
+      expect(a.getAttribute('href')).toMatch(/^https:\/\//);
+      expect(a.getAttribute('target')).toBe('_blank');
+      expect(a.getAttribute('rel')).toContain('noopener');
+    }
+  });
+});
