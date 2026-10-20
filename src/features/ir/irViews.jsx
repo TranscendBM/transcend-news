@@ -118,12 +118,12 @@ export function RecentMaterialList({ material, limit = 5, status }) {
   const rows = useMemo(() => sortMaterial(material).slice(0, limit), [material, limit]);
   if (!rows.length) return <p className="text-sm text-gray-500 text-center py-4">{noData(status)}</p>;
   return (
-    <ul className="space-y-1.5">
+    <ul className="divide-y divide-gray-800/50">
       {rows.map((r, i) => {
         const link = safeHttpUrl(r.link);
         const name = (STOCK_META[r.code] && STOCK_META[r.code].name) || r.name || r.code;
         return (
-          <li key={`${r.code}|${r.date}|${i}`} className="flex items-start gap-2 text-sm">
+          <li key={`${r.code}|${r.date}|${i}`} className="flex items-start gap-2 text-sm py-2">
             <span className="font-semibold text-ink shrink-0">{name}</span>
             <span className="text-gray-500 shrink-0 tabular-nums">{r.date}</span>
             {link

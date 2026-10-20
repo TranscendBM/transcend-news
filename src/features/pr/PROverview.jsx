@@ -59,7 +59,7 @@ function ExposureSummary({ records, status, onRetry }) {
           ['新聞稿／主題', perf.topicCount, '依標題彙整'],
           ['最近曝光', fmtDay(perf.latestDate), ''],
         ].map(([label, value, hint]) => (
-          <div key={label} className="rounded-xl border border-gray-700/60 bg-gray-900 p-2.5 text-center">
+          <div key={label} className="rounded-xl border border-gray-700/40 bg-gray-800/40 p-2.5 text-center">
             <p className="text-xs text-gray-500">{label}</p>
             <p className="text-lg font-bold text-ink mt-0.5 tabular-nums">{value}</p>
             {hint && <p className="text-xs text-gray-600">{hint}</p>}
@@ -68,9 +68,9 @@ function ExposureSummary({ records, status, onRetry }) {
       </div>
       <p className="text-xs text-gray-500 mt-2" data-testid="overview-exposure-scope">{coverageScopeText(scope, perf.total)}</p>
       <p className="text-xs text-gray-500 mt-3 mb-1.5">最近的新聞稿／主題</p>
-      <ul className="space-y-1.5">
+      <ul className="divide-y divide-gray-800/50">
         {latestTopics.map(t => (
-          <li key={t.key} className="flex items-start gap-2 text-sm">
+          <li key={t.key} className="flex items-start gap-2 text-sm py-2">
             <span className="min-w-0 flex-1 text-ink leading-snug line-clamp-2">{t.name}</span>
             <span className="shrink-0 text-xs text-gray-500 tabular-nums">{t.total} 則・{fmtDay(t.lastDate)}</span>
           </li>

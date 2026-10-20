@@ -16,7 +16,7 @@ const inputCls = 'min-w-0 max-w-full rounded-xl border border-gray-700/60 px-3 p
 
 function Stat({ label, value, tone = '' }) {
   return (
-    <div className="rounded-xl border border-gray-700/60 bg-gray-900 p-3 text-center min-w-0">
+    <div className="rounded-xl border border-gray-700/40 bg-gray-800/40 p-3 text-center min-w-0">
       <p className="text-xs text-gray-500 truncate">{label}</p>
       <p className={`text-2xl font-bold mt-1 tabular-nums ${tone || 'text-ink'}`}>{value}</p>
     </div>

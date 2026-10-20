@@ -40,9 +40,9 @@ export default function EventCard({ topic, open, onToggle, allArticles, onShowAl
   const detailId = `event-${topic.id}`;
   const rising = isRising(topic);
   return (
-    <article className="rounded-xl border border-gray-700/60 bg-gray-900" data-testid="event-card">
+    <article className="rounded-xl border border-gray-700/40 bg-gray-800/40" data-testid="event-card">
       <button onClick={onToggle} aria-expanded={open} aria-controls={detailId}
-        className="w-full text-left p-3 flex items-start gap-3 hover:bg-gray-800/30 rounded-xl transition">
+        className="w-full text-left p-3 flex items-start gap-3 hover:bg-gray-800 rounded-xl transition">
         <Icon name="chevronright" className={`mt-1 text-gray-500 transition-transform shrink-0 ${open ? 'rotate-90' : ''}`} />
         <div className="min-w-0 flex-1">
           <h3 className="text-sm font-semibold text-ink leading-snug break-words">{topic.title}</h3>
@@ -70,7 +70,7 @@ export default function EventCard({ topic, open, onToggle, allArticles, onShowAl
         </div>
       </button>
       {open && (
-        <div id={detailId} className="px-3 pb-3 border-t border-gray-700/60 pt-2">
+        <div id={detailId} className="px-3 pb-3 border-t border-gray-800/50 pt-2">
           <p className="text-xs text-gray-500 mb-1">原始新聞（新到舊）</p>
           {topic.articles.length > 0
             ? <ArticleList articles={topic.articles} showAll={allArticles} onShowAll={onShowAllArticles} />
