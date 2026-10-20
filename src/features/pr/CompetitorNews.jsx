@@ -56,7 +56,7 @@ function BrandExposureTable({ news, active, timeFilter, onBrand, onPeriod }) {
                 <td className="px-3 py-1.5 text-right">
                   {r.newsUrl && (
                     <a href={r.newsUrl} target="_blank" rel="noopener noreferrer" aria-label={`${r.name} 官網最新消息（另開新分頁）`}
-                      className="text-xs text-blue-600 hover:underline whitespace-nowrap">最新消息 <Icon name="external" /></a>
+                      className="text-sm font-medium text-blue-600 hover:underline whitespace-nowrap inline-flex items-center gap-1 py-1">最新消息 <Icon name="external" /></a>
                   )}
                 </td>
               </tr>
