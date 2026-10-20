@@ -105,7 +105,7 @@ export function CompetitorNews({ news }) {
 
       {filtered.length > 0
         ? <>
-            <div className="space-y-2">{more.shown.map((n, i) => <NewsCard key={n.id || i} article={n} />)}</div>
+            <div className="space-y-2">{more.shown.map((n, i) => <NewsCard key={n.id || i} article={n} showBrand />)}</div>
             <ShowMoreButton remaining={more.remaining} step={80} onMore={more.showMore} onAll={more.showAll} />
           </>
         : <p className="text-sm text-gray-600 text-center py-8">

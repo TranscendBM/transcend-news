@@ -111,7 +111,7 @@ export function PROverview({
 
         <PRSummaryCard title="競品最新動態" icon="target" onViewAll={() => onNavigate('competitors')}>
           {latestCompetitors.length > 0
-            ? <div className="space-y-2">{latestCompetitors.map((n, i) => <NewsCard key={n.id || i} article={n} />)}</div>
+            ? <div className="space-y-2">{latestCompetitors.map((n, i) => <NewsCard key={n.id || i} article={n} showBrand />)}</div>
             : <ListMessage>暫無競品報導</ListMessage>}
         </PRSummaryCard>
       </div>
