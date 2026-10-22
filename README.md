@@ -66,9 +66,12 @@ ollama pull gemma3:4b
 同時處理同一筆。新聞文字一律視為不可信外部資料，不會授予模型工具、
 系統指令或對外發送能力。
 
-## 📧 DRAM/Flash 產業新聞摘要信（`functions/digest.py`，Phase 1）
+## 📧 DRAM/Flash 產業新聞摘要信（`functions/digest.py`，Phase 1）— ⏸ 已停止
 
-平日自動寄出重要 DRAM/Flash 產業新聞摘要信（`functions/main.py`
+> **2026-10 起已停止寄送**：`tw_dram_digest_job`／`us_dram_digest_job` 已從 `functions/main.py` 移除並刪除雲端排程函式。
+> `digest.py` 與 Secret `MAIL2000_SMTP_PASSWORD` 保留；要恢復需把兩個排程函式加回 `main.py` 再部署。以下為停止前的設計紀錄。
+
+（停止前）平日自動寄出重要 DRAM/Flash 產業新聞摘要信（`functions/main.py`
 `tw_dram_digest_job` / `us_dram_digest_job`）：
 
 | 排程 | 時間（台灣時間，平日） | 內容 |

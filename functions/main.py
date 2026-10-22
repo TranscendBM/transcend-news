@@ -11,8 +11,7 @@
   trading_job    交易日 13:40 / 17:10           每日開收盤 + 三大法人
   finance_job    每天 17:30                     月營收/季損益/股利/重大訊息
   finance_early_month_job  每月 1–10 日 09–18 時每小時（申報期加密）
-  tw_dram_digest_job  平日 08:00                台灣 DRAM/Flash 產業新聞摘要信
-  us_dram_digest_job  平日 16:30                美國 DRAM/Flash 產業新聞摘要信
+  （產業新聞摘要信 tw/us_dram_digest_job 已停止寄送並移除排程）
   news_cleanup_job    每天 02:30                新聞保存期限清理（只留本月＋上個月）
   ai_worker_health_job  每天 02:35              彙總本機 AI worker 積壓狀況（ai_jobs/ai_insights）
   topic_cluster_job      每 30 分鐘              把近期新增的新聞聚成話題（news_topics，事件中心）
@@ -163,31 +162,10 @@ def finance_early_month_job(event: scheduler_fn.ScheduledEvent) -> None:
                 ttl_minutes=12)
 
 
-# ─── DRAM/Flash 產業新聞摘要信（Phase 1，規則版摘要，零 API 費用）───
-# 平日 08:00 寄台灣新聞、16:30 寄美國新聞；兩者各自獨立追蹤「上次寄送
-# 時間」（meta/digest_tw、meta/digest_us），互不影響，遇到週末也不會
-# 漏掉——週一 08:00 那次會自動涵蓋整個週末（上次寄送時間是上週五 08:00）。
-@scheduler_fn.on_schedule(
-    schedule='0 8 * * 1-5', timezone=TZ, region=REGION,
-    memory=MemoryOption.MB_256, timeout_sec=120, max_instances=1,
-    secrets=[MAIL2000_SMTP_PASSWORD])
-def tw_dram_digest_job(event: scheduler_fn.ScheduledEvent) -> None:
-    def work(db):
-        result = digest.run_digest(db, 'tw', MAIL2000_SMTP_PASSWORD.value)
-        print(f"  ✉ 台灣 DRAM/Flash 新聞摘要已寄出（{result['count']} 則）")
-    _run_locked('digest_tw', work, ttl_minutes=5)
-
-
-@scheduler_fn.on_schedule(
-    schedule='30 16 * * 1-5', timezone=TZ, region=REGION,
-    memory=MemoryOption.MB_256, timeout_sec=120, max_instances=1,
-    secrets=[MAIL2000_SMTP_PASSWORD])
-def us_dram_digest_job(event: scheduler_fn.ScheduledEvent) -> None:
-    def work(db):
-        result = digest.run_digest(db, 'us', MAIL2000_SMTP_PASSWORD.value)
-        print(f"  ✉ 美國 DRAM/Flash 新聞摘要已寄出（{result['count']} 則）")
-    _run_locked('digest_us', work, ttl_minutes=5)
-
+# ─── DRAM/Flash 產業新聞摘要信：已停止（2026-10）───
+# tw_dram_digest_job（平日 08:00）與 us_dram_digest_job（平日 16:30）已移除排程。
+# digest.py 與 Secret MAIL2000_SMTP_PASSWORD 保留；要恢復時，參考 git 歷史把兩個
+# @scheduler_fn.on_schedule 函式加回來（各自用鎖 digest_tw／digest_us）再部署即可。
 
 # ─── 新聞保存期限清理：只保留本月＋上個月（Asia/Taipei 日曆月份，見 news_cleanup.py）───
 # 每天凌晨低峰期執行一次，使用獨立鎖 news_cleanup（跟每 15 分鐘一次的

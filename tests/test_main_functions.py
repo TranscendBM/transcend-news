@@ -168,7 +168,6 @@ class TestScheduledEntrypoints(unittest.TestCase):
     def test_all_jobs_have_max_instances_1(self):
         jobs = [main.stocks_job, main.news_job,
                 main.trading_job, main.finance_job, main.finance_early_month_job,
-                main.tw_dram_digest_job, main.us_dram_digest_job,
                 main.news_cleanup_job, main.ai_worker_health_job,
                 main.press_release_sync_job, main.topic_cluster_job]
         for job in jobs:
@@ -180,7 +179,6 @@ class TestScheduledEntrypoints(unittest.TestCase):
         # (job, 對應 _run_locked ttl_minutes)——與 main.py 內設定同步維護
         ttls = {'stocks_job': 3, 'news_job': 12,
                 'trading_job': 8, 'finance_job': 12, 'finance_early_month_job': 12,
-                'tw_dram_digest_job': 5, 'us_dram_digest_job': 5,
                 'news_cleanup_job': 15, 'ai_worker_health_job': 5,
                 'press_release_sync_job': 8, 'topic_cluster_job': 8}
         for job_name, ttl in ttls.items():
@@ -188,19 +186,10 @@ class TestScheduledEntrypoints(unittest.TestCase):
             self.assertGreater(ttl * 60, timeout_sec,
                                f'{job_name}: 鎖 TTL({ttl}分) 必須 > timeout({timeout_sec}秒)')
 
-    def test_digest_jobs_use_independent_locks(self):
-        names = []
-        with patch.object(main, '_run_locked', side_effect=lambda n, *a, **k: names.append(n)):
-            main.tw_dram_digest_job(None)
-            main.us_dram_digest_job(None)
-        self.assertEqual(names, ['digest_tw', 'digest_us'],
-                         '台灣/美國摘要信各自獨立追蹤寄送進度，不得共用同一把鎖')
-
-    def test_digest_jobs_require_email_secret(self):
-        for job_name in ('tw_dram_digest_job', 'us_dram_digest_job'):
-            secrets = getattr(main, job_name)._schedule_opts['secrets']
-            self.assertIn(main.MAIL2000_SMTP_PASSWORD, secrets,
-                         f'{job_name} 必須帶入 MAIL2000_SMTP_PASSWORD 才能寄信')
+    def test_digest_jobs_are_removed(self):
+        # 每日產業新聞摘要信已停止：排程函式不得再存在，避免誤部署後恢復寄信
+        self.assertFalse(hasattr(main, 'tw_dram_digest_job'))
+        self.assertFalse(hasattr(main, 'us_dram_digest_job'))
 
     def test_finmind_dependent_jobs_require_finmind_secret(self):
         # stocks_job/trading_job/finance_job/finance_early_month_job 都會呼叫
@@ -274,8 +263,7 @@ class TestScheduledEntrypoints(unittest.TestCase):
         self.assertEqual(opts['timezone'], main.TZ)
         self.assertEqual(opts['region'], main.REGION)
         self.assertEqual(opts['max_instances'], 1)
-        # 同專案 ADC 不需要任何 Secret；只有寄信的兩個 digest job 才需要
-        # MAIL2000_SMTP_PASSWORD，清理本身完全不用帶 secrets。
+        # 同專案 ADC 不需要任何 Secret；清理本身完全不用帶 secrets。
         self.assertNotIn('secrets', opts,
                          '清理只需要同專案 ADC 寫入權限，不需要任何 Secret')
 
