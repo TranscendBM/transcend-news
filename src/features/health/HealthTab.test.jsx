@@ -130,3 +130,43 @@ describe('HealthTab — 重新檢查', () => {
     expect(getDocs.mock.calls.length).toBeGreaterThan(callsBefore);
   });
 });
+
+describe('HealthTab — 整體狀態與分組', () => {
+  const okJob = () => ({ lastSuccessAt: ts(new Date(Date.now() - 5 * 60 * 1000)), lastError: null });
+
+  it('有執行失敗的排程：整體顯示「異常」，失敗的排在「需要處理」最前面，正常的在「運作正常」', async () => {
+    setupMocks({ jobStatus: {
+      news: okJob(),
+      finance: { lastSuccessAt: null, lastError: 'FinMind HTTP 402', lastErrorAt: ts(new Date()) },
+    } });
+    render(<HealthTab />);
+    expect(await screen.findByText(/異常：有排程執行失敗/)).toBeTruthy();
+    const attention = screen.getByRole('region', { name: /需要處理/ });
+    const first = within(attention).getAllByText(/./, { selector: 'p.text-sm' })[0];
+    expect(first.textContent).toContain('財務資料');            // 失敗的排最前面
+    expect(within(screen.getByRole('region', { name: /運作正常/ })).getByText('RSS 新聞')).toBeTruthy();
+  });
+
+  it('全部正常：整體顯示「整體正常」，沒有「需要處理」區塊', async () => {
+    const fresh = okJob();
+    setupMocks({
+      jobStatus: { stocks: fresh, news: fresh, trading: fresh, finance: fresh, press_release_sync: fresh, topic_cluster: fresh, news_cleanup: fresh,
+        ai_worker: { pendingCount: 0, lastInsightAt: ts(new Date()) } },
+      stocks: { '2451': { price: 300, updatedAt: ts(new Date()) } },
+      daily: { updatedAt: ts(new Date()) }, revenue: { updatedAt: ts(new Date()) }, latestNews: ts(new Date()),
+    });
+    render(<HealthTab />);
+    expect(await screen.findByText('整體正常')).toBeTruthy();
+    expect(screen.queryByRole('region', { name: /需要處理/ })).toBeNull();
+  });
+
+  it('技術細節預設收合，展開後才顯示函式名稱（aria-expanded）；已停止的每日摘要信排程不再列出', async () => {
+    setupMocks({ jobStatus: { news: okJob() } });
+    render(<HealthTab />);
+    await screen.findByText('RSS 新聞');
+    expect(screen.queryByText(/news_job/)).toBeNull();
+    fireEvent.click(within(screen.getByText('RSS 新聞').closest('div.border-b')).getByRole('button', { name: /技術細節/ }));
+    expect(screen.getByText(/news_job/)).toBeTruthy();
+    expect(screen.queryByText(/DRAM\/Flash 產業摘要信/)).toBeNull();
+  });
+});

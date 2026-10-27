@@ -42,6 +42,10 @@ const PATHS = {
   undo: 'M9 14L4 9l5-5 M4 9h10a6 6 0 0 1 0 12h-3',
   clock: 'M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18z M12 7v5l3 2',
   dot: 'M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6z',
+  filter: 'M3 5h18l-7 8v6l-4-2v-4z',
+  close: 'M6 6l12 12 M18 6L6 18',
+  chevrondown: 'M6 9l6 6 6-6',
+  chevronup: 'M6 15l6-6 6 6',
 };
 
 export const ICON_NAMES = Object.keys(PATHS);

@@ -1,10 +1,12 @@
 import { useState, useEffect, useMemo, lazy, Suspense } from 'react';
 
 import { getDb, doc, onSnapshot, getDoc } from './services/firebase.js';
-import Spinner from './components/Spinner.jsx';
 import StockCountdown from './components/StockCountdown.jsx';
-import Icon from './components/Icon.jsx';
-import TranscendMark from './components/logos/TranscendMark.jsx';
+import AppShell from './components/shell/AppShell.jsx';
+import GlobalHeader from './components/shell/GlobalHeader.jsx';
+import PrimaryNavigation from './components/shell/PrimaryNavigation.jsx';
+import LoadingSkeleton from './components/ui/LoadingSkeleton.jsx';
+import MarketSummary from './components/shell/MarketSummary.jsx';
 import { useNewsFeed } from './features/news/useNewsFeed.js';
 import { usePRNews } from './features/news/usePRNews.js';
 import { useUpstreamNews } from './features/news/useUpstreamNews.js';
@@ -21,6 +23,14 @@ import { COMPETITORS, STOCK_META } from './config/competitors.js';
 // 主分頁存在網址 ?tab=（pr／ir／us／health；沒有或不認識的值 → pr），上一頁／下一頁會切換分頁。
 // 'events' 只是舊網址的別名：事件已整合進「上游市場 → 事件」，見下方的導向
 const TAB_IDS = ['pr', 'events', 'ir', 'us', 'health'];
+
+// 第一層導覽（「事件」已整合進上游市場的子頁，所以不在這裡）
+const NAV_ITEMS = [
+  { id: 'pr', icon: 'megaphone', label: 'PR 媒體戰情' },
+  { id: 'ir', icon: 'trend', label: 'IR 投資情報' },
+  { id: 'us', icon: 'globe', label: '上游市場' },
+  { id: 'health', icon: 'activity', label: '系統健康' },
+];
 
 const PRTab = lazy(() => import('./features/pr/PRTab.jsx').then(m => ({ default: m.PRTab })));
 const USMarketTab = lazy(() => import('./features/market/USMarketTab.jsx').then(m => ({ default: m.USMarketTab })));
@@ -217,95 +227,28 @@ export default function App() {
   );
 
   const self = stocks['2451'];
-  const updatedStr = updated ? updated.toLocaleTimeString('zh-TW', { hour: '2-digit', minute: '2-digit' }) : '';
+
+  const staleSelf = !!self && isStockStale(self);
+  const quotes = COMPETITORS.filter(c => c.stock && stocks[c.stock])
+    .map(c => ({ code: c.stock, name: STOCK_META[c.stock]?.name || c.name, stock: stocks[c.stock] }));
 
   return (
-    <div className="light-theme min-h-screen" style={{ background: '#f5f6f8', fontFamily: "'Segoe UI',system-ui,sans-serif" }}>
-
-      {/* ─────────── HEADER ─────────── */}
-      <header className="sticky top-0 z-50 shadow-2xl"
-        style={{ background: 'rgb(150,0,20)' }}>
-        <div className="max-w-7xl mx-auto px-2 sm:px-4 h-14 flex items-center justify-between gap-1.5 sm:gap-3">
-
-          {/* Logo */}
-          <div className="flex items-center gap-3 shrink-0">
-            <TranscendMark height={20} fill="white" />
-            <div className="border-l border-white/20 pl-3 hidden sm:block">
-              <p className="text-lg font-bold text-white/90 leading-tight tracking-wide">新聞監控</p>
-              <p className="text-xs text-red-200/60 leading-tight">News Intelligence</p>
-            </div>
-          </div>
-
-          {/* PR / IR / US tab switcher */}
-          <nav className="flex gap-0.5 sm:gap-1 p-1 rounded-xl" style={{ background: 'rgba(0,0,0,0.35)' }}>
-            {[
-              { id: 'pr', icon: 'megaphone', label: 'PR 媒體戰情' },
-              { id: 'ir', icon: 'trend', label: 'IR 投資情報' },
-              { id: 'us', icon: 'globe', label: '上游市場' },
-              { id: 'health', icon: 'activity', label: '系統健康' },
-            ].map(t => (
-              <button key={t.id} onClick={() => setTab(t.id)}
-                className={`flex items-center gap-1.5 px-2 sm:px-4 py-1.5 rounded-lg text-sm font-semibold transition-all ${tab === t.id ? 'text-white shadow' : 'text-red-200/60 hover:text-white'}`}
-                style={tab === t.id ? { background: 'rgba(0,0,0,0.5)' } : {}}>
-                <Icon name={t.icon} className="text-[1.25em]" />
-                <span className="hidden sm:inline">{t.label}</span>
-              </button>
-            ))}
-          </nav>
-
-          {/* Action buttons */}
-          <div className="flex items-center gap-2 shrink-0">
-            <button onClick={() => fetchAll()} disabled={loading}
-              className="flex items-center gap-1.5 px-2 sm:px-3 py-1.5 rounded-lg text-sm font-medium transition-all"
-              style={{ background: 'rgba(255,255,255,0.15)', border: '1px solid rgba(255,255,255,0.2)', color: 'white' }}>
-              {loading ? <Spinner /> : <Icon name="refresh" />}
-              <span className="hidden sm:inline">{loading ? '載入中' : '重新整理'}</span>
-            </button>
-          </div>
-        </div>
-      </header>
-
-      {/* ─────────── STATUS BAR ─────────── */}
-      <div style={{ background: '#ffffff', borderBottom: '1px solid #e5e7eb', boxShadow: '0 1px 2px rgba(15,23,42,.04)' }}>
-        <div className="max-w-7xl mx-auto px-4 h-8 flex items-center gap-4 text-xs overflow-x-auto whitespace-nowrap">
-          <span className={connected ? 'text-green-500' : 'text-yellow-500'}>
-            {connected ? '● Firebase 已連線' : '○ 連線中…'}
-          </span>
-          <span className="text-gray-600"><Icon name="news" /> {news.length} 則新聞</span>
-          {updatedStr && <span className="text-gray-600">更新 {updatedStr}</span>}
-          <StockCountdown resetSignal={stocks} onExpire={() => { fetchStocks(); fetchDaily(); }} />
-          {self && isStockStale(self) && (
-            <span className="text-amber-500" title={`交易時段中超過 30 分鐘未更新（${fmtStockUpdated(self)}）`}>
-              <Icon name="alert" /> 股價資料過期
-            </span>
-          )}
-          {self && (
-            <span className="text-gray-500">
-              創見 <span className={`font-semibold ${self.changePct >= 0 ? 'text-red-400' : 'text-green-400'}`}>
-                ${self.price} {self.changePct >= 0 ? '▲' : '▼'}{Math.abs(self.changePct ?? 0).toFixed(2)}%
-              </span>
-            </span>
-          )}
-          {COMPETITORS.filter(c => c.stock && stocks[c.stock]).map(c => {
-            const s = stocks[c.stock];
-            const shortName = STOCK_META[c.stock]?.name || c.name;
-            return (
-              <span key={c.stock} className="text-gray-500">
-                {shortName} <span className={`font-semibold ${s.changePct >= 0 ? 'text-red-400' : 'text-green-400'}`}>
-                  ${s.price} {s.changePct >= 0 ? '▲' : '▼'}{Math.abs(s.changePct ?? 0).toFixed(2)}%
-                </span>
-              </span>
-            );
-          })}
-        </div>
-      </div>
-
+    <AppShell
+      header={
+        <GlobalHeader connected={connected} updated={updated} loading={loading} onRefresh={() => fetchAll()}>
+          <PrimaryNavigation items={NAV_ITEMS} active={tab === 'events' ? 'us' : tab} onChange={setTab} />
+        </GlobalHeader>
+      }
+      summary={
+        <MarketSummary self={self} quotes={quotes} stale={staleSelf}
+          staleHint={self ? `交易時段中超過 30 分鐘未更新（${fmtStockUpdated(self)}）` : undefined}
+          countdown={<StockCountdown resetSignal={stocks} onExpire={() => { fetchStocks(); fetchDaily(); }} />} />
+      }>
       {/* ─────────── MAIN ─────────── */}
-      <main className="max-w-7xl mx-auto px-4 py-5">
         {/* 三個分頁都是 lazy load，切換分頁或重新整理時第一次進入該分頁
             會有短暫的載入態；fallback 維持跟原本「載入中」骨架一致的
             高度感，避免畫面跳動。 */}
-        <Suspense fallback={<div className="h-32 flex items-center justify-center text-gray-500 text-sm">載入中…</div>}>
+        <Suspense fallback={<LoadingSkeleton lines={4} className="py-6" />}>
           {tab === 'pr' ? (
             <PRTab
               news={news}
@@ -334,8 +277,6 @@ export default function App() {
             <IRTab news={news} stocks={stocks} community={community} revenue={revenue} financials={financials} dividends={dividends} material={material} daily={daily} compRev={compRev} loadErrors={loadErrors} loading={loading} />
           )}
         </Suspense>
-      </main>
-
-    </div>
+    </AppShell>
   );
 }

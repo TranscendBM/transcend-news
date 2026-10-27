@@ -170,7 +170,7 @@ describe('曝光分類 — PR 總覽', () => {
       mediaExposure={RECORDS} mediaExposureStatus="ready" refreshMediaExposure={vi.fn()} onNavigate={vi.fn()} />);
     const scope = screen.getByTestId('overview-exposure-scope');
     expect(scope.textContent).toBe('範圍：新聞稿衍生曝光（3 則）');
-    const card = scope.closest('.bg-gray-900');
+    const card = scope.closest('[data-card]');
     expect(within(card).getByText('人工彙整曝光').nextElementSibling.textContent).toBe('3');
   });
 });

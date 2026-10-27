@@ -339,7 +339,7 @@ describe('涉及創見：第二層嚴格判定', () => {
     expect(filterTopics(MIXED, { tag: 'transcend' })).toHaveLength(topicStats(MIXED, new Date()).transcend);
   });
 
-  it('PR 總覽的「涉及創見的重要事件」只列真正提到創見的，最多 3 則', () => {
+  it('PR 總覽的「需要注意的事件」只列真正提到創見的，最多 3 則', () => {
     render(<TopEvents topics={MIXED} status="ready" tag="transcend" limit={3} />);
     const items = within(screen.getByTestId('top-events')).getAllByRole('listitem');
     expect(items).toHaveLength(3);
@@ -455,7 +455,7 @@ describe('App 整合：事件中心頁籤', () => {
   it('舊網址 ?tab=events 導向 上游市場 → 事件；導覽列不再有獨立的「事件中心」', async () => {
     setUrl('?tab=events&filter=transcend');
     await renderApp();
-    expect(await screen.findByText('事件中心', { selector: 'h3' }, { timeout: 5000 })).toBeTruthy();
+    expect(await screen.findByRole('heading', { name: '事件', level: 2 }, { timeout: 5000 })).toBeTruthy();
     await waitFor(() => expect(Object.fromEntries(new URLSearchParams(window.location.search))).toEqual({ tab: 'us', section: 'events', filter: 'transcend' }));
     expect(screen.getByRole('tab', { name: '事件' }).getAttribute('aria-selected')).toBe('true');
     expect(screen.queryByRole('button', { name: /事件中心/ })).toBeNull();
@@ -488,10 +488,10 @@ describe('App 整合：事件中心頁籤', () => {
     expect(mounts).toEqual({ feed: 1, pr: 1, exposure: 1, upstream: 1 });
   });
 
-  it('PR 總覽有「涉及創見的重要事件」（最多 3 個）', async () => {
+  it('PR 總覽有「需要注意的事件」（最多 3 個）', async () => {
     setUrl('?tab=pr');
     await renderApp();
-    const card = (await screen.findByText('涉及創見的重要事件', { selector: 'h3' }, { timeout: 5000 })).closest('.bg-gray-900');
+    const card = (await screen.findByText('需要注意的事件', { selector: 'h3' }, { timeout: 5000 })).closest('[data-card]');
     await waitFor(() => expect(within(card).queryAllByRole('listitem').length).toBeGreaterThan(0));
     expect(within(card).getAllByRole('listitem').length).toBeLessThanOrEqual(3);
   });

@@ -1,12 +1,4 @@
-:root {
-  --page: #f5f6f8;
-  --surface: #ffffff;
-  --surface-soft: #f2f5f8;
-  --line: #e5e7eb;
-  --text: #1f2937;
-  --muted: #64748b;
-  --brand: #960014;
-}
+/* 變數定義已搬到 tokens.css */
 body { font-family: 'Segoe UI', system-ui, -apple-system, sans-serif; background: var(--page); color:var(--text); }
 .line-clamp-2 { display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden; }
 .line-clamp-3 { display:-webkit-box; -webkit-line-clamp:3; -webkit-box-orient:vertical; overflow:hidden; }
@@ -123,7 +115,8 @@ body { font-family: 'Segoe UI', system-ui, -apple-system, sans-serif; background
 
 /* PR 媒體戰情子頁籤：鍵盤焦點清楚可見（選中的標籤是深紅底，所以外框往外推 2px 才看得到）。 */
 .pr-subtab:focus-visible { outline: 2px solid rgb(150,0,20); outline-offset: 2px; }
-.pr-subnav [role="tablist"] { scrollbar-width: thin; }
+.pr-subnav [role="tablist"] { scrollbar-width: none; }
+.pr-subnav [role="tablist"]::-webkit-scrollbar { display: none; }
 
 /* 尊重「減少動態效果」：關掉轉場與動畫。畫面狀態不依賴動畫（選中的子頁用顏色標示、
    內容直接切換），所以關掉不影響任何功能。 */
@@ -140,3 +133,19 @@ body { font-family: 'Segoe UI', system-ui, -apple-system, sans-serif; background
 .light-theme .text-yellow-400 { color:#a16207 !important; }
 .light-theme .text-blue-400,
 .light-theme .text-blue-400\/70 { color:#1d4ed8 !important; }
+
+/* ═══ 共用 UI 元件（src/components/ui）的基礎樣式 ═══ */
+.ui-card { background:var(--surface); border:var(--border); border-radius:var(--radius-lg); padding:var(--space-4); }
+.ui-field { min-height:var(--tap); border:1px solid var(--line-strong); border-radius:var(--radius-md); padding:0 .75rem; font-size:var(--text-sm); background:#fff; color:var(--text); }
+@media (min-width:768px) { .ui-field { min-height:2.25rem; } }
+.ui-field:focus { outline:2px solid var(--brand); outline-offset:1px; border-color:var(--brand); }
+.ui-focus:focus-visible, .light-theme .ui-focus:focus-visible { outline:2px solid var(--brand); outline-offset:2px; }
+.ui-header .ui-focus:focus-visible { outline-color:#fff; }
+.ui-header nav .ui-focus:focus-visible { outline-color:var(--brand); }   /* 手機底部導覽是白底 */
+@media (min-width:768px) { .ui-header nav .ui-focus:focus-visible { outline-color:#fff; } }
+.ui-skeleton { background:linear-gradient(90deg,#e8edf3 25%,#f3f6f9 50%,#e8edf3 75%); background-size:200% 100%; animation:skeleton 1.4s ease-in-out infinite; }
+@keyframes skeleton { from { background-position:200% 0; } to { background-position:-200% 0; } }
+@media (prefers-reduced-motion:reduce) { .ui-skeleton { animation:none; } }
+/* 手機底部導覽讓出空間，避免遮住頁面最底部的內容 */
+.app-main { padding-bottom:calc(var(--bottom-nav-h) + 1rem); }
+@media (min-width:768px) { .app-main { padding-bottom:1.5rem; } }

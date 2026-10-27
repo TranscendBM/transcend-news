@@ -188,14 +188,15 @@ describe('PRTab — Excel 匯出符合目前搜尋條件、媒體、情緒與期
     // 「今天」文字在畫面上不只一處（CompetitorNews 也有自己一份共用的
     // TIME_FILTERS，同樣有「今天」按鈕）——把查詢範圍限定在「創見最新
     // 報導」卡片內，才是 PR 專用的期間篩選按鈕。
-    const card = screen.getByText('創見最新報導').closest('.bg-gray-900');
+    const card = screen.getByText('創見最新報導').closest('[data-card]');
     fireEvent.click(within(card).getByText('今天'));
 
     // 再套用媒體篩選：只留「正常媒體」——應排除 today2（其他媒體）與
     // earlierThisMonth（已被期間篩選排除）。
     fireEvent.change(screen.getByLabelText('依媒體篩選'), { target: { value: '正常媒體' } });
 
-    fireEvent.click(within(card).getByText('匯出 Excel'));
+    // 匯出按鈕在頁首（PageHeader），不在清單卡片內
+    fireEvent.click(screen.getByRole('button', { name: '匯出 Excel' }));
     expect(exportNewsExcel).toHaveBeenCalledTimes(1);
     const [exported] = exportNewsExcel.mock.calls[0];
     expect(exported.map(a => a.id)).toEqual(['today1']);
@@ -219,12 +220,12 @@ describe('PRTab — 人工彙整曝光與自動新聞分開呈現', () => {
 
     // 總覽：自動統計只算自動新聞（1），人工彙整曝光有自己的摘要
     expect(screen.getByText('媒體曝光｜本月').parentElement.textContent).toContain('1');
-    const summary = screen.getByText('新聞稿曝光成效').closest('.bg-gray-900');
+    const summary = screen.getByText('新聞稿曝光成效').closest('[data-card]');
     expect(within(summary).getByText('人工彙整曝光').nextElementSibling.textContent).toBe('1');
 
     // 「曝光成效」子頁的人工彙整曝光卡片
     fireEvent.click(within(summary).getByRole('button', { name: '查看全部：新聞稿曝光成效' }));
-    const card = screen.getByText('人工彙整曝光', { selector: 'h3' }).closest('.bg-gray-900');
+    const card = screen.getByText('人工彙整曝光', { selector: 'h3' }).closest('[data-card]');
     expect(within(card).getByText('本月人工彙整').parentElement.textContent).toContain('1');
     expect(within(card).getByText('人工確認新聞')).toBeTruthy();
     expect(within(card).getByText('人工確認')).toBeTruthy();
@@ -250,7 +251,7 @@ describe('PRTab — 人工彙整曝光與自動新聞分開呈現', () => {
       link: 'https://example.com/manual', exposureDate: taipei(2026, 8, 16),
     };
     renderPRTab({ section: 'exposure', mediaExposure: [manual], mediaExposureStatus: 'ready' });
-    const card = screen.getByText('人工彙整曝光', { selector: 'h3' }).closest('.bg-gray-900');
+    const card = screen.getByText('人工彙整曝光', { selector: 'h3' }).closest('[data-card]');
     fireEvent.click(within(card).getByText('匯出曝光明細'));
     expect(exportMediaExposureExcel).toHaveBeenCalledWith([manual]);
   });
@@ -259,10 +260,12 @@ describe('PRTab — 人工彙整曝光與自動新聞分開呈現', () => {
 describe('PRTab — 曝光成效頁：人工彙整曝光在最下方並提供上傳', () => {
   it('人工彙整曝光是曝光成效頁最後一張卡片，在重點媒體曝光監控之後', () => {
     renderPRTab({ section: 'exposure', prArticles: [], mediaExposureStatus: 'ready' });
-    const media = screen.getByText('重點媒體曝光監控').closest('.bg-gray-900');
-    const manual = screen.getByText('人工彙整曝光').closest('.bg-gray-900');
+    const media = screen.getByText('重點媒體曝光監控').closest('[data-card]');
+    const manual = screen.getByText('人工彙整曝光', { selector: 'h3' }).closest('[data-card]');
     expect(media.compareDocumentPosition(manual) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-    expect(manual.parentElement.lastElementChild).toBe(manual);
+    // 每個檢視包在自己的容器裡（一次只顯示一個），人工彙整曝光的容器是最後一個
+    const wrap = manual.parentElement;
+    expect(wrap.parentElement.lastElementChild).toBe(wrap);
   });
 
   it('預設不顯示上傳區，按「上傳 Excel」才展開，再按一次收合', () => {
@@ -307,12 +310,12 @@ describe('PRTab — 新聞稿曝光成效區塊', () => {
     { id: 'e3', title: '創見公告庫藏股', mediaName: '鉅亨網', reporter: '', link: 'https://example.com/e3',
       exposureDate: taipei(2026, 8, 18), exposureType: 'online' },
   ];
-  const perfCard = () => screen.getByText('新聞稿曝光成效').closest('.bg-gray-900');
+  const perfCard = () => screen.getByText('新聞稿曝光成效').closest('[data-card]');
 
   it('順序是「新聞稿曝光成效」→「重點媒體曝光監控」→「人工彙整曝光」，人工彙整曝光是最後一張卡片', () => {
     renderPRTab({ section: 'exposure', mediaExposure: exposures, mediaExposureStatus: 'ready' });
-    const media = screen.getByText('重點媒體曝光監控').closest('.bg-gray-900');
-    const manual = screen.getByText('人工彙整曝光', { selector: 'h3' }).closest('.bg-gray-900');
+    const media = screen.getByText('重點媒體曝光監控').closest('[data-card]');
+    const manual = screen.getByText('人工彙整曝光', { selector: 'h3' }).closest('[data-card]');
     expect(perfCard().compareDocumentPosition(media) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(media.compareDocumentPosition(manual) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(manual.parentElement.lastElementChild).toBe(manual);
@@ -341,7 +344,7 @@ describe('PRTab — 新聞稿曝光成效區塊', () => {
     unmount();
     // 同一個測試內重新 render 曝光成效頁：新的 PRTab（沒有保留篩選）與資料本身一致
     renderPRTab({ section: 'exposure', ...props });
-    const row = within(screen.getByText('重點媒體曝光監控').closest('.bg-gray-900')).getByText('電子時報').closest('.group');
+    const row = within(screen.getByText('重點媒體曝光監控').closest('[data-card]')).getByText('電子時報').closest('.group');
     expect(row.textContent).toBe('1電子時報Digitimes10');
   });
 
@@ -349,7 +352,7 @@ describe('PRTab — 新聞稿曝光成效區塊', () => {
     renderPRTab({ section: 'exposure', mediaExposure: exposures, mediaExposureStatus: 'ready' });
     fireEvent.change(within(perfCard()).getByLabelText('曝光媒體篩選'), { target: { value: '經濟日報' } });
     expect(within(perfCard()).getByText('人工彙整曝光', { selector: 'p' }).nextElementSibling.textContent).toBe('1');
-    const manual = screen.getByText('人工彙整曝光', { selector: 'h3' }).closest('.bg-gray-900');
+    const manual = screen.getByText('人工彙整曝光', { selector: 'h3' }).closest('[data-card]');
     expect(within(manual).getByText('已載入曝光').parentElement.textContent).toContain('3');
   });
 
@@ -378,7 +381,7 @@ describe('PRTab — 人工彙整曝光清單的連結安全', () => {
         { id: 'bad', title: '惡意連結曝光', mediaName: '鉅亨網', link: 'javascript:alert(1)', exposureDate: taipei(2026, 8, 17) },
       ],
     });
-    const card = screen.getByText('人工彙整曝光', { selector: 'h3' }).closest('.bg-gray-900');
+    const card = screen.getByText('人工彙整曝光', { selector: 'h3' }).closest('[data-card]');
     expect(within(card).getByText('安全的曝光').closest('a').getAttribute('href')).toBe('https://example.com/ok');
     expect(within(card).getByText('惡意連結曝光').closest('a')).toBeNull();
     expect(document.querySelector('a[href^="javascript"]')).toBeNull();

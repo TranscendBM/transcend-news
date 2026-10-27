@@ -1,8 +1,6 @@
 import { useMemo } from 'react';
 
-import Card from '../../components/Card.jsx';
-import Icon from '../../components/Icon.jsx';
-import TabBtn from '../../components/TabBtn.jsx';
+import { ActionButton, ListStatus, PageHeader, SectionCard, SegmentedControl } from '../../components/ui/index.js';
 import ShowMoreButton, { useShowMore } from '../../components/ShowMore.jsx';
 import NewsFilterToolbar from '../../components/filters/NewsFilterToolbar.jsx';
 import NewsCard from '../news/NewsCard.jsx';
@@ -59,6 +57,11 @@ export function PRNewsSection({ validTranscend, prStatus, refreshPRNews }) {
 
   return (
     <div className="space-y-4">
+      <PageHeader title="新聞監測" description="創見相關報導：搜尋、媒體、情緒與期間篩選，可匯出目前的結果。"
+        actions={
+          <ActionButton icon="download" onClick={() => exportNewsExcel(transcendFull, '創見最新報導', '創見最新報導')}
+            disabled={transcendFull.length === 0}>匯出 Excel</ActionButton>
+        } />
       {/* resultCount／totalCount 一律來自 usePRNews 的本月＋上月資料 */}
       <NewsFilterToolbar
         query={prQuery} setQuery={setPrQuery}
@@ -73,40 +76,15 @@ export function PRNewsSection({ validTranscend, prStatus, refreshPRNews }) {
           這幾個期間的數字本來就要同時顯示。 */}
       <PRStatsPanel articles={searchFiltered} status={prStatus} />
 
-      <Card title="創見最新報導" icon="news"
-        actions={
-          <button onClick={() => exportNewsExcel(transcendFull, '創見最新報導', '創見最新報導')}
-            disabled={transcendFull.length === 0}
-            className="text-sm px-3.5 py-1.5 rounded-lg border border-gray-700/60 text-gray-400 hover:text-gray-200 hover:bg-gray-800 transition disabled:opacity-40 disabled:cursor-not-allowed shrink-0">
-            <Icon name="download" /> 匯出 Excel
-          </button>
-        }>
-        {/* 時間篩選：今天／本週／本月／上月，PR 專用 */}
-        <div className="flex flex-wrap gap-1.5 mb-3">
-          {PR_LIST_TIME_FILTERS.map(f => (
-            <TabBtn key={f.id} active={timeFilter === f.id} onClick={() => setTimeFilter(f.id)}>
-              {f.label}
-            </TabBtn>
-          ))}
-        </div>
-        {prStatus === 'error'
-          ? <div className="h-32 flex flex-col items-center justify-center gap-2 text-red-400 text-sm">
-              <span><Icon name="alert" /> 報導載入失敗</span>
-              <button onClick={refreshPRNews}
-                className="text-xs px-3 py-1 rounded-lg border border-red-700/60 text-red-300 hover:bg-red-900/30 transition">
-                重試
-              </button>
-            </div>
-          : transcend.length > 0
-          ? <>
-              <div className="space-y-2">{transcend.map((n, i) => <NewsCard key={n.id || i} article={n} />)}</div>
-              <ShowMoreButton remaining={more.remaining} step={50} onMore={more.showMore} onAll={more.showAll} />
-            </>
-          : <div className="h-32 flex items-center justify-center text-gray-600 text-sm">
-              {prStatus === 'ready' ? '此區間暫無符合報導' : '載入中…'}
-            </div>
-        }
-      </Card>
+      <SectionCard title="創見最新報導" icon="news">
+        {/* 期間：今天／本週／本月／上月，PR 專用 */}
+        <SegmentedControl label="期間" value={timeFilter} onChange={setTimeFilter} options={PR_LIST_TIME_FILTERS} className="mb-3" />
+        <ListStatus status={prStatus} count={transcend.length} errorText="報導載入失敗" onRetry={refreshPRNews}
+          emptyText="此區間沒有符合的報導" emptyHint="可調整上方的期間或篩選條件">
+          <div className="space-y-2">{transcend.map((n, i) => <NewsCard key={n.id || i} article={n} />)}</div>
+          <ShowMoreButton remaining={more.remaining} step={50} onMore={more.showMore} onAll={more.showAll} />
+        </ListStatus>
+      </SectionCard>
     </div>
   );
 }

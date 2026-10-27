@@ -81,7 +81,7 @@ function renderPR(props = {}) {
     news={competitorNews} prArticles={prArticles} prStatus="ready" refreshPRNews={vi.fn()}
     mediaExposure={exposures} mediaExposureStatus="ready" refreshMediaExposure={vi.fn()} {...props} />);
 }
-const cardOf = (title, selector = 'h3') => screen.getByText(title, { selector }).closest('.bg-gray-900');
+const cardOf = (title, selector = 'h3') => screen.getByText(title, { selector }).closest('[data-card]');
 
 beforeEach(() => {
   mounts.feed = 0; mounts.pr = 0; mounts.exposure = 0; mounts.upstream = 0;
@@ -131,7 +131,7 @@ describe('PR 子頁籤 — 每個功能只出現在正確的子頁', () => {
     expect(screen.getByText('媒體曝光｜今天')).toBeTruthy();
     const card = cardOf('創見最新報導');
     ['今天', '本週', '本月', '上月'].forEach(t => expect(within(card).getByText(t)).toBeTruthy());
-    expect(within(card).getByText('匯出 Excel')).toBeTruthy();
+    expect(screen.getByRole('button', { name: '匯出 Excel' })).toBeTruthy();   // 匯出在頁首
     // 不屬於這一頁的功能
     expect(screen.queryByText('競品動態監測')).toBeNull();
     expect(screen.queryByText('新聞稿曝光成效')).toBeNull();

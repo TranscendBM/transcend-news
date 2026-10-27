@@ -95,7 +95,7 @@ describe('ExposurePerformancePanel — 整體摘要', () => {
 
   it('曝光類型分布與媒體排行', () => {
     renderPanel();
-    const panel = screen.getByText('新聞稿曝光成效').closest('.bg-gray-900');
+    const panel = screen.getByText('新聞稿曝光成效').closest('[data-card]');
     expect(within(panel).getByText(/網路新聞 4（67%）/)).toBeTruthy();
     expect(within(panel).getByText(/影音 1（17%）/)).toBeTruthy();
     expect(within(panel).getByText(/社群 1（17%）/)).toBeTruthy();
@@ -147,8 +147,8 @@ describe('ExposurePerformancePanel — 新聞稿／主題與明細', () => {
     const many = Array.from({ length: 20 }, (_, i) => raw(`m${i}`, tw(2026, 9, 1 + i), 'A報', '',
       [0, 1, 2, 3].map(k => String.fromCharCode(0x4e00 + i * 37 + k * 11)).join('')));
     renderPanel({ records: many });
-    expect(topicButtons()).toHaveLength(15);
-    fireEvent.click(screen.getByText(/顯示更多（再 5 則）/));
+    expect(topicButtons()).toHaveLength(10);
+    fireEvent.click(screen.getByText(/顯示更多（再 10 則）/));
     expect(topicButtons()).toHaveLength(20);
   });
 });

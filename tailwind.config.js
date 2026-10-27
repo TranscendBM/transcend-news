@@ -14,6 +14,16 @@ export default {
   content: ['./index.html', './src/**/*.{js,jsx}'],
   theme: {
     extend: {
+      // 顏色一律指到 src/styles/tokens.css 的 CSS 變數
+      colors: {
+        brand: { DEFAULT: 'var(--brand)', strong: 'var(--brand-strong)', soft: 'var(--brand-soft)', line: 'var(--brand-line)' },
+        ui: {
+          page: 'var(--page)', surface: 'var(--surface)', soft: 'var(--surface-soft)',
+          line: 'var(--line)', strong: 'var(--line-strong)',
+          text: 'var(--text)', secondary: 'var(--text-secondary)', muted: 'var(--muted)',
+        },
+      },
+      maxWidth: { content: 'var(--content-max)' },
       fontSize: {
         xs: ['9pt', { lineHeight: '1.4' }],
         sm: ['12pt', { lineHeight: '1.5' }],

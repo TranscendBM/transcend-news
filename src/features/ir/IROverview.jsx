@@ -3,7 +3,7 @@ import { COMPETITOR_ORDER } from '../../config/competitors.js';
 import { EmptyFinancialState } from './DataStatus.jsx';
 import {
   CompetitorStockRows, DividendSnapshot, FinancialSnapshot, RecentMaterialList, SelfStockSummary,
-  StatusStrip, useIRStatuses,
+  IRStatusBar, useIRStatuses,
 } from './irViews.jsx';
 
 const OVERVIEW_MATERIAL_LIMIT = 5;
@@ -15,22 +15,18 @@ const OVERVIEW_MATERIAL_LIMIT = 5;
 export function IROverview({ stocks, revenue, financials, dividends, material, loadErrors, loading, onNavigate }) {
   const statuses = useIRStatuses({ stocks, revenue, financials, dividends, material, loadErrors, loading });
   const self = stocks['2451'];
-  const problems = Object.values(statuses).some(s => s === 'stale' || s === 'error');
 
   return (
     <div className="space-y-4">
-      <div className="rounded-2xl border border-gray-700/60 bg-gray-900 p-3">
-        <p className="text-sm font-semibold text-gray-200 mb-2">資料狀態{problems ? '（有項目需要注意，點擊前往查看）' : ''}</p>
-        <StatusStrip statuses={statuses} onNavigate={onNavigate} />
-      </div>
+      <IRStatusBar statuses={statuses} onNavigate={onNavigate} />
 
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-        <SummaryCard title="創見股價" icon="trend" onViewAll={() => onNavigate('market')}>
+      <div className="grid grid-cols-1 lg:grid-cols-5 gap-4">
+        <SummaryCard title="創見股價" className="lg:col-span-2" icon="trend" onViewAll={() => onNavigate('market')}>
           {self
             ? <SelfStockSummary stock={self} status={statuses.stocks} />
             : <EmptyFinancialState status={statuses.stocks === 'ok' || statuses.stocks === 'stale' ? 'empty' : statuses.stocks} />}
         </SummaryCard>
-        <SummaryCard title="競品股價摘要" icon="target" onViewAll={() => onNavigate('market')}>
+        <SummaryCard title="競品股價摘要" icon="target" className="lg:col-span-3" onViewAll={() => onNavigate('market')}>
           <CompetitorStockRows stocks={stocks} codes={COMPETITOR_ORDER} />
         </SummaryCard>
       </div>

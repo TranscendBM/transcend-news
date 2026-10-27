@@ -1,9 +1,7 @@
 import { useMemo } from 'react';
 
-import Card from '../../components/Card.jsx';
-import Icon from '../../components/Icon.jsx';
+import { ActionButton, EmptyState, ErrorState, FilterBar, LoadingSkeleton, MetricCard, PageHeader, SearchField, SegmentedControl } from '../../components/ui/index.js';
 import ShowMoreButton, { useShowMore } from '../../components/ShowMore.jsx';
-import TabBtn from '../../components/TabBtn.jsx';
 import { PanelStateProvider, usePanelState } from '../../hooks/usePanelState.jsx';
 import { useUrlParam } from '../../hooks/useUrlParam.js';
 import { useNow } from '../../hooks/useNow.js';
@@ -12,16 +10,6 @@ import { SENTIMENTS, SORTS, TAGS, filterTopics, sortTopics, topicStats } from '.
 
 const PAGE = 20;
 const TAG_IDS = Object.keys(TAGS);
-const inputCls = 'min-w-0 max-w-full rounded-xl border border-gray-700/60 px-3 py-2 text-sm outline-none transition focus:border-red-700';
-
-function Stat({ label, value, tone = '' }) {
-  return (
-    <div className="list-row rounded-xl border border-gray-700/40 bg-gray-800/40 p-3 text-center min-w-0">
-      <p className="text-xs text-gray-500 truncate">{label}</p>
-      <p className={`text-2xl font-bold mt-1 tabular-nums ${tone || 'text-ink'}`}>{value}</p>
-    </div>
-  );
-}
 
 // defaultTag：網址沒有 ?filter= 時預設的類別（上游市場的「事件」子頁預設看「上游市場」；明確選「全部」會寫成 ?filter=all）
 export function EventCenter({ topics, status, onRetry, defaultTag = 'all' }) {
@@ -53,91 +41,85 @@ export function EventCenter({ topics, status, onRetry, defaultTag = 'all' }) {
   const loadingFirst = status === 'loading' && topics.length === 0;
   const failed = status === 'error';
 
+  const todayStr = new Date().toLocaleDateString('sv-SE', { timeZone: 'Asia/Taipei' });
+  const TAG_OPTIONS = Object.entries(TAGS).map(([id, label]) => ({ id, label }));
+  const SORT_OPTIONS = Object.entries(SORTS).map(([id, label]) => ({ id, label }));
+  // 統計卡可以點：直接套用對應的篩選（再點一次取消）；沒有對應篩選的（待確認）不可點。
+  const kpiToggle = (isOn, on, off) => () => (isOn ? off() : on());
+  const kpis = [
+    { label: '今日事件', value: stats.today, on: from === todayStr && to === todayStr,
+      onClick: kpiToggle(from === todayStr && to === todayStr, () => { setFrom(todayStr); setTo(todayStr); }, () => { setFrom(''); setTo(''); }) },
+    { label: '升溫事件', value: stats.rising, tone: stats.rising ? 'text-[color:var(--up)]' : '', on: sortMode === 'surge',
+      onClick: kpiToggle(sortMode === 'surge', () => setSortMode('surge'), () => setSortMode('importance')) },
+    { label: '涉及創見', value: stats.transcend, on: tag === 'transcend',
+      onClick: kpiToggle(tag === 'transcend', () => setTag('transcend'), () => setTag(defaultTag)) },
+    { label: '競品事件', value: stats.competitor, on: tag === 'competitor',
+      onClick: kpiToggle(tag === 'competitor', () => setTag('competitor'), () => setTag(defaultTag)) },
+    { label: '產業事件', value: stats.upstream, on: tag === 'upstream',
+      onClick: kpiToggle(tag === 'upstream', () => setTag('upstream'), () => setTag(defaultTag)) },
+    { label: '負面事件', value: stats.negative, tone: stats.negative ? 'text-[color:var(--up)]' : '', on: sentiment === 'negative',
+      onClick: kpiToggle(sentiment === 'negative', () => setSentiment('negative'), () => setSentiment('all')) },
+    { label: '待確認事件', value: stats.review },
+  ];
+  const activeChips = [
+    ...(tag !== defaultTag ? [{ key: 'tag', label: `類別：${TAGS[tag]}`, onClear: () => setTag(defaultTag, { replace: true }) }] : []),
+    ...(sentiment !== 'all' ? [{ key: 'sent', label: `情緒：${SENTIMENTS[sentiment].replace('情緒：', '')}`, onClear: () => setSentiment('all') }] : []),
+    ...(query.trim() ? [{ key: 'q', label: `搜尋：${query.trim()}`, onClear: () => setQuery('') }] : []),
+    ...((from || to) ? [{ key: 'date', label: `日期：${from || '…'} ～ ${to || '…'}`, onClear: () => { setFrom(''); setTo(''); } }] : []),
+  ];
+
   return (
     <div className="space-y-4">
-      <Card title="事件中心" icon="radar">
-        <p className="text-xs text-gray-500 mb-3">
-          把不同媒體對同一事件的報導聚成一個話題（透明規則、零 API 費用，每 30 分鐘更新）。
-          月份、季度、產品型號、公司不同的報導不會被合併；信心較低的保持獨立。展開可看原始新聞，既有新聞清單仍在各頁籤。
-        </p>
+      <PageHeader title="事件" description="把不同媒體對同一事件的報導聚成一個話題（透明規則、零 API 費用，每 30 分鐘更新）。月份、季度、產品型號、公司不同的報導不會被合併；信心較低的保持獨立。展開可看原始新聞。" />
 
-        {failed && (
-          <div className="py-6 text-center text-sm text-red-400" role="alert">
-            <p><Icon name="alert" /> 事件載入失敗</p>
-            <button onClick={onRetry}
-              className="mt-2 text-sm px-3.5 py-1.5 rounded-lg border border-red-700/60 text-red-300 hover:bg-red-900/30 transition">重試</button>
-          </div>
-        )}
-        {loadingFirst && <div className="py-8 text-center text-sm text-gray-600">載入中…</div>}
-        {!failed && !loadingFirst && topics.length === 0 && (
-          <div className="py-8 text-center text-sm text-gray-600">目前沒有事件資料（話題聚類排程會陸續產生）</div>
-        )}
+      {failed && <ErrorState message="事件載入失敗" onRetry={onRetry} />}
+      {loadingFirst && <LoadingSkeleton lines={4} className="py-4" />}
+      {!failed && !loadingFirst && topics.length === 0 && (
+        <EmptyState title="目前沒有事件資料" hint="話題聚類排程每 30 分鐘執行一次，有新報導後會陸續產生事件。" />
+      )}
 
-        {!loadingFirst && topics.length > 0 && (
-          <div className="space-y-4">
-            <div>
-              <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-7 gap-2" data-testid="event-stats">
-                <Stat label="今日事件" value={stats.today} />
-                <Stat label="升溫事件" value={stats.rising} tone={stats.rising ? 'text-red-400' : ''} />
-                <Stat label="涉及創見" value={stats.transcend} />
-                <Stat label="競品事件" value={stats.competitor} />
-                <Stat label="產業事件" value={stats.upstream} />
-                <Stat label="負面事件" value={stats.negative} tone={stats.negative ? 'text-red-400' : ''} />
-                <Stat label="待確認事件" value={stats.review} />
-              </div>
-              <p className="text-xs text-gray-500 mt-1.5">統計範圍：今日事件＝最新報導在台灣今天；其餘為近 72 小時有更新的事件（共 {stats.recentTotal} 個）。</p>
+      {!loadingFirst && topics.length > 0 && (
+        <>
+          <div>
+            <div className="grid grid-cols-3 sm:grid-cols-4 lg:grid-cols-7 gap-2" data-testid="event-stats">
+              {kpis.map(k => (
+                <MetricCard key={k.label} label={k.label} value={String(k.value)} tone={k.tone}
+                  onClick={k.onClick} active={k.onClick ? k.on : undefined} />
+              ))}
             </div>
+            <p className="text-xs text-ui-muted mt-1.5">統計範圍：今日事件＝最新報導在台灣今天；其餘為近 72 小時有更新的事件（共 {stats.recentTotal} 個）。點統計卡可直接套用篩選。</p>
+          </div>
 
+          <FilterBar active={activeChips} onClearAll={filtering ? clear : undefined} clearLabel="清除篩選"
+            resultText={`符合 ${sorted.length} / 共 ${topics.length} 個事件`}>
+            <SearchField value={query} onChange={setQuery} label="搜尋事件" placeholder="搜尋事件、公司、產品或新聞標題…" className="md:flex-1 md:min-w-[220px]" />
+            <select value={sentiment} onChange={e => setSentiment(e.target.value)} aria-label="事件情緒篩選" className="ui-field">
+              {Object.entries(SENTIMENTS).map(([id, label]) => <option key={id} value={id}>{label}</option>)}
+            </select>
+            <div className="flex items-center gap-2">
+              <input type="date" value={from} max={to || undefined} onChange={e => setFrom(e.target.value)} aria-label="事件起始日" className="ui-field" />
+              <span className="text-ui-muted text-sm">至</span>
+              <input type="date" value={to} min={from || undefined} onChange={e => setTo(e.target.value)} aria-label="事件結束日" className="ui-field" />
+            </div>
+            <SegmentedControl label="事件類別篩選" value={tag} onChange={setTag} options={TAG_OPTIONS} className="basis-full" />
+            <SegmentedControl label="事件排序" value={sortMode} onChange={setSortMode} options={SORT_OPTIONS} className="basis-full" />
+          </FilterBar>
+          <p className="sr-only" data-testid="event-count" aria-live="polite">符合 {sorted.length} / 共 {topics.length} 個事件</p>
+
+          {sorted.length === 0 ? (
+            <EmptyState title="沒有符合條件的事件" hint="可放寬類別、情緒或日期範圍。"
+              action={<ActionButton onClick={clear}>清除篩選</ActionButton>} />
+          ) : (
             <div className="space-y-2">
-              <div className="flex flex-wrap gap-1.5" role="group" aria-label="事件類別篩選">
-                {Object.entries(TAGS).map(([id, label]) => (
-                  <TabBtn key={id} active={tag === id} onClick={() => setTag(id)}>{label}</TabBtn>
-                ))}
-              </div>
-              <div className="flex flex-col lg:flex-row lg:flex-wrap lg:items-center gap-2">
-                <label className="relative flex-1 min-w-[200px]">
-                  <span className="sr-only">搜尋事件</span>
-                  <input type="search" value={query} onChange={e => setQuery(e.target.value)} placeholder="搜尋事件、公司、產品或新聞標題…"
-                    aria-label="搜尋事件" className={`${inputCls} w-full`} />
-                </label>
-                <select value={sentiment} onChange={e => setSentiment(e.target.value)} aria-label="事件情緒篩選" className={inputCls}>
-                  {Object.entries(SENTIMENTS).map(([id, label]) => <option key={id} value={id}>{label}</option>)}
-                </select>
-                <div className="flex items-center gap-2">
-                  <input type="date" value={from} max={to || undefined} onChange={e => setFrom(e.target.value)} aria-label="事件起始日" className={inputCls} />
-                  <span className="text-gray-500 text-sm">至</span>
-                  <input type="date" value={to} min={from || undefined} onChange={e => setTo(e.target.value)} aria-label="事件結束日" className={inputCls} />
-                </div>
-                {filtering && (
-                  <button onClick={clear} className="text-sm px-3.5 py-1.5 rounded-lg border border-gray-700/60 text-gray-400 hover:text-gray-200 hover:bg-gray-800 transition">清除篩選</button>
-                )}
-              </div>
-              <div className="flex flex-wrap items-center justify-between gap-2">
-                <p className="text-xs text-gray-500 tabular-nums" data-testid="event-count">符合 {sorted.length} / 共 {topics.length} 個事件</p>
-                <div className="flex flex-wrap gap-1.5" role="group" aria-label="事件排序">
-                  {Object.entries(SORTS).map(([id, label]) => (
-                    <TabBtn key={id} active={sortMode === id} onClick={() => setSortMode(id)}>{label}</TabBtn>
-                  ))}
-                </div>
-              </div>
+              {more.shown.map(t => (
+                <EventCard key={t.id} topic={t} open={openIds.has(t.id)} onToggle={() => toggle(setOpenIds, t.id)}
+                  allArticles={allArticles.has(t.id)} onShowAllArticles={() => toggle(setAllArticles, t.id)} />
+              ))}
+              <ShowMoreButton remaining={more.remaining} step={PAGE} onMore={more.showMore} onAll={more.showAll} />
             </div>
-
-            {sorted.length === 0 ? (
-              <div className="py-8 text-center text-sm text-gray-600">
-                沒有符合條件的事件。<button onClick={clear} className="ml-2 underline text-gray-400 hover:text-gray-200">清除篩選</button>
-              </div>
-            ) : (
-              <div className="space-y-2">
-                {more.shown.map(t => (
-                  <EventCard key={t.id} topic={t} open={openIds.has(t.id)} onToggle={() => toggle(setOpenIds, t.id)}
-                    allArticles={allArticles.has(t.id)} onShowAllArticles={() => toggle(setAllArticles, t.id)} />
-                ))}
-                <ShowMoreButton remaining={more.remaining} step={PAGE} onMore={more.showMore} onAll={more.showAll} />
-              </div>
-            )}
-          </div>
-        )}
-      </Card>
+          )}
+        </>
+      )}
     </div>
   );
 }

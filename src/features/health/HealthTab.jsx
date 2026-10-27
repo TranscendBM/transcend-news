@@ -1,19 +1,21 @@
 import { useState, useEffect, useCallback } from 'react';
 
-import Card from '../../components/Card.jsx';
 import Icon from '../../components/Icon.jsx';
+import { ActionButton, DataStateBanner, ErrorState, LastUpdatedLabel, LoadingSkeleton, PageHeader, SectionCard, StatusBadge } from '../../components/ui/index.js';
 import { getDb, collection, doc, getDoc, getDocs, query, orderBy, limit } from '../../services/firebase.js';
+import { fmtNextRun, nextRun } from './schedule.js';
 
 // 排程總覽（跟 functions/main.py 的實際排程設定同步維護）——
-// cadence 只是給人看的說明文字，不參與判斷邏輯。
+// cadence 只是給人看的說明文字；schedule 用來估算「下一次預計執行」，都不參與健康判斷。
+// （每日產業新聞摘要信 tw/us_dram_digest_job 已停止並移除，所以不在這裡。）
 const JOBS = [
-  { key: 'stocks', label: '即時股價', fn: 'stocks_job', cadence: '交易日 09:00–13:35 每分鐘' },
-  { key: 'news', label: 'RSS 新聞', fn: 'news_job', cadence: '每 15 分鐘' },
-  { key: 'trading', label: '每日交易資料（開收盤／三大法人）', fn: 'trading_job', cadence: '交易日 13:40 / 17:40' },
-  { key: 'finance', label: '財務資料（月營收／季損益／股利／重訊）', fn: 'finance_job', cadence: '每天 17:30（申報期加密）' },
-  { key: 'digest_tw', label: '台灣 DRAM/Flash 產業摘要信', fn: 'tw_dram_digest_job', cadence: '平日 08:00' },
-  { key: 'digest_us', label: '美國 DRAM/Flash 產業摘要信', fn: 'us_dram_digest_job', cadence: '平日 16:30' },
-  { key: 'news_cleanup', label: '新聞保存期限清理', fn: 'news_cleanup_job', cadence: '每天 02:30' },
+  { key: 'stocks', label: '即時股價', fn: 'stocks_job', cadence: '交易日 09:00–13:35 每分鐘', schedule: { window: [[9, 0], [13, 35]], weekdays: true } },
+  { key: 'news', label: 'RSS 新聞', fn: 'news_job', cadence: '每 15 分鐘', schedule: { every: 15 } },
+  { key: 'trading', label: '每日交易資料（開收盤／三大法人）', fn: 'trading_job', cadence: '交易日 13:40 / 17:40', schedule: { daily: [[13, 40], [17, 40]], weekdays: true } },
+  { key: 'finance', label: '財務資料（月營收／季損益／股利／重訊）', fn: 'finance_job', cadence: '每天 17:30（申報期加密）', schedule: { daily: [[17, 30]] } },
+  { key: 'press_release_sync', label: '新聞稿稿單同步與曝光配對', fn: 'press_release_sync_job', cadence: '每天 06:30', schedule: { daily: [[6, 30]] } },
+  { key: 'topic_cluster', label: '事件話題聚類', fn: 'topic_cluster_job', cadence: '每 30 分鐘', schedule: { every: 30 } },
+  { key: 'news_cleanup', label: '新聞保存期限清理', fn: 'news_cleanup_job', cadence: '每天 02:30', schedule: { daily: [[2, 30]] } },
 ];
 
 // 排程本身「多久沒成功執行一次」才算異常——只抓「函式本身丟例外」
@@ -67,106 +69,117 @@ function dataFreshnessNote(jobKey, dataDoc, now) {
   if (jobKey === 'news') {
     const ms = dataDoc;
     if (ms == null) return null;
-    const hours = (ms == null) ? null : (now - ms) / 3_600_000;
-    if (hours != null && hours > 0.5) return { level: 'warn', text: `最新一篇新聞是 ${fmtAgo(ms, now)}抓到的` };
+    const hours = (now - ms) / 3_600_000;
+    if (hours > 0.5) return { level: 'warn', text: `最新一篇新聞是 ${fmtAgo(ms, now)}抓到的` };
     return { level: 'ok', text: `最新一篇新聞是 ${fmtAgo(ms, now)}抓到的` };
   }
   return null;
 }
 
-function StatusBadge({ level }) {
-  const cfg = {
-    ok: { text: '正常', cls: 'text-green-400' },
-    warn: { text: '資料偏舊', cls: 'text-yellow-400' },
-    stale: { text: '過期', cls: 'text-yellow-400' },
-    error: { text: '執行失敗', cls: 'text-red-400' },
-    unknown: { text: '尚無紀錄', cls: 'text-gray-500' },
-  }[level] || { text: '尚無紀錄', cls: 'text-gray-500' };
-  return <span className={`inline-flex items-center gap-1 text-sm font-semibold ${cfg.cls}`}><Icon name="dot" className="text-[1.3em]" />{cfg.text}</span>;
+// 單一排程的狀態等級：error（執行失敗）> stale（過期）> warn（資料偏舊）> ok
+function jobLevel(statusDoc, freshness, now) {
+  if (statusDoc?.lastError) return 'error';
+  const lastSuccessMs = tsToMs(statusDoc?.lastSuccessAt);
+  if (lastSuccessMs == null || (now - lastSuccessMs) / 3_600_000 > STALE_AFTER_HOURS) return 'stale';
+  if (freshness && (freshness.level === 'warn' || freshness.level === 'stale')) return 'warn';
+  return 'ok';
 }
 
-function JobRow({ job, statusDoc, dataDoc, now }) {
-  const hasError = !!statusDoc?.lastError;
-  const lastSuccessMs = tsToMs(statusDoc?.lastSuccessAt);
-  const ageHours = lastSuccessMs == null ? null : (now - lastSuccessMs) / 3_600_000;
-  const isRunStale = !hasError && (lastSuccessMs == null || ageHours > STALE_AFTER_HOURS);
-  const freshness = dataFreshnessNote(job.key, dataDoc, now);
+const LEVEL_BADGE = {
+  ok: { tone: 'ok', text: '正常' },
+  warn: { tone: 'warn', text: '資料偏舊' },
+  stale: { tone: 'warn', text: '過期' },
+  error: { tone: 'error', text: '執行失敗' },
+  unknown: { tone: 'neutral', text: '尚無紀錄' },
+};
+const SEVERITY = { error: 0, stale: 1, warn: 2, unknown: 3, ok: 4 };
 
-  let level = 'ok';
-  if (hasError) level = 'error';
-  else if (isRunStale) level = 'stale';
-  else if (freshness && (freshness.level === 'warn' || freshness.level === 'stale')) level = 'warn';
+function LevelBadge({ level }) {
+  const b = LEVEL_BADGE[level] || LEVEL_BADGE.unknown;
+  return <StatusBadge tone={b.tone}>{b.text}</StatusBadge>;
+}
 
+// 一列排程：先給結論（狀態徽章），再給「最後成功／下一次預計／最近錯誤／資料是否過期」；
+// 函式名稱等技術細節預設收合。
+function HealthRow({ title, level, lastSuccessMs, showLastSuccess = true, nextText, error, errorAt, freshness, extra, tech, now }) {
+  const [open, setOpen] = useState(false);
   return (
-    <div className="border-b border-gray-800/40 py-3 last:border-0">
+    <div className="border-b border-ui-line py-3 last:border-0">
       <div className="flex items-center justify-between gap-3 flex-wrap">
-        <div>
-          <p className="text-sm font-medium text-gray-200">{job.label}</p>
-          <p className="text-xs text-gray-600">{job.fn} · {job.cadence}</p>
-        </div>
-        <StatusBadge level={level} />
+        <p className="text-sm font-medium text-ui-text min-w-0">{title}</p>
+        <LevelBadge level={level} />
       </div>
-      <p className="text-xs text-gray-500 mt-1">
-        上次成功執行：{lastSuccessMs == null ? '從未' : `${fmtAgo(lastSuccessMs, now)}`}
-      </p>
-      {hasError && (
-        <p className="text-xs text-red-400/90 mt-1 break-all">
-          <Icon name="alert" /> {statusDoc.lastError}
-          {statusDoc.lastErrorAt && ` （${fmtAgo(tsToMs(statusDoc.lastErrorAt), now)}）`}
+      <dl className="mt-1.5 grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-0.5 text-xs text-ui-muted">
+        {showLastSuccess && <div><dt className="inline">上次成功執行：</dt><dd className="inline">{lastSuccessMs == null ? '從未' : fmtAgo(lastSuccessMs, now)}</dd></div>}
+        {nextText && <div><dt className="inline">下一次預計：</dt><dd className="inline">{nextText}</dd></div>}
+      </dl>
+      {extra && <p className="text-xs text-ui-muted mt-1">{extra}</p>}
+      {error && (
+        <p className="text-xs text-[color:var(--danger)] mt-1 break-all">
+          <Icon name="alert" /> 最近錯誤：{error}
+          {errorAt && ` （${fmtAgo(tsToMs(errorAt), now)}）`}
         </p>
       )}
       {freshness && (
-        <p className={`text-xs mt-1 ${freshness.level === 'ok' ? 'text-gray-600' : 'text-yellow-500/90'}`}>
-          {freshness.level === 'ok' ? <Icon name="check" /> : <Icon name="alert" />} {freshness.text}
+        <p className={`text-xs mt-1 ${freshness.level === 'ok' ? 'text-ui-muted' : 'text-[color:var(--warn)]'}`}>
+          <Icon name={freshness.level === 'ok' ? 'check' : 'alert'} /> {freshness.text}
         </p>
+      )}
+      {tech && (
+        <>
+          <button type="button" onClick={() => setOpen(o => !o)} aria-expanded={open}
+            className="ui-focus mt-1 inline-flex items-center gap-1 text-xs text-ui-secondary underline min-h-8">
+            技術細節<Icon name={open ? 'chevronup' : 'chevrondown'} />
+          </button>
+          {open && <p className="text-xs text-ui-muted break-all">{tech}</p>}
+        </>
       )}
     </div>
   );
 }
 
-function AiWorkerRow({ statusDoc, now }) {
-  if (!statusDoc) {
-    return (
-      <div className="border-b border-gray-800/40 py-3 last:border-0">
-        <div className="flex items-center justify-between gap-3 flex-wrap">
-          <div>
-            <p className="text-sm font-medium text-gray-200">本機 AI Worker（tools/local_ai_worker.py）</p>
-            <p className="text-xs text-gray-600">跑在使用者自己的電腦上，每天 02:35 由 Cloud Functions 彙總一次狀態</p>
-          </div>
-          <StatusBadge level="unknown" />
-        </div>
-        <p className="text-xs text-gray-500 mt-1">尚無彙總紀錄</p>
-      </div>
-    );
-  }
+function JobRow({ job, statusDoc, dataDoc, now }) {
+  const freshness = dataFreshnessNote(job.key, dataDoc, now);
+  const level = jobLevel(statusDoc, freshness, now);
+  return (
+    <HealthRow title={job.label} level={level} now={now}
+      lastSuccessMs={tsToMs(statusDoc?.lastSuccessAt)}
+      nextText={fmtNextRun(nextRun(job.schedule, new Date(now)), new Date(now))}
+      error={statusDoc?.lastError} errorAt={statusDoc?.lastErrorAt} freshness={freshness}
+      tech={`${job.fn} · ${job.cadence}`} />
+  );
+}
 
+const AI_TITLE = '本機 AI Worker（tools/local_ai_worker.py）';
+const AI_TECH = '跑在使用者自己的電腦上，每天 02:35 由 Cloud Functions 彙總一次狀態';
+
+function aiWorkerLevel(statusDoc, now) {
+  if (!statusDoc) return 'unknown';
   const pending = statusDoc.pendingCount ?? 0;
   const lastInsightMs = tsToMs(statusDoc.lastInsightAt);
   const insightAgeDays = lastInsightMs == null ? null : (now - lastInsightMs) / 86_400_000;
   // worker 完全沒在跑：積壓 > 0 且最近一次分析是很久以前（或從未有過）。
-  const looksDown = pending > 0 && (insightAgeDays == null || insightAgeDays > 2);
-  const level = looksDown ? 'stale' : 'ok';
+  return pending > 0 && (insightAgeDays == null || insightAgeDays > 2) ? 'stale' : 'ok';
+}
 
+function AiWorkerRow({ statusDoc, level, now }) {
+  if (!statusDoc) {
+    return <HealthRow title={AI_TITLE} level="unknown" showLastSuccess={false} now={now} extra="尚無彙總紀錄" tech={AI_TECH} />;
+  }
+  const pending = statusDoc.pendingCount ?? 0;
+  const lastInsightMs = tsToMs(statusDoc.lastInsightAt);
   return (
-    <div className="border-b border-gray-800/40 py-3 last:border-0">
-      <div className="flex items-center justify-between gap-3 flex-wrap">
-        <div>
-          <p className="text-sm font-medium text-gray-200">本機 AI Worker（tools/local_ai_worker.py）</p>
-          <p className="text-xs text-gray-600">跑在使用者自己的電腦上，每天 02:35 由 Cloud Functions 彙總一次狀態</p>
-        </div>
-        <StatusBadge level={level} />
-      </div>
-      <p className="text-xs text-gray-500 mt-1">
-        待處理新聞分析：{pending} 筆 · 最近一次完成分析：{lastInsightMs == null ? '從未' : fmtAgo(lastInsightMs, now)}
-      </p>
-      {looksDown && (
-        <p className="text-xs text-yellow-500/90 mt-1">
-          <Icon name="alert" /> 有積壓工作但很久沒有新的分析結果，本機 worker 可能沒有在執行
-        </p>
-      )}
-    </div>
+    <HealthRow title={AI_TITLE} level={level} showLastSuccess={false} now={now} tech={AI_TECH}
+      nextText="每天 02:35 彙總"
+      extra={`待處理新聞分析：${pending} 筆 · 最近一次完成分析：${lastInsightMs == null ? '從未' : fmtAgo(lastInsightMs, now)}`}
+      freshness={level === 'stale' ? { level: 'warn', text: '有積壓工作但很久沒有新的分析結果，本機 worker 可能沒有在執行' } : null} />
   );
 }
+
+const OVERALL = {
+  error: { state: 'error', title: '異常：有排程執行失敗', hint: '請先處理下方「需要處理」的項目。' },
+  warn: { state: 'stale', title: '注意：部分排程或資料已過期', hint: '資料可能不是最新；請看下方「需要處理」的項目。' },
+};
 
 export function HealthTab() {
   const [jobStatus, setJobStatus] = useState(null);
@@ -211,40 +224,55 @@ export function HealthTab() {
   useEffect(() => { load(); }, [load]);
 
   const now = Date.now();
+  const dataFor = key => ({ stocks: stocksData, finance: revenueData, trading: dailyData, news: latestNewsAt })[key] ?? null;
+
+  // 每一列先算好狀態，才能依嚴重度分組與排序（失敗、過期的排在最前面）
+  const rows = jobStatus ? [
+    ...JOBS.map(job => {
+      const statusDoc = jobStatus[job.key];
+      const level = jobLevel(statusDoc, dataFreshnessNote(job.key, dataFor(job.key), now), now);
+      return { id: job.key, level, node: <JobRow key={job.key} job={job} statusDoc={statusDoc} dataDoc={dataFor(job.key)} now={now} /> };
+    }),
+    (() => {
+      const level = aiWorkerLevel(jobStatus.ai_worker, now);
+      return { id: 'ai_worker', level, node: <AiWorkerRow key="ai_worker" statusDoc={jobStatus.ai_worker} level={level} now={now} /> };
+    })(),
+  ].sort((a, b) => SEVERITY[a.level] - SEVERITY[b.level]) : [];
+
+  const attention = rows.filter(r => r.level !== 'ok' && r.level !== 'unknown');
+  const fine = rows.filter(r => r.level === 'ok' || r.level === 'unknown');
+  const overall = attention.some(r => r.level === 'error') ? 'error' : attention.length ? 'warn' : 'ok';
 
   return (
     <div className="space-y-4 fade-in">
-      <Card title="排程健康狀態" icon="activity"
+      <PageHeader title="系統健康" description="排程的實際成功／失敗紀錄由 Cloud Functions 寫入；這裡不是即時監控，是每次開啟本頁時查詢一次目前狀態。"
+        meta={<LastUpdatedLabel date={checkedAt} label="最後檢查" />}
         actions={
-          <button onClick={load} disabled={loading}
-            className="text-xs px-2.5 py-1 rounded-lg border border-gray-700/60 text-gray-400 hover:text-gray-200 hover:bg-gray-800 transition disabled:opacity-40">
-            {loading ? '檢查中…' : '↻ 重新檢查'}
-          </button>
-        }>
-        <p className="text-xs text-gray-600 mb-3">
-          {checkedAt ? `本頁最後檢查時間：${checkedAt.toLocaleTimeString('zh-TW', { hour: '2-digit', minute: '2-digit' })} · ` : ''}
-          各排程實際成功/失敗紀錄每天由 Cloud Functions 寫入，這裡不是即時監控，是每次開啟這頁時查詢一次目前狀態。
-        </p>
-        {error ? (
-          <div className="h-20 flex items-center justify-center text-red-400 text-sm"><Icon name="alert" /> 載入失敗，請重試</div>
-        ) : loading && !jobStatus ? (
-          <div className="h-20 flex items-center justify-center text-gray-600 text-sm">載入中…</div>
-        ) : (
-          <div>
-            {JOBS.map(job => {
-              let dataDoc = null;
-              if (job.key === 'stocks') dataDoc = stocksData;
-              else if (job.key === 'finance') dataDoc = revenueData;
-              else if (job.key === 'trading') dataDoc = dailyData;
-              else if (job.key === 'news') dataDoc = latestNewsAt;
-              return (
-                <JobRow key={job.key} job={job} statusDoc={jobStatus?.[job.key]} dataDoc={dataDoc} now={now} />
-              );
-            })}
-            <AiWorkerRow statusDoc={jobStatus?.ai_worker} now={now} />
-          </div>
-        )}
-      </Card>
+          <ActionButton onClick={load} disabled={loading} icon="refresh" aria-label="重新檢查">
+            {loading ? '檢查中…' : '重新檢查'}
+          </ActionButton>
+        } />
+
+      {error ? (
+        <ErrorState message="載入失敗，請重試" onRetry={load} />
+      ) : loading && !jobStatus ? (
+        <LoadingSkeleton lines={5} className="py-4" label="檢查排程狀態中" />
+      ) : (
+        <>
+          {overall === 'ok'
+            ? <div className="flex items-center gap-2 text-sm"><StatusBadge tone="ok">整體正常</StatusBadge><span className="text-ui-muted">所有排程近期都有成功執行，資料沒有過期。</span></div>
+            : <DataStateBanner state={OVERALL[overall].state} title={OVERALL[overall].title}>{OVERALL[overall].hint}</DataStateBanner>}
+
+          {attention.length > 0 && (
+            <SectionCard title={`需要處理（${attention.length}）`} icon="alert">
+              {attention.map(r => r.node)}
+            </SectionCard>
+          )}
+          <SectionCard title={`運作正常（${fine.length}）`} icon="checkcircle">
+            {fine.length ? fine.map(r => r.node) : <p className="text-sm text-ui-muted">目前沒有運作正常的項目。</p>}
+          </SectionCard>
+        </>
+      )}
     </div>
   );
 }
