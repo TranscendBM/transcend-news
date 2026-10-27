@@ -14,7 +14,7 @@ export default function GlobalHeader({ children, connected, updated, loading, on
       <div className="max-w-content mx-auto px-3 sm:px-4 h-14 flex items-center gap-3 md:gap-5">
         <div className="flex items-center gap-3 shrink-0">
           <TranscendMark height={18} fill="#960014" />
-          <div className="hidden lg:block border-l border-ui-line pl-3">
+          <div className="hidden xl:block border-l border-ui-line pl-3">
             <p className="text-sm font-bold text-ui-text leading-tight">新聞監控</p>
             <p className="text-xs text-ui-muted leading-tight">News Intelligence</p>
           </div>
@@ -26,14 +26,14 @@ export default function GlobalHeader({ children, connected, updated, loading, on
           <span className={`inline-flex items-center gap-1 text-xs ${connected ? 'text-[color:var(--ok)]' : 'text-[color:var(--warn)]'}`}
             role="status" title={connected ? 'Firebase 已連線' : '連線中…'}>
             <Icon name="dot" className="text-[1.3em]" />
-            <span className="hidden md:inline">{connected ? 'Firebase 已連線' : '連線中…'}</span>
-            <span className="sr-only md:hidden">{connected ? 'Firebase 已連線' : '連線中'}</span>
+            <span className="hidden xl:inline">{connected ? 'Firebase 已連線' : '連線中…'}</span>
+            <span className="sr-only xl:hidden">{connected ? 'Firebase 已連線' : '連線中'}</span>
           </span>
           <LastUpdatedLabel date={updated} className="text-[11px] sm:text-xs" />
           <ActionButton onClick={onRefresh} disabled={loading} aria-label={loading ? '載入中' : '重新整理'} title="重新整理資料"
             icon={loading ? undefined : 'refresh'}>
             {loading && <Spinner />}
-            <span className="hidden sm:inline">{loading ? '載入中' : '重新整理'}</span>
+            <span className="hidden sm:max-lg:hidden lg:inline">{loading ? '載入中' : '重新整理'}</span>
           </ActionButton>
         </div>
       </div>

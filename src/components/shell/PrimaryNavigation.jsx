@@ -16,7 +16,7 @@ export default function PrimaryNavigation({ items, active, onChange }) {
         const on = item.id === active;
         return (
           <button key={item.id} type="button" onClick={() => onChange(item.id)} aria-current={on ? 'page' : undefined}
-            className={`ui-focus relative flex flex-col md:flex-row items-center justify-center gap-0.5 md:gap-1.5 min-h-14 md:min-h-0 px-1 md:px-3 text-[11px] md:text-sm leading-tight transition-colors ${on
+            className={`ui-focus relative flex flex-col md:flex-row items-center justify-center gap-0.5 md:gap-1.5 min-h-14 md:min-h-0 px-1 md:px-2 lg:px-3 text-[11px] md:text-[13px] lg:text-sm leading-tight transition-colors ${on
               ? 'text-brand font-bold'
               : 'text-ui-secondary font-medium hover:text-ui-text'}`}>
             <Icon name={item.icon} className="text-[1.45em] md:text-[1.15em]" />
