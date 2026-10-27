@@ -1,0 +1,49 @@
+/* ═══════════════════════════════════════════════════════════
+   全站 Design Tokens —— 顏色、間距、圓角、邊框、陰影、字級、斷點、內容寬度。
+   元件與頁面一律引用這裡的變數（或 tailwind.config.js 對應的 class），
+   不再各自寫近似但不同的色碼。
+   斷點（tailwind 預設）：手機 < 768px（md 以下）、平板 768–1023px（md）、桌機 ≥ 1024px（lg）。
+   ═══════════════════════════════════════════════════════════ */
+:root {
+  /* 品牌：創見紅只用於主要操作、選取狀態、重點數字 */
+  --brand: #960014;
+  --brand-strong: #7a0010;
+  --brand-soft: #fdf1f2;
+  --brand-line: #f0c4ca;
+
+  /* 表面與文字 */
+  --page: #f5f6f8;
+  --surface: #ffffff;
+  --surface-soft: #f2f5f8;
+  --line: #e1e6ec;
+  --line-strong: #cbd5e1;
+  --text: #1f2937;
+  --text-secondary: #475569;
+  --muted: #5b6b7f;          /* 白底對比 5.4:1，符合 WCAG AA */
+
+  /* 狀態色（文字／底／框）：同時搭配符號與文字，不只靠顏色 */
+  --ok: #15803d;     --ok-bg: #f0fdf4;     --ok-line: #bbf7d0;
+  --warn: #92400e;   --warn-bg: #fffbeb;   --warn-line: #fde68a;
+  --danger: #b91c1c; --danger-bg: #fef2f2; --danger-line: #fecaca;
+  --info: #1d4ed8;   --info-bg: #eff6ff;   --info-line: #bfdbfe;
+  --neutral: #475569; --neutral-bg: #f1f5f9; --neutral-line: #e2e8f0;
+  /* 台股慣例：上漲紅、下跌綠 */
+  --up: #c81e1e;
+  --down: #15803d;
+
+  /* 間距（4px 基準）、圓角、邊框、陰影 */
+  --space-1: .25rem; --space-2: .5rem; --space-3: .75rem; --space-4: 1rem; --space-5: 1.25rem; --space-6: 1.5rem;
+  --radius-sm: .375rem; --radius-md: .5rem; --radius-lg: .75rem;
+  --border: 1px solid var(--line);
+  --shadow-sm: 0 1px 2px rgba(15, 23, 42, .05);
+
+  /* 字級與行高 */
+  --text-xs: .75rem;  --text-sm: .875rem; --text-base: 1rem; --text-lg: 1.125rem; --text-xl: 1.5rem; --text-2xl: 1.875rem;
+  --leading-tight: 1.3; --leading-normal: 1.5;
+
+  /* 版面 */
+  --content-max: 80rem;      /* 1280px */
+  --header-h: 3.5rem;        /* 56px */
+  --bottom-nav-h: 3.5rem;    /* 手機底部導覽 */
+  --tap: 2.75rem;            /* 44px 最小點擊區 */
+}

@@ -13,7 +13,7 @@ export const subPanelId = (prefix, id) => `${prefix}-panel-${id}`;
  *   鍵盤：← → 切換（頭尾循環）、Home／End 跳到第一個／最後一個；Enter／Space 為按鈕原生行為。
  * - 版面：sticky 在主 Header（h-14）下方；手機上標籤不換行、整列可橫向捲動，
  *   目前的標籤會自動捲到可視範圍內；只有這一列自己捲動，不會讓整個頁面出現水平捲軸。
- * - 目前所在位置用深紅底白字標示，不依賴動畫。
+ * - 目前所在位置用淡紅底＋品牌紅字＋細框標示（與第一層導覽的底線區隔），不依賴動畫。
  *
  * sections: [{ id, label, icon }]；prefix 用來組出 tab／panel 的 id（如 pr-tab-news）。
  */
@@ -45,8 +45,7 @@ export default function SubNavigation({ sections, active, onChange, prefix, labe
   };
 
   return (
-    <div className="pr-subnav sticky top-14 z-40 -mx-4 px-4 pt-1 pb-2 border-b border-gray-700/60"
-      style={{ background: '#f5f6f8' }}>
+    <div className="pr-subnav sticky top-14 z-40 -mx-3 sm:-mx-4 px-3 sm:px-4 pt-1 pb-2 border-b border-ui-line bg-ui-page">
       <div role="tablist" aria-label={label} aria-orientation="horizontal"
         className="flex gap-1 overflow-x-auto whitespace-nowrap">
         {sections.map((section, index) => {
@@ -58,9 +57,8 @@ export default function SubNavigation({ sections, active, onChange, prefix, labe
               tabIndex={selected ? 0 : -1}
               ref={el => { buttonRefs.current[section.id] = el; }}
               onClick={() => onChange(section.id)} onKeyDown={e => onKeyDown(e, index)}
-              className={`pr-subtab shrink-0 flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-semibold whitespace-nowrap transition-colors ${
-                selected ? 'text-white shadow-sm' : 'text-gray-500 hover:text-gray-200 hover:bg-gray-800'}`}
-              style={selected ? { background: 'rgb(150,0,20)' } : undefined}>
+              className={`pr-subtab shrink-0 flex items-center gap-1.5 px-4 min-h-11 md:min-h-10 rounded-lg border text-sm font-semibold whitespace-nowrap transition-colors ${
+                selected ? 'bg-brand-soft text-brand border-brand-line' : 'text-ui-secondary border-transparent hover:bg-ui-soft'}`}>
               <Icon name={section.icon} />
               {section.label}
             </button>
