@@ -10,7 +10,7 @@ import ActionButton from './ActionButton.jsx';
  *
  * active: [{ key, label, onClear }]；resultText：例如「顯示 12 / 80 則」。
  */
-export default function FilterBar({ children, active = [], onClearAll, resultText, className = '' }) {
+export default function FilterBar({ children, active = [], onClearAll, clearLabel = '清除條件', resultText, className = '' }) {
   const [open, setOpen] = useState(false);
   const panelId = useId();
   useEffect(() => {
@@ -40,7 +40,7 @@ export default function FilterBar({ children, active = [], onClearAll, resultTex
               {a.label}<Icon name="close" />
             </button>
           ))}
-          {onClearAll && <button type="button" onClick={onClearAll} className="ui-focus text-xs font-medium text-ui-secondary underline px-2 min-h-8">清除條件</button>}
+          {onClearAll && <button type="button" onClick={onClearAll} className="ui-focus text-xs font-medium text-ui-secondary underline px-2 min-h-8">{clearLabel}</button>}
         </div>
       )}
     </div>

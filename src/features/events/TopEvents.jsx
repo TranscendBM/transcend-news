@@ -1,4 +1,5 @@
 import { tagClass } from '../../components/tagStyles.js';
+import { EmptyState, ErrorState, LoadingSkeleton } from '../../components/ui/index.js';
 import { sentimentText, topEvents, velocityText } from './eventData.js';
 import { writeParams } from '../../utils/urlState.js';
 
@@ -11,17 +12,17 @@ export function openEventCenter(filter = 'all') {
 /** 摘要用的重要事件清單（最多 limit 個）。沒有事件資料時顯示說明，不影響所在頁面。 */
 export default function TopEvents({ topics, status, tag, keywords, limit = 3, emptyText = '近 72 小時沒有符合的重要事件' }) {
   const list = topEvents(topics || [], { tag, keywords, limit });
-  if (status === 'error' && list.length === 0) return <p className="text-sm text-gray-500 text-center py-4">事件載入失敗</p>;
-  if (status === 'loading' && list.length === 0) return <p className="text-sm text-gray-500 text-center py-4">載入中…</p>;
-  if (list.length === 0) return <p className="text-sm text-gray-500 text-center py-4">{emptyText}</p>;
+  if (status === 'error' && list.length === 0) return <ErrorState message="事件載入失敗" />;
+  if (status === 'loading' && list.length === 0) return <LoadingSkeleton lines={3} />;
+  if (list.length === 0) return <EmptyState title={emptyText} className="py-4" />;
   return (
     <ul className="space-y-2" data-testid="top-events">
       {list.map(t => (
         <li key={t.id}>
           <button onClick={() => openEventCenter(tag || 'all')} aria-label={`查看事件：${t.title}`}
-            className="list-row w-full text-left rounded-xl border border-gray-700/40 bg-gray-800/40 hover:bg-gray-800 p-2.5 transition">
+            className="ui-focus list-row w-full text-left rounded-lg border border-ui-line bg-ui-soft hover:bg-ui-surface p-2.5 transition">
             <p className="text-sm font-medium text-ink leading-snug line-clamp-2">{t.title}</p>
-            <div className="flex flex-wrap items-center gap-1.5 mt-1.5 text-xs text-gray-500">
+            <div className="flex flex-wrap items-center gap-1.5 mt-1.5 text-xs text-ui-muted">
               <span>{t.articleCount} 篇｜{t.mediaCount} 家媒體</span>
               <span className={tagClass('gray')}>{sentimentText(t)}</span>
               <span>{velocityText(t)}</span>

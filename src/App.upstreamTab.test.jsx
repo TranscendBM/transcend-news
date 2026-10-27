@@ -125,7 +125,6 @@ describe('USMarketTab — 查詢失敗顯示明確錯誤，可重試', () => {
 describe('USMarketTab — 期間篩選只保留今天／本週／本月，台灣週一為週起點', () => {
   it('only renders today/week/month period buttons (no 本年/已載入資料)', () => {
     renderUSMarketTab({ upstreamArticles: [] });
-    const card = newsListCard();
     expect(within(filterBar()).getByText('今天')).toBeTruthy();
     expect(within(filterBar()).getByText('本週')).toBeTruthy();
     expect(within(filterBar()).getByText('本月')).toBeTruthy();

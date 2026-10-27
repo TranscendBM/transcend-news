@@ -455,7 +455,7 @@ describe('App 整合：事件中心頁籤', () => {
   it('舊網址 ?tab=events 導向 上游市場 → 事件；導覽列不再有獨立的「事件中心」', async () => {
     setUrl('?tab=events&filter=transcend');
     await renderApp();
-    expect(await screen.findByText('事件中心', { selector: 'h3' }, { timeout: 5000 })).toBeTruthy();
+    expect(await screen.findByRole('heading', { name: '事件', level: 2 }, { timeout: 5000 })).toBeTruthy();
     await waitFor(() => expect(Object.fromEntries(new URLSearchParams(window.location.search))).toEqual({ tab: 'us', section: 'events', filter: 'transcend' }));
     expect(screen.getByRole('tab', { name: '事件' }).getAttribute('aria-selected')).toBe('true');
     expect(screen.queryByRole('button', { name: /事件中心/ })).toBeNull();
