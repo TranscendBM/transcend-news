@@ -5,7 +5,8 @@ import Card from '../../components/Card.jsx';
 import TabBtn from '../../components/TabBtn.jsx';
 import Icon from '../../components/Icon.jsx';
 import { BRAND } from '../../utils/news.js';
-import { COMPETITOR_ORDER } from '../../config/competitors.js';
+import { COMPETITOR_ORDER, COMPETITORS } from '../../config/competitors.js';
+import BrandTag from '../../components/ui/BrandTag.jsx';
 import { safeHttpUrl } from '../../utils/safeUrl.js';
 import { sortMaterial, materialYears, filterMaterial } from './irData.js';
 
@@ -43,6 +44,9 @@ export function CompetitorMaterial({ material }) {
     '下市': 'bg-gray-800/80 text-gray-400 border-gray-600/50',
     '合併': 'bg-cyan-900/60 text-cyan-300 border-cyan-700/50',
   };
+
+  // 標籤名稱與「競品動態監測」一致（沿用 COMPETITORS 的 "ADATA 威剛"）；創見與未知公司退回原名稱
+  const tagName = r => COMPETITORS.find(c => c.stock === r.code)?.name || COMP_META[r.code]?.name || r.name || r.code;
 
   // 日期用數字比較排序（新→舊），不用字串排序
   const records = useMemo(() => sortMaterial(material), [material]);
@@ -92,9 +96,7 @@ export function CompetitorMaterial({ material }) {
             return (
               <div key={key} className={`rounded-xl px-3 py-2.5 text-sm border ${r.highlight ? 'border-gray-600/60 bg-gray-800/40' : 'border-gray-800/40 bg-gray-900/30'}`}>
                 <div className="flex items-start gap-2">
-                  <span className="font-bold shrink-0" style={{ color: meta.color || '#9ca3af' }}>
-                    {meta.name || r.name || r.code}
-                  </span>
+                  <BrandTag name={tagName(r)} color={meta.color} />
                   <span className="text-gray-500 shrink-0 tabular-nums">{r.date}</span>
                   {link && !open
                     ? <a href={link} target="_blank" rel="noopener noreferrer"
@@ -144,11 +146,12 @@ export function CompetitorMaterial({ material }) {
       </p>
 
       {/* 公開資訊觀測站連結 */}
-      <div className="flex flex-wrap items-center gap-1.5 mt-3 pt-3 border-t border-gray-800/60">
-        <span className="text-xs text-gray-500 mr-1">公開資訊觀測站</span>
+      <div className="flex flex-wrap items-center gap-x-4 gap-y-1 mt-3 pt-3 border-t border-gray-800/60">
+        <span className="text-sm text-gray-500">公開資訊觀測站</span>
         {MOPS_LINKS.map(l => (
           <a key={l.code} href={mopsUrl(l.code)} target="_blank" rel="noopener noreferrer"
-            className="text-xs px-2.5 py-1 rounded-lg border border-gray-700/60 text-gray-400 hover:text-gray-200 hover:bg-gray-800 transition">
+            aria-label={`${l.name} ${l.code} 公開資訊觀測站（另開新分頁）`}
+            className="text-sm font-medium text-blue-600 hover:underline whitespace-nowrap inline-flex items-center gap-1 py-1">
             {l.name} {l.code} <Icon name="external" />
           </a>
         ))}

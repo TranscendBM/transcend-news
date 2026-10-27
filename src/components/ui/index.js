@@ -1,6 +1,7 @@
 // 全站共用 UI 元件的統一出口：頁面一律從這裡取用，不再各自寫一套。
 export { default as ActionButton, IconButton } from './ActionButton.jsx';
 export { default as StatusBadge } from './StatusBadge.jsx';
+export { default as BrandTag } from './BrandTag.jsx';
 export { default as LoadingSkeleton, MetricSkeleton } from './LoadingSkeleton.jsx';
 export { default as EmptyState } from './EmptyState.jsx';
 export { default as ErrorState } from './ErrorState.jsx';
