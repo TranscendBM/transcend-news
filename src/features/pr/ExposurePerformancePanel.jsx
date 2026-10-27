@@ -53,7 +53,7 @@ function SyncStatusLine({ sync, hasMatchData }) {
 
 const fmtDay = d => (d ? d.toLocaleDateString('zh-TW', { timeZone: 'Asia/Taipei' }) : '—');
 const pct = v => `${Math.round(v * 100)}%`;
-const TOPIC_PAGE = 15;
+const TOPIC_PAGE = 10;
 
 const inputCls = 'min-w-0 max-w-full rounded-xl border border-gray-700/60 px-3 py-2 text-sm outline-none transition focus:border-red-700';
 const btnCls = 'text-sm px-3.5 py-1.5 rounded-lg border border-gray-700/60 text-gray-400 hover:text-gray-200 hover:bg-gray-800 transition disabled:opacity-40 disabled:cursor-not-allowed shrink-0';

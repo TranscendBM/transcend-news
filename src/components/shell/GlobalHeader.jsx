@@ -29,7 +29,7 @@ export default function GlobalHeader({ children, connected, updated, loading, on
             <span className="hidden md:inline">{connected ? 'Firebase 已連線' : '連線中…'}</span>
             <span className="sr-only md:hidden">{connected ? 'Firebase 已連線' : '連線中'}</span>
           </span>
-          <LastUpdatedLabel date={updated} className="hidden sm:inline" />
+          <LastUpdatedLabel date={updated} className="text-[11px] sm:text-xs" />
           <ActionButton onClick={onRefresh} disabled={loading} aria-label={loading ? '載入中' : '重新整理'} title="重新整理資料"
             icon={loading ? undefined : 'refresh'}>
             {loading && <Spinner />}

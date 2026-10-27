@@ -147,8 +147,8 @@ describe('ExposurePerformancePanel — 新聞稿／主題與明細', () => {
     const many = Array.from({ length: 20 }, (_, i) => raw(`m${i}`, tw(2026, 9, 1 + i), 'A報', '',
       [0, 1, 2, 3].map(k => String.fromCharCode(0x4e00 + i * 37 + k * 11)).join('')));
     renderPanel({ records: many });
-    expect(topicButtons()).toHaveLength(15);
-    fireEvent.click(screen.getByText(/顯示更多（再 5 則）/));
+    expect(topicButtons()).toHaveLength(10);
+    fireEvent.click(screen.getByText(/顯示更多（再 10 則）/));
     expect(topicButtons()).toHaveLength(20);
   });
 });

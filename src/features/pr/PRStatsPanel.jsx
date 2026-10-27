@@ -1,4 +1,4 @@
-import Icon from '../../components/Icon.jsx';
+import MetricCard from '../../components/ui/MetricCard.jsx';
 import { useNow } from '../../hooks/useNow.js';
 import {
   taipeiDayStart, taipeiWeekStart, taipeiMonthStart, taipeiPeriodRange, inPeriod,
@@ -36,32 +36,20 @@ export function PRStatsPanel({ articles, status = 'ready' }) {
   };
 
   const PERIODS = [
-    { label: '今天', val: counts.today, color: '#dc2626' },
-    { label: '本週', val: counts.week, color: '#ea580c' },
-    { label: '本月', val: counts.month, color: '#ca8a04' },
-    { label: '上月', val: counts.lastMonth, color: '#6b7280' },
+    { label: '今天', val: counts.today },
+    { label: '本週', val: counts.week },
+    { label: '本月', val: counts.month },
+    { label: '上月', val: counts.lastMonth },
   ];
+  const cardState = status === 'error' ? 'error' : status === 'loading' ? 'loading' : 'ready';
 
   return (
     <div className="space-y-4">
-      {/* 統計卡片：查詢失敗時明確顯示錯誤，不悄悄顯示 0 */}
+      {/* 統計卡片：查詢失敗明確顯示錯誤、載入中顯示骨架，不悄悄顯示 0（重點數字用品牌紅） */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
         {PERIODS.map(p => (
-          <div key={p.label} className="bg-gray-900 border border-gray-700/60 rounded-2xl p-4 text-center">
-            <p className="text-xs text-gray-500 mb-1">媒體曝光｜{p.label}</p>
-            {status === 'error' ? (
-              <p className="text-sm text-red-400 mt-1"><Icon name="alert" /> 載入失敗</p>
-            ) : status === 'loading' ? (
-              <p className="text-sm text-gray-600 mt-1">載入中…</p>
-            ) : (
-              <>
-                <p className="text-3xl font-bold tabular-nums leading-none mt-1" style={{ color: p.color }}>
-                  {p.val}
-                </p>
-                <p className="text-xs text-gray-600 mt-1">篇</p>
-              </>
-            )}
-          </div>
+          <MetricCard key={p.label} label={`媒體曝光｜${p.label}`} value={`${p.val}`} hint={cardState === 'ready' ? '篇' : undefined} state={cardState}
+            tone="text-brand !text-3xl" className="text-center" />
         ))}
       </div>
     </div>

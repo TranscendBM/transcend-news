@@ -261,9 +261,11 @@ describe('PRTab — 曝光成效頁：人工彙整曝光在最下方並提供上
   it('人工彙整曝光是曝光成效頁最後一張卡片，在重點媒體曝光監控之後', () => {
     renderPRTab({ section: 'exposure', prArticles: [], mediaExposureStatus: 'ready' });
     const media = screen.getByText('重點媒體曝光監控').closest('[data-card]');
-    const manual = screen.getByText('人工彙整曝光').closest('[data-card]');
+    const manual = screen.getByText('人工彙整曝光', { selector: 'h3' }).closest('[data-card]');
     expect(media.compareDocumentPosition(manual) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-    expect(manual.parentElement.lastElementChild).toBe(manual);
+    // 每個檢視包在自己的容器裡（一次只顯示一個），人工彙整曝光的容器是最後一個
+    const wrap = manual.parentElement;
+    expect(wrap.parentElement.lastElementChild).toBe(wrap);
   });
 
   it('預設不顯示上傳區，按「上傳 Excel」才展開，再按一次收合', () => {

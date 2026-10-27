@@ -115,7 +115,8 @@ body { font-family: 'Segoe UI', system-ui, -apple-system, sans-serif; background
 
 /* PR 媒體戰情子頁籤：鍵盤焦點清楚可見（選中的標籤是深紅底，所以外框往外推 2px 才看得到）。 */
 .pr-subtab:focus-visible { outline: 2px solid rgb(150,0,20); outline-offset: 2px; }
-.pr-subnav [role="tablist"] { scrollbar-width: thin; }
+.pr-subnav [role="tablist"] { scrollbar-width: none; }
+.pr-subnav [role="tablist"]::-webkit-scrollbar { display: none; }
 
 /* 尊重「減少動態效果」：關掉轉場與動畫。畫面狀態不依賴動畫（選中的子頁用顏色標示、
    內容直接切換），所以關掉不影響任何功能。 */

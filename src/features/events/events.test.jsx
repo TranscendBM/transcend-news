@@ -339,7 +339,7 @@ describe('涉及創見：第二層嚴格判定', () => {
     expect(filterTopics(MIXED, { tag: 'transcend' })).toHaveLength(topicStats(MIXED, new Date()).transcend);
   });
 
-  it('PR 總覽的「涉及創見的重要事件」只列真正提到創見的，最多 3 則', () => {
+  it('PR 總覽的「需要注意的事件」只列真正提到創見的，最多 3 則', () => {
     render(<TopEvents topics={MIXED} status="ready" tag="transcend" limit={3} />);
     const items = within(screen.getByTestId('top-events')).getAllByRole('listitem');
     expect(items).toHaveLength(3);
@@ -488,10 +488,10 @@ describe('App 整合：事件中心頁籤', () => {
     expect(mounts).toEqual({ feed: 1, pr: 1, exposure: 1, upstream: 1 });
   });
 
-  it('PR 總覽有「涉及創見的重要事件」（最多 3 個）', async () => {
+  it('PR 總覽有「需要注意的事件」（最多 3 個）', async () => {
     setUrl('?tab=pr');
     await renderApp();
-    const card = (await screen.findByText('涉及創見的重要事件', { selector: 'h3' }, { timeout: 5000 })).closest('[data-card]');
+    const card = (await screen.findByText('需要注意的事件', { selector: 'h3' }, { timeout: 5000 })).closest('[data-card]');
     await waitFor(() => expect(within(card).queryAllByRole('listitem').length).toBeGreaterThan(0));
     expect(within(card).getAllByRole('listitem').length).toBeLessThanOrEqual(3);
   });
