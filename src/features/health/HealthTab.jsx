@@ -101,7 +101,7 @@ function LevelBadge({ level }) {
 
 // 一列排程：先給結論（狀態徽章），再給「最後成功／下一次預計／最近錯誤／資料是否過期」；
 // 函式名稱等技術細節預設收合。
-function HealthRow({ title, level, lastSuccessMs, nextText, error, errorAt, freshness, extra, tech, now }) {
+function HealthRow({ title, level, lastSuccessMs, showLastSuccess = true, nextText, error, errorAt, freshness, extra, tech, now }) {
   const [open, setOpen] = useState(false);
   return (
     <div className="border-b border-ui-line py-3 last:border-0">
@@ -110,7 +110,7 @@ function HealthRow({ title, level, lastSuccessMs, nextText, error, errorAt, fres
         <LevelBadge level={level} />
       </div>
       <dl className="mt-1.5 grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-0.5 text-xs text-ui-muted">
-        <div><dt className="inline">上次成功執行：</dt><dd className="inline">{lastSuccessMs == null ? '從未' : fmtAgo(lastSuccessMs, now)}</dd></div>
+        {showLastSuccess && <div><dt className="inline">上次成功執行：</dt><dd className="inline">{lastSuccessMs == null ? '從未' : fmtAgo(lastSuccessMs, now)}</dd></div>}
         {nextText && <div><dt className="inline">下一次預計：</dt><dd className="inline">{nextText}</dd></div>}
       </dl>
       {extra && <p className="text-xs text-ui-muted mt-1">{extra}</p>}
@@ -164,12 +164,12 @@ function aiWorkerLevel(statusDoc, now) {
 
 function AiWorkerRow({ statusDoc, level, now }) {
   if (!statusDoc) {
-    return <HealthRow title={AI_TITLE} level="unknown" now={now} extra="尚無彙總紀錄" tech={AI_TECH} />;
+    return <HealthRow title={AI_TITLE} level="unknown" showLastSuccess={false} now={now} extra="尚無彙總紀錄" tech={AI_TECH} />;
   }
   const pending = statusDoc.pendingCount ?? 0;
   const lastInsightMs = tsToMs(statusDoc.lastInsightAt);
   return (
-    <HealthRow title={AI_TITLE} level={level} now={now} tech={AI_TECH}
+    <HealthRow title={AI_TITLE} level={level} showLastSuccess={false} now={now} tech={AI_TECH}
       nextText="每天 02:35 彙總"
       extra={`待處理新聞分析：${pending} 筆 · 最近一次完成分析：${lastInsightMs == null ? '從未' : fmtAgo(lastInsightMs, now)}`}
       freshness={level === 'stale' ? { level: 'warn', text: '有積壓工作但很久沒有新的分析結果，本機 worker 可能沒有在執行' } : null} />
