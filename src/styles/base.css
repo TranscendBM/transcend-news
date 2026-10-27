@@ -140,6 +140,9 @@ body { font-family: 'Segoe UI', system-ui, -apple-system, sans-serif; background
 @media (min-width:768px) { .ui-field { min-height:2.25rem; } }
 .ui-field:focus { outline:2px solid var(--brand); outline-offset:1px; border-color:var(--brand); }
 .ui-focus:focus-visible, .light-theme .ui-focus:focus-visible { outline:2px solid var(--brand); outline-offset:2px; }
+.ui-header .ui-focus:focus-visible { outline-color:#fff; }
+.ui-header nav .ui-focus:focus-visible { outline-color:var(--brand); }   /* 手機底部導覽是白底 */
+@media (min-width:768px) { .ui-header nav .ui-focus:focus-visible { outline-color:#fff; } }
 .ui-skeleton { background:linear-gradient(90deg,#e8edf3 25%,#f3f6f9 50%,#e8edf3 75%); background-size:200% 100%; animation:skeleton 1.4s ease-in-out infinite; }
 @keyframes skeleton { from { background-position:200% 0; } to { background-position:-200% 0; } }
 @media (prefers-reduced-motion:reduce) { .ui-skeleton { animation:none; } }
