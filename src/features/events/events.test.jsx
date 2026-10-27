@@ -491,7 +491,7 @@ describe('App 整合：事件中心頁籤', () => {
   it('PR 總覽有「涉及創見的重要事件」（最多 3 個）', async () => {
     setUrl('?tab=pr');
     await renderApp();
-    const card = (await screen.findByText('涉及創見的重要事件', { selector: 'h3' }, { timeout: 5000 })).closest('.bg-gray-900');
+    const card = (await screen.findByText('涉及創見的重要事件', { selector: 'h3' }, { timeout: 5000 })).closest('[data-card]');
     await waitFor(() => expect(within(card).queryAllByRole('listitem').length).toBeGreaterThan(0));
     expect(within(card).getAllByRole('listitem').length).toBeLessThanOrEqual(3);
   });

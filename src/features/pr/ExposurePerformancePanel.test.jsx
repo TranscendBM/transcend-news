@@ -95,7 +95,7 @@ describe('ExposurePerformancePanel — 整體摘要', () => {
 
   it('曝光類型分布與媒體排行', () => {
     renderPanel();
-    const panel = screen.getByText('新聞稿曝光成效').closest('.bg-gray-900');
+    const panel = screen.getByText('新聞稿曝光成效').closest('[data-card]');
     expect(within(panel).getByText(/網路新聞 4（67%）/)).toBeTruthy();
     expect(within(panel).getByText(/影音 1（17%）/)).toBeTruthy();
     expect(within(panel).getByText(/社群 1（17%）/)).toBeTruthy();

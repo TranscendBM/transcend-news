@@ -1,7 +1,6 @@
 import { useState, useMemo } from 'react';
 
-import TabBtn from '../../components/TabBtn.jsx';
-import Icon from '../../components/Icon.jsx';
+import { ActionButton, ListStatus, MetricCard, PageHeader, SectionCard, SegmentedControl } from '../../components/ui/index.js';
 import ShowMoreButton, { useShowMore } from '../../components/ShowMore.jsx';
 import NewsFilterToolbar from '../../components/filters/NewsFilterToolbar.jsx';
 import USNewsCard from '../news/USNewsCard.jsx';
@@ -17,7 +16,7 @@ import { useNow } from '../../hooks/useNow.js';
 import { taipeiPeriodRange, inPeriod } from '../../utils/dates.js';
 import { exportNewsExcel } from '../../utils/formatting.js';
 import {
-  BRAND, getSentiment, dedupeArticlesByTitle, getUSBrand, US_BRAND_CFG, filterNewsList,
+  getSentiment, dedupeArticlesByTitle, getUSBrand, US_BRAND_CFG, filterNewsList,
 } from '../../utils/news.js';
 
 // 上游市場自己的期間設定：只保留今天/本週/本月。故意不共用 PRTab 的
@@ -144,6 +143,14 @@ export function USMarketTab({ upstreamArticles, upstreamStatus, refreshUpstreamN
       {/* 今日重要情報受下方工具列的篩選影響，所以新聞清單子頁也放一份；總覽子頁顯示同一份資料 */}
       <TodayBriefing articles={briefingSource} title="上游市場今日重要情報" topics={topics} />
 
+      <PageHeader title="新聞清單" description="供應鏈與 DRAM／Flash 市場新聞；篩選條件同時套用到下方統計與今日重要情報。"
+        actions={
+          <ActionButton icon="download" disabled={final.length === 0}
+            onClick={() => exportNewsExcel(final, '上游市場新聞',
+              `上游市場新聞_${UPSTREAM_TIME_FILTERS.find(f => f.id === timeFilter)?.label}`,
+              { 品牌: getUSBrand })}>匯出 Excel</ActionButton>
+        } />
+
       <NewsFilterToolbar
         query={usQuery} setQuery={setUsQuery}
         media={usMedia} setMedia={setUsMedia}
@@ -151,89 +158,31 @@ export function USMarketTab({ upstreamArticles, upstreamStatus, refreshUpstreamN
         mediaOptions={mediaOptions}
         resultCount={searchFiltered.length} totalCount={validUpstream.length}
         onReset={resetUpstreamFilters}
-      />
+        extraActive={[
+          ...(brandFilter !== 'all' ? [{ key: 'b', label: `品牌：${US_BRAND_CFG.find(b => b.id === brandFilter)?.label || brandFilter}`, onClear: () => setBrandFilter('all') }] : []),
+        ]}>
+        <SegmentedControl label="期間" value={timeFilter} onChange={setTimeFilter} options={UPSTREAM_TIME_FILTERS} />
+        <SegmentedControl label="品牌" value={brandFilter} onChange={setBrandFilter} className="basis-full"
+          options={US_BRAND_CFG.map(b => ({ id: b.id, label: b.label, count: (b.id === 'all' ? periodFiltered.length : (brandCounts[b.id] || 0)) || undefined }))} />
+      </NewsFilterToolbar>
 
       {/* 統計卡片：查詢失敗時明確顯示錯誤，載入中顯示載入中，不悄悄顯示 0 */}
       <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
         {STAT_CARDS.map((s, i) => (
-          <div key={i} className="bg-gray-900 rounded-2xl border border-gray-700/60 p-4">
-            <p className="text-xs text-gray-500 mb-1">{s.label}</p>
-            {upstreamStatus === 'error' ? (
-              <p className="text-sm text-red-400 mt-1"><Icon name="alert" /> 載入失敗</p>
-            ) : upstreamStatus === 'loading' ? (
-              <p className="text-sm text-gray-600 mt-1">載入中…</p>
-            ) : (
-              <>
-                <p className={`${s.big === false ? 'text-lg' : 'text-2xl'} font-bold ${s.cls} truncate`}>{s.val}</p>
-                <p className="text-xs text-gray-600 mt-0.5">{s.sub}</p>
-              </>
-            )}
-          </div>
+          <MetricCard key={i} label={s.label} value={String(s.val)} hint={s.sub}
+            state={upstreamStatus === 'error' ? 'error' : upstreamStatus === 'loading' ? 'loading' : 'ready'}
+            tone={s.cls} />
         ))}
       </div>
 
-      {/* 主要新聞卡 */}
-      <div className="bg-gray-900 rounded-2xl border border-gray-700/60 p-4">
-        <div className="flex items-center gap-2 mb-3">
-          <h3 className="text-base font-semibold text-gray-200 flex items-center gap-2 min-w-0">
-            <Icon name="globe" className="text-gray-500" />上游供應鏈 ＆ DRAM / Flash 市場新聞
-          </h3>
-          {/* 匯出目前畫面上的完整結果（final，未截斷成前 80 則）：期間＋品牌＋搜尋/媒體/情緒都已套用 */}
-          <button
-            onClick={() => exportNewsExcel(final, '上游市場新聞',
-              `上游市場新聞_${UPSTREAM_TIME_FILTERS.find(f => f.id === timeFilter)?.label}`,
-              { 品牌: getUSBrand })}
-            disabled={final.length === 0}
-            className="ml-auto text-sm px-3.5 py-1.5 rounded-lg border border-gray-700/60 text-gray-400 hover:text-gray-200 hover:bg-gray-800 transition disabled:opacity-40 disabled:cursor-not-allowed shrink-0">
-            <Icon name="download" /> 匯出 Excel
-          </button>
-        </div>
-
-        {/* 時間篩選：今天/本週/本月/上月，上游市場專用（見上方 UPSTREAM_TIME_FILTERS） */}
-        <div className="flex flex-wrap gap-1.5 mb-3">
-          {UPSTREAM_TIME_FILTERS.map(f => (
-            <TabBtn key={f.id} active={timeFilter === f.id} onClick={() => setTimeFilter(f.id)}>{f.label}</TabBtn>
-          ))}
-        </div>
-
-        {/* 品牌篩選 pill */}
-        <div className="flex flex-wrap gap-1.5 mb-4">
-          {US_BRAND_CFG.map(b => {
-            const cnt = b.id === 'all' ? periodFiltered.length : (brandCounts[b.id] || 0);
-            const active = brandFilter === b.id;
-            return (
-              <button key={b.id} onClick={() => setBrandFilter(b.id)}
-                className={`text-xs px-2.5 py-1 rounded-full border transition-all ${
-                  active ? 'text-white' : 'bg-gray-800/60 text-gray-400 hover:text-gray-200'
-                }`}
-                style={active
-                  ? { background: b.color || BRAND, borderColor: b.color || BRAND }
-                  : { borderColor: 'rgba(75,85,99,0.4)' }}>
-                {b.label}
-                {cnt > 0 && <span className={`ml-1 ${active ? 'text-white/70' : 'text-gray-600'}`}>{cnt}</span>}
-              </button>
-            );
-          })}
-        </div>
-
-        {upstreamStatus === 'error'
-          ? <div className="h-32 flex flex-col items-center justify-center gap-2 text-red-400 text-sm">
-              <span><Icon name="alert" /> 上游新聞載入失敗</span>
-              <button onClick={refreshUpstreamNews}
-                className="text-xs px-3 py-1 rounded-lg border border-red-700/60 text-red-300 hover:bg-red-900/30 transition">
-                重試
-              </button>
-            </div>
-          : shown.length > 0
-          ? <>
-              <div className="space-y-2">{shown.map((n, i) => <USNewsCard key={n.id || i} article={n} />)}</div>
-              <ShowMoreButton remaining={more.remaining} step={80} onMore={more.showMore} onAll={more.showAll} />
-            </>
-          : <div className="h-32 flex items-center justify-center text-gray-600 text-sm">
-              {upstreamStatus === 'ready' ? '此區間暫無資料' : '載入中…'}
-            </div>
-        }
-      </div>
+      {/* 篩選：搜尋、媒體、情緒、期間、品牌集中在同一個 FilterBar（上方），清單只負責顯示 */}
+      <SectionCard title="上游供應鏈 ＆ DRAM / Flash 市場新聞" icon="globe">
+        <ListStatus status={upstreamStatus} count={shown.length} errorText="上游新聞載入失敗" onRetry={refreshUpstreamNews}
+          emptyText="此區間暫無資料" emptyHint="可調整上方的期間、品牌或搜尋條件">
+          <div className="space-y-2">{shown.map((n, i) => <USNewsCard key={n.id || i} article={n} />)}</div>
+          <ShowMoreButton remaining={more.remaining} step={80} onMore={more.showMore} onAll={more.showAll} />
+        </ListStatus>
+      </SectionCard>
     </div>
   );
 

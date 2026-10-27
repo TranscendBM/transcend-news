@@ -77,7 +77,7 @@ const material = [
 const setUrl = search => window.history.replaceState(null, '', `/${search}`);
 const tabNamed = name => screen.getByRole('tab', { name });
 const selectedTab = () => screen.getAllByRole('tab').find(t => t.getAttribute('aria-selected') === 'true')?.textContent.trim();
-const cardOf = title => screen.getByText(title, { selector: 'h3' }).closest('.bg-gray-900');
+const cardOf = title => screen.getByText(title, { selector: 'h3' }).closest('[data-card]');
 
 function renderIR(props = {}, section) {
   if (section) setUrl(`?tab=ir&section=${section}`);
@@ -204,7 +204,7 @@ describe('IR 總覽 — 摘要內容', () => {
     expect(within(card).getAllByRole('listitem')).toHaveLength(5);
     expect(within(card).getByText('$80.00')).toBeTruthy();
     expect(within(card).getByText('-1.20%')).toBeTruthy();
-    expect(within(card).getAllByText('—').length).toBeGreaterThan(0);
+    expect(within(card).getAllByText('尚無股價').length).toBeGreaterThan(0);   // 沒有資料的競品明說「尚無股價」，不是「—」
   });
 
   it('「查看全部」導向對應子頁，並捲回頂端', () => {
@@ -234,7 +234,7 @@ describe('IR 總覽 — 摘要內容', () => {
     const empty = renderIR({ stocks: {}, revenue: [], financials: [], dividends: [], material: [], loading: false });
     for (const bad of ['NaN', 'undefined', 'null', '$0', '0%']) expect(empty.container.textContent).not.toContain(bad);
     expect(empty.container.textContent).toContain('尚無資料');
-    expect(within(cardOf('財務營運摘要')).getAllByText('—').length).toBeGreaterThanOrEqual(4);
+    expect(within(cardOf('財務營運摘要')).getAllByText('尚無資料').length).toBeGreaterThanOrEqual(4);
   });
 
   it('資料缺欄位（EPS／毛利率為空、0）顯示「—」而不是 0', () => {
@@ -270,8 +270,14 @@ describe('IR — 資料狀態（正常／更新中／過期／載入失敗／尚
     expect(selectedTab()).toBe('股價與競品');
   });
 
-  it('資料正常時狀態列顯示「正常」，且沒有可點的警示按鈕', () => {
+  it('資料正常時狀態列縮成一行「資料狀態正常」，可展開明細，且沒有可點的警示按鈕', () => {
     renderIR();
+    expect(screen.getByText('資料狀態正常')).toBeTruthy();
+    expect(screen.queryByText('股價：正常')).toBeNull();            // 預設不展開明細
+    const toggle = screen.getByRole('button', { name: '查看明細' });
+    expect(toggle.getAttribute('aria-expanded')).toBe('false');
+    fireEvent.click(toggle);
+    expect(toggle.getAttribute('aria-expanded')).toBe('true');
     expect(screen.getByText('股價：正常')).toBeTruthy();
     expect(screen.queryByRole('button', { name: /前往查看/ })).toBeNull();
   });
@@ -294,7 +300,7 @@ describe('IR 股價與競品', () => {
     const comp = cardOf('競品股價摘要');
     expect(comp.querySelector('[data-trend="down"]').textContent).toContain('▼');
     expect(comp.querySelector('[data-trend="flat"]').textContent).toContain('─');
-    expect(comp.querySelector('[data-trend="none"]')).toBeTruthy();
+    expect(within(comp).getAllByText('尚無股價').length).toBeGreaterThan(0);
     expect(cardOf('創見股價').querySelector('[data-trend="up"]').textContent).toContain('▲');
   });
 

@@ -1,4 +1,6 @@
-import Icon from '../../components/Icon.jsx';
+import LoadingSkeleton from '../../components/ui/LoadingSkeleton.jsx';
+import EmptyState from '../../components/ui/EmptyState.jsx';
+import ErrorState from '../../components/ui/ErrorState.jsx';
 import { STATUS_LABEL } from './irData.js';
 
 // 資料新鮮度：全站 IR 統一用這個徽章，文字＋符號，不只靠顏色。
@@ -22,13 +24,9 @@ export function DataStatusBadge({ status, label, updated }) {
   );
 }
 
-/** 沒有資料時的空狀態：更新中／載入失敗／尚無資料（不會出現 0、NaN、undefined）。 */
+/** 沒有資料時的狀態：載入中＝骨架；載入失敗＝紅色錯誤＋下一步；尚無資料＝說明（不會出現 0、NaN、undefined）。 */
 export function EmptyFinancialState({ status = 'empty', emptyText = '尚無資料', height = 'h-24' }) {
-  const text = status === 'loading' ? '資料更新中…' : status === 'error' ? '載入失敗，請按右上角「重新整理」再試一次' : emptyText;
-  return (
-    <div role={status === 'error' ? 'alert' : 'status'} className={`${height} flex items-center justify-center gap-2 text-sm text-gray-500 text-center`}>
-      {status === 'error' && <Icon name="alert" />}
-      {text}
-    </div>
-  );
+  if (status === 'loading') return <LoadingSkeleton lines={3} label="資料更新中" className={`${height} py-2`} />;
+  if (status === 'error') return <ErrorState message="載入失敗，請按右上角「重新整理」再試一次" />;
+  return <EmptyState title={emptyText} className="py-5" />;
 }

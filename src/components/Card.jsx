@@ -1,15 +1,6 @@
-import Icon from './Icon.jsx';
+import SectionCard from './ui/SectionCard.jsx';
 
+// 舊名稱 Card：全站區塊卡片已統一為 ui/SectionCard（同一套 token、標題列與間距）。
 export default function Card({ title, icon, children, className = '', actions }) {
-  return (
-    <div className={`bg-gray-900 rounded-2xl border border-gray-700/60 p-4 ${className}`}>
-      {title && (
-        <div className="flex flex-wrap items-center justify-between gap-2 mb-3">
-          <h3 className="text-base font-semibold text-gray-200 flex items-center gap-2">{icon && <Icon name={icon} className="text-gray-500" />}{title}</h3>
-          {actions}
-        </div>
-      )}
-      {children}
-    </div>
-  );
+  return <SectionCard title={title} icon={icon} actions={actions} className={className} as="div">{children}</SectionCard>;
 }

@@ -13,7 +13,7 @@ export function ViewAllButton({ onClick, label }) {
 /** 全站唯一的區塊卡片：標題列（圖示＋標題＋可選說明／動作／查看全部）＋內容。 */
 export default function SectionCard({ title, icon, description, actions, onViewAll, children, className = '', as: Tag = 'section' }) {
   return (
-    <Tag className={`ui-card ${className}`} aria-label={title || undefined}>
+    <Tag data-card className={`ui-card ${className}`} aria-label={title || undefined}>
       {(title || actions || onViewAll) && (
         <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1 mb-3">
           {title && (

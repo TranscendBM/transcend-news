@@ -16,7 +16,7 @@ export function KeyMediaPanel({ articles, status = 'ready', limit, onViewAll }) 
   const now = useNow();
   const monthStart = taipeiMonthStart(now);
   const getD = n => n.pubDate?.toDate ? n.pubDate.toDate() : new Date(n.pubDate || 0);
-  const actions = onViewAll ? <ViewAllButton onClick={onViewAll} label="查看全部：重點媒體曝光監控" /> : undefined;
+  const actions = onViewAll ? <ViewAllButton onClick={onViewAll} label="重點媒體曝光監控" /> : undefined;
 
   // 註：不用 useMemo，理由同 PRStatsPanel——避免 monthStart 隨時間變動時，
   // 只依賴 [articles] 的 memo 卡在舊邊界。

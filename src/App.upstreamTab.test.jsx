@@ -42,19 +42,23 @@ function renderUSMarketTab({ upstreamArticles = [], upstreamStatus = 'ready', re
   );
 }
 
-// 「上游供應鏈 ＆ DRAM / Flash 市場新聞」卡片：期間/品牌篩選按鈕跟
-// 下方的新聞清單都在這個容器內。
+// 「上游供應鏈 ＆ DRAM / Flash 市場新聞」清單卡片（只含新聞清單與「顯示更多」）。
 function newsListCard() {
-  return screen.getByText(/上游供應鏈/).closest('.bg-gray-900');
+  return screen.getByText(/上游供應鏈/).closest('[data-card]');
+}
+
+// 篩選列（搜尋／媒體／情緒／期間／品牌都在這一個 FilterBar；清單卡片只負責顯示結果）。
+function filterBar() {
+  return screen.getByRole('search');
 }
 
 // 「上游市場今日重要情報」卡片（TodayBriefing）。
 function briefingPanel() {
-  return screen.getByText('上游市場今日重要情報').closest('.bg-gray-900');
+  return screen.getByText('上游市場今日重要情報').closest('[data-card]');
 }
 
 function statCard(label) {
-  return screen.getByText(label).closest('.bg-gray-900');
+  return screen.getByText(label).closest('[data-metric]');
 }
 
 afterEach(() => {
@@ -109,7 +113,7 @@ describe('USMarketTab — 查詢失敗顯示明確錯誤，可重試', () => {
       <USMarketTab upstreamArticles={[]} upstreamStatus="loading" refreshUpstreamNews={vi.fn()} />);
     const card = statCard('本期新聞');
     expect(within(card).queryByText('0')).toBeNull();
-    expect(within(card).getByText('載入中…')).toBeTruthy();
+    expect(within(card).getByRole('status').getAttribute('aria-busy')).toBe('true');   // 骨架，不是 0
 
     rerender(<USMarketTab upstreamArticles={[]} upstreamStatus="error" refreshUpstreamNews={vi.fn()} />);
     const cardAfter = statCard('本期新聞');
@@ -122,12 +126,12 @@ describe('USMarketTab — 期間篩選只保留今天／本週／本月，台灣
   it('only renders today/week/month period buttons (no 本年/已載入資料)', () => {
     renderUSMarketTab({ upstreamArticles: [] });
     const card = newsListCard();
-    expect(within(card).getByText('今天')).toBeTruthy();
-    expect(within(card).getByText('本週')).toBeTruthy();
-    expect(within(card).getByText('本月')).toBeTruthy();
-    expect(within(card).getByText('上月')).toBeTruthy();
-    expect(within(card).queryByText('本年')).toBeNull();
-    expect(within(card).queryByText('已載入資料')).toBeNull();
+    expect(within(filterBar()).getByText('今天')).toBeTruthy();
+    expect(within(filterBar()).getByText('本週')).toBeTruthy();
+    expect(within(filterBar()).getByText('本月')).toBeTruthy();
+    expect(within(filterBar()).getByText('上月')).toBeTruthy();
+    expect(within(filterBar()).queryByText('本年')).toBeNull();
+    expect(within(filterBar()).queryByText('已載入資料')).toBeNull();
   });
 
   it('week period uses the Taipei Monday boundary, not "last 7 days"', () => {
@@ -139,7 +143,7 @@ describe('USMarketTab — 期間篩選只保留今天／本週／本月，台灣
     renderUSMarketTab({ upstreamArticles: [thisWeek, lastWeek] });
 
     const card = newsListCard();
-    fireEvent.click(within(card).getByText('本週'));
+    fireEvent.click(within(filterBar()).getByText('本週'));
 
     expect(within(card).getByText('本週上游新聞')).toBeTruthy();
     expect(within(card).queryByText('上週上游新聞')).toBeNull();
@@ -220,7 +224,7 @@ describe('USMarketTab — 搜尋／媒體／情緒／品牌篩選同步影響統
 
     // 「Samsung」文字同時出現在品牌 pill 按鈕與新聞卡片上的品牌標籤，
     // 用 role=button 精準指到 pill 按鈕，避免點到卡片上的標籤。
-    fireEvent.click(within(newsListCard()).getByRole('button', { name: /^Samsung/ }));
+    fireEvent.click(within(filterBar()).getByRole('button', { name: /^Samsung/ }));
 
     expect(within(statCard('本期新聞')).getByText('1')).toBeTruthy();
     expect(within(statCard('品牌數量')).getByText('1')).toBeTruthy();
@@ -272,11 +276,11 @@ describe('USMarketTab — 上月期間與 Excel 匯出', () => {
     renderUSMarketTab({ upstreamArticles: [thisMonth, lastMonth] });
 
     const card = newsListCard();
-    fireEvent.click(within(card).getByText('上月'));
+    fireEvent.click(within(filterBar()).getByText('上月'));
     expect(within(card).getByText('六月上游新聞')).toBeTruthy();
     expect(within(card).queryByText('七月上游新聞')).toBeNull();
 
-    fireEvent.click(within(card).getByText('本月'));
+    fireEvent.click(within(filterBar()).getByText('本月'));
     expect(within(card).getByText('七月上游新聞')).toBeTruthy();
     expect(within(card).queryByText('六月上游新聞')).toBeNull();
   });
@@ -285,7 +289,7 @@ describe('USMarketTab — 上月期間與 Excel 匯出', () => {
     vi.setSystemTime(NOW);
     const todayRisk = mkUpstream('r1', 'Micron 財報優於預期', taipei(2026, 7, 20, 14, 0, 0));
     renderUSMarketTab({ upstreamArticles: [todayRisk] });
-    fireEvent.click(within(newsListCard()).getByText('上月'));
+    fireEvent.click(within(filterBar()).getByText('上月'));
     expect(within(briefingPanel()).getByText('Micron 財報優於預期')).toBeTruthy();
     expect(within(newsListCard()).queryByText('Micron 財報優於預期')).toBeNull();
   });
@@ -293,7 +297,7 @@ describe('USMarketTab — 上月期間與 Excel 匯出', () => {
   it('匯出按鈕在沒有資料時停用', () => {
     vi.setSystemTime(NOW);
     renderUSMarketTab({ upstreamArticles: [] });
-    expect(within(newsListCard()).getByText('匯出 Excel').disabled).toBe(true);
+    expect(screen.getByRole('button', { name: '匯出 Excel' }).disabled).toBe(true);
   });
 });
 
@@ -304,14 +308,14 @@ describe('USMarketTab — 顯示更多', () => {
       mkUpstream('n' + i, '上游新聞第' + i + '則', taipei(2026, 7, 20, 12, i % 60, 0)));
     renderUSMarketTab({ upstreamArticles: many });
     const card = newsListCard();
-    fireEvent.click(within(card).getByText('本月'));
+    fireEvent.click(within(filterBar()).getByText('本月'));
     expect(within(card).getAllByText(/^上游新聞第\d+則$/)).toHaveLength(80);
 
     fireEvent.click(within(card).getByText('顯示更多（再 20 則）'));
     expect(within(card).getAllByText(/^上游新聞第\d+則$/)).toHaveLength(100);
     expect(within(card).queryByText(/顯示更多/)).toBeNull();
 
-    fireEvent.click(within(card).getByText('本週'));
+    fireEvent.click(within(filterBar()).getByText('本週'));
     expect(within(card).getAllByText(/^上游新聞第\d+則$/)).toHaveLength(80);
   });
 });

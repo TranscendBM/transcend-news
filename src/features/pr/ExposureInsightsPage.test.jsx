@@ -49,7 +49,7 @@ describe('ExposureInsightsPage', () => {
     renderPage();
     expect(screen.getByText('重點發現')).toBeTruthy();
     expect(screen.getByText(/經濟日報 是最大曝光來源/)).toBeTruthy();
-    const monthsTable = screen.getByText('每月曝光篇數').closest('.bg-gray-900').querySelector('table');
+    const monthsTable = screen.getByText('每月曝光篇數').closest('[data-card]').querySelector('table');
     const rows = [...monthsTable.querySelectorAll('tbody tr')].map(tr => [...tr.querySelectorAll('td')].map(td => td.textContent));
     expect(rows[0].slice(0, 2)).toEqual(['2026-09', '3']);
     expect(rows[1].slice(0, 3)).toEqual(['2026-08', '3', '-25%']);
@@ -85,7 +85,7 @@ describe('ExposureInsightsPage', () => {
     renderPage();
     fireEvent.click(tab('關係變化'));
     expect(screen.getByText('2026/9 相較 2026/8 的變化')).toBeTruthy();
-    const card = screen.getByText('2026/9 相較 2026/8 的變化').closest('.bg-gray-900');
+    const card = screen.getByText('2026/9 相較 2026/8 的變化').closest('[data-card]');
     expect(within(card).getAllByText('時報資訊').length).toBeGreaterThan(0);   // 9 月首次出現的媒體
     expect(within(card).getAllByText('李二').length).toBeGreaterThan(0);       // 9 月沒出現的記者
   });

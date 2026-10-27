@@ -113,24 +113,24 @@ describe('IRTab — 股價卡片', () => {
 describe('IRTab — 每日交易資訊（開收盤／外資／投信）', () => {
   it('shows a loading state while daily is null, and an empty state once it resolves to no data', () => {
     const { rerender } = renderIR({ daily: null });
-    const card = screen.getByText('創見 2451 每日交易資訊').closest('div.bg-gray-900');
+    const card = screen.getByText('創見 2451 每日交易資訊').closest('[data-card]');
     expect(within(card).getByText('載入中…')).toBeTruthy();
 
     rerender(<AllIRBlocks stocks={{}} revenue={null} financials={null}
       dividends={null} material={null} daily={{}} compRev={{}} />);
-    const card2 = screen.getByText('創見 2451 每日交易資訊').closest('div.bg-gray-900');
+    const card2 = screen.getByText('創見 2451 每日交易資訊').closest('[data-card]');
     expect(within(card2).getByText('尚無資料（Actions 跑完後自動更新）')).toBeTruthy();
   });
 
   it('colors the daily price change red when up and green when down (台股慣例)', () => {
     const { rerender } = renderIR({ daily: { open: 100, close: 105, high: 106, low: 99, volume: 500000 } });
-    const card = screen.getByText('創見 2451 每日交易資訊').closest('div.bg-gray-900');
+    const card = screen.getByText('創見 2451 每日交易資訊').closest('[data-card]');
     expect(within(card).getByText('+5')).toHaveClass('text-red-400');
 
     rerender(<AllIRBlocks stocks={{}} revenue={null} financials={null}
       dividends={null} material={null}
       daily={{ open: 105, close: 100, high: 106, low: 99, volume: 500000 }} compRev={{}} />);
-    const card2 = screen.getByText('創見 2451 每日交易資訊').closest('div.bg-gray-900');
+    const card2 = screen.getByText('創見 2451 每日交易資訊').closest('[data-card]');
     expect(within(card2).getByText('-5')).toHaveClass('text-green-400');
   });
 
@@ -141,7 +141,7 @@ describe('IRTab — 每日交易資訊（開收盤／外資／投信）', () => 
       foreignNet: -500000, foreignBuy: 1_000_000, foreignSell: 1_500_000,
       trustNet: 200000, trustBuy: 800_000, trustSell: 600_000,
     } });
-    const card = screen.getByText('創見 2451 每日交易資訊').closest('div.bg-gray-900');
+    const card = screen.getByText('創見 2451 每日交易資訊').closest('[data-card]');
     // 買進固定紅色、賣出固定綠色，跟淨額本身漲跌方向無關
     expect(within(card).getByText('100萬')).toHaveClass('text-red-400/80');   // foreignBuy
     expect(within(card).getByText('150萬')).toHaveClass('text-green-400/80'); // foreignSell
@@ -190,12 +190,12 @@ describe('IRTab — 月營收 / 年度營收', () => {
 
   it('shows a loading state when revenue is null and an empty state once it resolves empty', () => {
     const { rerender } = renderIR({ revenue: null });
-    const card = screen.getByText('創見月營收（近 24 個月）').closest('div.bg-gray-900');
+    const card = screen.getByText('創見月營收（近 24 個月）').closest('[data-card]');
     expect(within(card).getByText('載入中…')).toBeTruthy();
 
     rerender(<AllIRBlocks stocks={{}} revenue={[]} financials={null}
       dividends={null} material={null} daily={null} compRev={{}} />);
-    const card2 = screen.getByText('創見月營收（近 24 個月）').closest('div.bg-gray-900');
+    const card2 = screen.getByText('創見月營收（近 24 個月）').closest('[data-card]');
     expect(within(card2).getByText('尚無月營收資料（Actions 跑完後自動更新）')).toBeTruthy();
   });
 
@@ -270,7 +270,7 @@ describe('IRTab — 競品月營收比較：每月橫軸與月增率表格', () 
   };
 
   function chartCard() {
-    return screen.getByText('創見 vs 競品月營收比較（近 24 個月）').closest('div.bg-gray-900');
+    return screen.getByText('創見 vs 競品月營收比較（近 24 個月）').closest('[data-card]');
   }
   const cells = tr => [...tr.querySelectorAll('td')].map(td => td.textContent);
 
@@ -325,7 +325,7 @@ describe('IRTab — 圖表複製按鈕', () => {
 
   it('按下後把該卡片的 <svg> 連同標題、圖例、說明傳給複製函式，並顯示已複製', async () => {
     renderIR({ revenue, compRev });
-    const card = screen.getByText('創見 vs 競品月營收比較（近 24 個月）').closest('div.bg-gray-900');
+    const card = screen.getByText('創見 vs 競品月營收比較（近 24 個月）').closest('[data-card]');
     fireEvent.click(within(card).getByText('複製圖表'));
 
     expect(copyChartImage).toHaveBeenCalledTimes(1);
@@ -342,7 +342,7 @@ describe('IRTab — 圖表複製按鈕', () => {
     copyChartImage.mockRejectedValue(new Error('boom'));
     const spy = vi.spyOn(console, 'error').mockImplementation(() => {});
     renderIR({ revenue, compRev });
-    const card = screen.getByText('創見月營收（近 24 個月）').closest('div.bg-gray-900');
+    const card = screen.getByText('創見月營收（近 24 個月）').closest('[data-card]');
     fireEvent.click(within(card).getByText('複製圖表'));
     expect(await within(card).findByText('複製失敗')).toBeTruthy();
     spy.mockRestore();
@@ -370,7 +370,7 @@ describe('IRTab — 表格淺灰橫線', () => {
 describe('IRTab — 公開資訊觀測站連結', () => {
   it('在「創見與競品 IR 新訊」下方列出創見＋五家競品的 MOPS 連結，創見排第一', () => {
     renderIR();
-    const card = screen.getByText('創見與競品 IR 新訊').closest('div.bg-gray-900');
+    const card = screen.getByText('創見與競品 IR 新訊').closest('[data-card]');
     const links = [...card.querySelectorAll('a[href*="mops.twse.com.tw"]')];
     expect(links.map(a => a.textContent.trim())).toEqual([
       '創見 2451', '威剛 3260', '廣穎 4973', '宜鼎 5289', '十銓 4967', '宇瞻 8271',
@@ -397,7 +397,7 @@ describe('IRTab — 年度營收趨勢（近 10 年）下方的年營收與年�
   const compRev = { '3260': [...year(2025, all12, 5), ...year(2026, jan7, 6)] };
 
   function annualCard() {
-    return screen.getByText('年度營收趨勢（近 10 年）').closest('div.bg-gray-900');
+    return screen.getByText('年度營收趨勢（近 10 年）').closest('[data-card]');
   }
   const cells = tr => [...tr.querySelectorAll('td')].map(td => td.textContent);
 
@@ -438,7 +438,7 @@ describe('IRTab — 各卡片「顯示全部歷史」按鈕', () => {
   const revenue = months.map(({ year, month }) => ({ year, month, revenue: 100e6 }));
   const compRev = { '3260': months.map(({ year, month }) => ({ year, month, revenue: 50e6 })) };
 
-  const card = title => screen.getByText(title).closest('div.bg-gray-900');
+  const card = title => screen.getByText(title).closest('[data-card]');
   const rows = c => c.querySelectorAll('tbody tr').length;
 
   it('創見月營收：預設近 12 個月明細，展開後是全部 40 個月，標題與按鈕跟著變，可收合', () => {
