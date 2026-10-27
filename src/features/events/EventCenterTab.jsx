@@ -81,7 +81,7 @@ export function EventCenter({ topics, status, onRetry, defaultTag = 'all' }) {
       {!loadingFirst && topics.length > 0 && (
         <>
           <div>
-            <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-7 gap-2" data-testid="event-stats">
+            <div className="grid grid-cols-3 sm:grid-cols-4 lg:grid-cols-7 gap-2" data-testid="event-stats">
               {kpis.map(k => (
                 <MetricCard key={k.label} label={k.label} value={String(k.value)} tone={k.tone}
                   onClick={k.onClick} active={k.onClick ? k.on : undefined} />

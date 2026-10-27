@@ -6,6 +6,7 @@ import TabBtn from '../../components/TabBtn.jsx';
 import ShowMoreButton, { useShowMore } from '../../components/ShowMore.jsx';
 import NewsCard from '../news/NewsCard.jsx';
 import { COMPETITORS } from '../../config/competitors.js';
+import { useIsWide } from '../../components/ui/useMediaQuery.js';
 import { useNow } from '../../hooks/useNow.js';
 import { BRAND_COUNT_PERIODS, COMPETITOR_TIME_FILTERS, brandExposureCounts, selectCompetitorNews } from './prData.js';
 import { usePRState } from './prState.jsx';
@@ -17,13 +18,14 @@ import { usePRState } from './prState.jsx';
 // ═══════════════════════════════════════════════════════════
 function BrandExposureTable({ news, active, timeFilter, onBrand, onPeriod }) {
   const now = useNow();
+  const wide = useIsWide();   // 手機沒有「官方消息」欄，改把連結放在品牌名稱下面
   const rows = useMemo(() => brandExposureCounts(news, now), [news, now]);
   const max = Math.max(1, ...rows.filter(r => r.id !== 'all').map(r => r.counts[timeFilter] || 0));
   return (
     <div className="mb-4" data-testid="brand-exposure">
       <p className="text-xs text-gray-500 mb-1.5">各品牌新聞曝光數量（點品牌或期間可套用到下方清單）</p>
       <div className="overflow-x-auto rounded-xl border border-gray-700/60">
-        <table className="w-full text-sm min-w-[440px]">
+        <table className="w-full text-sm">
           <thead>
             <tr className="text-xs text-gray-500 bg-gray-800/40">
               <th scope="col" className="text-left font-medium px-3 py-2">品牌</th>
@@ -33,7 +35,7 @@ function BrandExposureTable({ news, active, timeFilter, onBrand, onPeriod }) {
                     className={`px-1.5 rounded ${timeFilter === p.id ? 'text-red-700 font-bold' : 'hover:text-gray-200'}`}>{p.label}</button>
                 </th>
               ))}
-              <th scope="col" className="px-3 py-2 text-right font-medium">官方消息</th>
+              {wide && <th scope="col" className="px-3 py-2 text-right font-medium">官方消息</th>}
             </tr>
           </thead>
           <tbody>
@@ -44,6 +46,10 @@ function BrandExposureTable({ news, active, timeFilter, onBrand, onPeriod }) {
                     {r.color && <span className="inline-block w-2 h-2 rounded-full shrink-0" style={{ background: r.color }} aria-hidden="true" />}
                     {r.name}
                   </button>
+                  {!wide && r.newsUrl && (
+                    <a href={r.newsUrl} target="_blank" rel="noopener noreferrer" aria-label={`${r.name} 官網最新消息（另開新分頁）`}
+                      className="text-xs font-medium text-blue-600 hover:underline inline-flex items-center gap-1 mt-0.5">官網最新消息 <Icon name="external" /></a>
+                  )}
                 </th>
                 {BRAND_COUNT_PERIODS.map(p => (
                   <td key={p.id} className={`px-2 py-1.5 text-right tabular-nums ${timeFilter === p.id ? 'font-bold' : 'text-gray-400'}`}>
@@ -53,12 +59,12 @@ function BrandExposureTable({ news, active, timeFilter, onBrand, onPeriod }) {
                     )}
                   </td>
                 ))}
-                <td className="px-3 py-1.5 text-right">
+                {wide && <td className="px-3 py-1.5 text-right">
                   {r.newsUrl && (
                     <a href={r.newsUrl} target="_blank" rel="noopener noreferrer" aria-label={`${r.name} 官網最新消息（另開新分頁）`}
                       className="text-sm font-medium text-blue-600 hover:underline whitespace-nowrap inline-flex items-center gap-1 py-1">最新消息 <Icon name="external" /></a>
                   )}
-                </td>
+                </td>}
               </tr>
             ))}
           </tbody>
